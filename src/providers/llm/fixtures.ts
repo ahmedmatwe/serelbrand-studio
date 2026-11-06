@@ -161,6 +161,8 @@ export const MOCK_FIXTURES: Record<string, MockFixture> = {
   'script.expand': (vars) => vars.previous,
   // Offline: the fixer cannot invent text, so it returns the script unchanged.
   'script.fixclaims': (vars) => vars.previous,
+  // Offline shot planner: generic but varied queries, one per sentence.
+  'production.shots': (vars) => ({ queries: ((vars.sentences as string[]) ?? []).map((_, j) => ({ i: (vars.offset as number) + j, query: ['city skyline', 'office desk', 'old phones', 'warehouse boxes', 'people walking'][j % 5]! })) }),
   // Offline judge: never supports anything (no real evidence in dry-run).
   'factcheck.judge': () => ({ verdict: 'not_found', quote: '', correction: null }),
 

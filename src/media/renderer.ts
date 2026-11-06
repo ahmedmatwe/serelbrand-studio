@@ -8,12 +8,16 @@ import type { MediaAsset, TTSProvider } from '../providers/media.ts';
 import { FallbackTTS } from '../providers/tts/gemini-tts.ts';
 import { buildAss, chunkSubtitles, type AssEvent, type AssStyle } from './ass.ts';
 import { ffmpeg, filterPath, probeDuration, volumeStats, type VolumeStats } from './ffmpeg.ts';
+import { fetchShotVisuals, layoutShots, queriesForSentences, splitSentences, type Shot } from './shots.ts';
+import { renderThumbnail } from './thumbnail.ts';
 
 export type RenderSize = 'full' | 'preview';
 export interface RenderInput { videoId: string; size?: RenderSize; shorts?: boolean; /** Shorts to cut per long video (default 3). */ shortsPerLong?: number }
 
 export interface SceneVisual { kind: 'video' | 'image'; path: string; asset: MediaAsset }
-interface TimedScene { n: number; start: number; duration: number; audioPath: string; voiceover: string; onScreenText: string; visual?: SceneVisual }
+interface TimedScene { n: number; start: number; duration: number; audioPath: string; voiceover: string; onScreenText: string; visual?: SceneVisual; shots?: Shot[] }
+/** One background segment of the timeline (a shot, or a whole scene when it has no shots). */
+interface Segment { n: number; duration: number; visual?: SceneVisual }
 
 export interface RenderedShort { path: string; durationSec: number; scenes: number[]; title: string }
 
@@ -50,15 +54,16 @@ export function timelineAss(scenes: TimedScene[], o: { width: number; height: nu
   const styles: AssStyle[] = [
     { name: 'Title', font: FONT, size: Math.round(base * (vertical ? 0.085 : 0.09)), color: '#FFFFFF', outline: '#000000', outlineWidth: Math.max(2, Math.round(base * 0.005)), alignment: vertical ? 8 : 5, marginV: Math.round(o.height * (vertical ? 0.22 : 0.08)), bold: true },
     { name: 'Accent', font: FONT, size: Math.round(base * 0.05), color: o.accent, outline: '#000000', outlineWidth: 2, alignment: 8, marginV: Math.round(o.height * 0.06), bold: true },
-    { name: 'Sub', font: FONT, size: Math.round(base * (vertical ? 0.06 : 0.048)), color: '#FFFFFF', outline: '#000000', outlineWidth: Math.max(2, Math.round(base * 0.004)), alignment: 2, marginV: Math.round(o.height * (vertical ? 0.2 : 0.07)), boxed: false },
+    { name: 'Sub', font: FONT, size: Math.round(base * (vertical ? 0.085 : 0.062)), color: '#FFD400', secondary: '#FFFFFF', outline: '#000000', outlineWidth: Math.max(3, Math.round(base * 0.007)), shadow: 3, alignment: vertical ? 5 : 2, marginV: Math.round(o.height * (vertical ? 0.12 : 0.08)), bold: true },
   ];
   const events: AssEvent[] = [];
   const subs: { start: number; end: number; text: string }[] = [];
   for (const s of scenes) {
     if (s.onScreenText) events.push({ start: s.start + 0.2, end: s.start + Math.min(s.duration - 0.1, 5), style: 'Title', text: s.onScreenText, fadeMs: 300 });
-    const chunks = chunkSubtitles(s.voiceover, s.start, s.duration - 0.35, vertical ? 6 : 9);
+    // Viral-style captions: short chunks, the word being spoken lights up (ASS karaoke).
+    const chunks = chunkSubtitles(s.voiceover, s.start, s.duration - 0.35, vertical ? 4 : 6);
     subs.push(...chunks);
-    events.push(...chunks.map((c) => ({ ...c, style: 'Sub' })));
+    events.push(...chunks.map((c) => ({ ...c, style: 'Sub', karaoke: true })));
   }
   if (o.endCard && scenes.length) {
     const last = scenes.at(-1)!;
@@ -106,20 +111,24 @@ export function pickShortScenes(scenes: { n: number; duration: number }[], maxSe
  * Stock video → cover-crop + loop; photo → slow Ken Burns zoom; none → animated gradient.
  * Footage is darkened slightly so the Arabic text stays readable.
  */
-export function sceneGraph(scenes: TimedScene[], o: { width: number; height: number; palette: string[] }) {
+export function sceneGraph(scenes: Segment[], o: { width: number; height: number; palette: string[] }) {
   const { width: W, height: H } = o;
   const inputs: string[] = [];
   const parts: string[] = [];
   scenes.forEach((s, i) => {
     const d = s.duration.toFixed(3);
     const frames = Math.ceil(s.duration * 30);
-    const tone = 'eq=brightness=-0.09:saturation=0.92,setsar=1,format=yuv420p';
+    const tone = 'eq=brightness=-0.09:saturation=0.95:contrast=1.05,setsar=1,format=yuv420p';
     if (s.visual?.kind === 'video') {
+      // Slow camera move on every clip (pan left→right, right→left, or push-in) so no shot is ever static.
       inputs.push('-stream_loop', '-1', '-t', d, '-i', s.visual.path);
-      parts.push(`[${i}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=30,trim=duration=${d},setpts=PTS-STARTPTS,${tone}[s${i}]`);
+      const BW = Math.round(W * 1.12), BH = Math.round(H * 1.12);
+      const move = i % 3 === 0 ? `x='(iw-ow)*t/${d}':y='(ih-oh)/2'` : i % 3 === 1 ? `x='(iw-ow)*(1-t/${d})':y='(ih-oh)/2'` : `x='(iw-ow)/2':y='(ih-oh)*t/${d}'`;
+      parts.push(`[${i}:v]fps=30,scale=${BW}:${BH}:force_original_aspect_ratio=increase,crop=${BW}:${BH},crop=${W}:${H}:${move},trim=duration=${d},setpts=PTS-STARTPTS,${tone}[s${i}]`);
     } else if (s.visual?.kind === 'image') {
       inputs.push('-loop', '1', '-framerate', '30', '-t', d, '-i', s.visual.path);
-      parts.push(`[${i}:v]scale=${Math.round(W * 1.25)}:${Math.round(H * 1.25)}:force_original_aspect_ratio=increase,crop=${Math.round(W * 1.25)}:${Math.round(H * 1.25)},zoompan=z='min(1+0.0006*on,1.2)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${W}x${H}:fps=30,trim=end_frame=${frames},setpts=PTS-STARTPTS,${tone}[s${i}]`);
+      const zin = i % 2 === 0;
+      parts.push(`[${i}:v]scale=${Math.round(W * 1.25)}:${Math.round(H * 1.25)}:force_original_aspect_ratio=increase,crop=${Math.round(W * 1.25)}:${Math.round(H * 1.25)},zoompan=z='${zin ? 'min(1+0.0012*on,1.18)' : 'max(1.18-0.0012*on,1)'}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${W}x${H}:fps=30,trim=end_frame=${frames},setpts=PTS-STARTPTS,${tone}[s${i}]`);
     } else {
       const c0 = o.palette[i % 2] ?? DEFAULT_PALETTE[0]!;
       const c1 = o.palette[(i + 1) % 2] ?? DEFAULT_PALETTE[1]!;
@@ -129,6 +138,27 @@ export function sceneGraph(scenes: TimedScene[], o: { width: number; height: num
   });
   const filter = `${parts.join(';')};${scenes.map((_, i) => `[s${i}]`).join('')}concat=n=${scenes.length}:v=1:a=0`;
   return { inputs, filter };
+}
+
+/** Keeps the shots that fall inside the first `d` seconds (Shorts trimmed to 59 s). */
+export function trimShots(shots: Shot[] | undefined, d: number): Shot[] | undefined {
+  if (!shots) return shots;
+  const out: Shot[] = [];
+  for (const s of shots) { if (s.start >= d) break; out.push({ ...s, duration: Math.min(s.duration, d - s.start) }); }
+  return out;
+}
+export const uniqueAssets = (shots: Shot[]) => [...new Map(shots.filter((s) => s.visual).map((s) => [s.visual!.asset.id, s.visual!.asset])).values()];
+/** 55 for pure text cards → 95 when every shot has real footage and cuts are frequent. */
+export function visualScoreFor(shots: Shot[]): number {
+  if (!shots.length) return 55;
+  const share = shots.filter((s) => s.visual).length / shots.length;
+  const avg = shots.reduce((a, s) => a + s.duration, 0) / shots.length;
+  return Math.round(55 + 30 * share + (avg <= 6 ? 10 : 0));
+}
+
+/** Expands scenes into background segments (one per shot). */
+export function segmentsOf(scenes: TimedScene[]): Segment[] {
+  return scenes.flatMap((s) => (s.shots?.length ? s.shots.map((sh) => ({ n: s.n, duration: sh.duration, visual: sh.visual ?? s.visual })) : [{ n: s.n, duration: s.duration, visual: s.visual }]));
 }
 
 /**
@@ -143,33 +173,58 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
   private async renderTimeline(scenes: TimedScene[], audioPath: string, out: string, o: { width: number; height: number; palette: string[]; preset: string; endCard?: string; assPath: string }) {
     const { ass, subs } = timelineAss(scenes, { width: o.width, height: o.height, accent: o.palette[2] ?? '#FFD400', endCard: o.endCard });
     writeFileSync(o.assPath, ass, 'utf8');
-    const { inputs, filter } = sceneGraph(scenes, o);
+    // Render the background in chunks of ≤ 20 shots (keeps FFmpeg graphs small), then concat losslessly.
+    const segs = segmentsOf(scenes);
+    const parts: string[] = [];
+    for (let i = 0; i < segs.length; i += 20) {
+      const { inputs, filter } = sceneGraph(segs.slice(i, i + 20), o);
+      const part = `${out}.part${String(parts.length).padStart(3, '0')}.mp4`;
+      await ffmpeg([...inputs, '-filter_complex', `${filter}[v]`, '-map', '[v]', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '17', '-pix_fmt', 'yuv420p', '-r', '30', '-an', part]);
+      parts.push(part);
+    }
+    const list = `${out}.parts.txt`;
+    writeFileSync(list, parts.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
     await ffmpeg([
-      ...inputs,
+      '-f', 'concat', '-safe', '0', '-i', list,
       '-i', audioPath,
-      '-filter_complex', `${filter},subtitles=filename='${filterPath(o.assPath)}'[v]`,
-      '-map', '[v]', '-map', `${scenes.length}:a`,
+      '-vf', `subtitles=filename='${filterPath(o.assPath)}'`,
+      '-map', '0:v', '-map', '1:a',
       '-c:v', 'libx264', '-preset', o.preset, '-crf', '21', '-pix_fmt', 'yuv420p', '-r', '30',
       '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
       '-shortest', '-movflags', '+faststart',
       out,
     ]);
+    for (const p of [...parts, list]) rmSync(p, { force: true });
     return subs;
+  }
+
+  /** One stock clip per sentence for every scene (queries from the LLM, clips never reused when avoidable). */
+  private async planShots(videoId: string, scenes: TimedScene[], bp: Blueprint, size: RenderSize, notes: string[], used: Set<string>) {
+    const perScene = scenes.map((s) => splitSentences(s.voiceover));
+    const fallbacks = scenes.flatMap((s, i) => perScene[i]!.map(() => { const b = bp.scenes.find((x) => x.n === s.n); return b?.stockQuery || b?.footage || 'documentary'; }));
+    const queries = await queriesForSentences(this.ctx, perScene.flat(), fallbacks, videoId);
+    let k = 0;
+    for (const [i, s] of scenes.entries()) {
+      const sentences = perScene[i]!.map((text) => ({ text, query: queries[k++]! }));
+      s.shots = layoutShots(sentences.length ? sentences : [{ text: s.voiceover, query: fallbacks[0] ?? 'documentary' }], s.duration);
+    }
+    await fetchShotVisuals(this.ctx, scenes.flatMap((s) => s.shots ?? []), { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used, notes });
+    for (const s of scenes) s.visual = s.shots?.find((x) => x.visual)?.visual;
   }
 
   private async renderPack(o: { videoId: string; dir: string; timed: TimedScene[]; t: number; size: RenderSize; palette: string[]; preset: string; notes: string[]; tts: TTSProvider; voiceName: string; th: ThumbnailOutput }): Promise<RenderOutput> {
     const bp = this.ctx.repos.artifacts.latest<Blueprint>(o.videoId, 'blueprint')!.data;
     const script = this.ctx.repos.artifacts.latest<Script>(o.videoId, 'script')!.data;
-    const visuals = await this.fetchVisuals(bp, o.size, o.notes);
+    await this.planShots(o.videoId, o.timed, bp, o.size, o.notes, new Set());
+    const shots = o.timed.flatMap((s) => s.shots ?? []);
     const shorts: RenderedShort[] = [];
     for (const s of o.timed) {
-      s.visual = visuals.get(s.n);
       const d = Math.min(s.duration, SHORT_MAX_SEC + 1);
       if (s.duration > SHORT_MAX_SEC + 1) o.notes.push(`Scene ${s.n} is ${Math.round(s.duration)}s — trimmed to ${SHORT_MAX_SEC + 1}s`);
       const audio = resolve(o.dir, `short-${s.n}.m4a`);
       await ffmpeg(['-i', s.audioPath, '-t', String(d), '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11', '-ar', '48000', '-c:a', 'aac', '-b:a', '160k', audio]);
       const path = resolve(o.dir, `short-${s.n}.mp4`);
-      await this.renderTimeline([{ ...s, start: 0, duration: d }], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
+      await this.renderTimeline([{ ...s, start: 0, duration: d, shots: trimShots(s.shots, d) }], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
       const sc = script.scenes.find((x) => x.n === s.n);
       shorts.push({ path, durationSec: Number(d.toFixed(2)), scenes: [s.n], title: sc?.curiosityGap || sc?.onScreenText || script.mainTitle });
     }
@@ -178,17 +233,18 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const silent = !Number.isFinite(audio.meanDb) || audio.meanDb < -50;
     const assets: MediaAsset[] = [
       { id: 'voice', kind: 'voice', path: o.dir, license: 'generated-owned', source: o.tts.name, aiGenerated: true },
-      ...[...visuals.values()].map((v) => v.asset),
+      ...uniqueAssets(shots),
     ];
+    const withStock = shots.filter((x) => x.visual).length;
     return {
       videoPath: first.path, thumbnailPath: '', captionsPath: '',
       durationSec: first.durationSec, size: dims(o.size, true),
       scenes: o.timed.map(({ n, start, duration, audioPath, visual }) => ({ n, start: Number(start.toFixed(2)), duration: Number(duration.toFixed(2)), audioPath, visual: visual ? `${visual.kind}:${visual.asset.id}` : 'text-card' })),
       shorts, packOnly: true,
       voice: { provider: o.tts.name, voice: o.voiceName, synthetic: true },
-      visualMode: visuals.size === 0 ? 'text-cards' : visuals.size === o.timed.length ? 'stock' : 'mixed',
+      visualMode: withStock === 0 ? 'text-cards' : withStock === shots.length ? 'stock' : 'mixed',
       assets,
-      measurements: { audio, audioScore: silent ? 0 : 85, visualScore: Math.round(55 + 25 * (visuals.size / Math.max(1, o.timed.length))), subtitleAccuracy: 100, avSyncDiffSec: 0, notes: o.notes },
+      measurements: { audio, audioScore: silent ? 0 : 85, visualScore: visualScoreFor(shots), subtitleAccuracy: 100, avSyncDiffSec: 0, notes: o.notes },
     };
   }
 
@@ -274,8 +330,9 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       timed = v.out; t = v.total;
     }
     if (!existsSync(timed[0]!.audioPath)) throw new StudioError('TTS_FAILED', 'No audio produced');
-    const visuals = await this.fetchVisuals(bp, size, notes);
-    for (const s of timed) s.visual = visuals.get(s.n);
+    const usedClips = new Set<string>();
+    await this.planShots(videoId, timed, bp, size, notes, usedClips);
+    const allShots = () => timed.flatMap((s) => s.shots ?? []);
     if (tts.name.startsWith('mock')) notes.push('Mock TTS: voice track is silence (set TTS_PROVIDER=macos and DRY_RUN=false for real speech).');
 
     // Shorts pack: every scene becomes its own vertical Short; no 16:9 video, no captions file.
@@ -294,18 +351,12 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const captionsPath = resolve(dir, 'captions.srt');
     writeFileSync(captionsPath, toSrt(subs), 'utf8');
 
-    // 4) Thumbnail PNG (1280x720) from the recommended concept.
-    const thumbnailPath = resolve(dir, 'thumbnail.png');
-    const thumbAss = resolve(dir, 'thumb.ass');
-    writeFileSync(thumbAss, buildAss({
-      width: 1280, height: 720,
-      styles: [{ name: 'T', font: FONT, size: 140, color: palette[2] ?? '#FFD400', outline: '#000000', outlineWidth: 8, alignment: 5, marginV: 0, bold: true }],
-      events: [{ start: 0, end: 5, style: 'T', text: concept.text }],
-    }));
-    await ffmpeg(['-f', 'lavfi', '-i', `gradients=s=1280x720:c0=${palette[0]!.replace('#', '0x')}:c1=${(palette[1] ?? '#000000').replace('#', '0x')}:d=1:seed=7`, '-vf', `subtitles=filename='${filterPath(thumbAss)}'`, '-frames:v', '1', '-update', '1', thumbnailPath]);
-    notes.push(`Thumbnail is text-on-gradient; the concept visual ("${concept.mainVisual}") still needs an image.`);
+    // 4) Thumbnail PNG (1280x720): real photo + big outlined text + attention ring + channel badge.
+    const thumb = await renderThumbnail(this.ctx, { dir, videoId, concept, title: script.mainTitle, palette, font: FONT, used: usedClips, notes });
+    const thumbnailPath = thumb.path;
 
-    /** A vertical Short narrated from its own text, over the given scene's visual. */
+    const extraShots: Shot[] = [];
+    /** A vertical Short narrated from its own text, with one clip per sentence. */
     const narratedShort = async (k: number, text: string, scene: TimedScene, title: string): Promise<RenderedShort> => {
       const r = await tts.synthesize(text, resolve(dir, `short-${k}.aiff`));
       const wav = resolve(dir, `short-${k}.wav`);
@@ -314,7 +365,12 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       const d = Math.min(await probeDuration(wav), SHORT_MAX_SEC + 1);
       const saudio = resolve(dir, `short-${k}.m4a`);
       await ffmpeg(['-i', wav, '-t', String(d), '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11', '-ar', '48000', '-c:a', 'aac', '-b:a', '160k', saudio]);
-      const one: TimedScene[] = [{ n: scene.n, start: 0, duration: d, audioPath: wav, voiceover: text, onScreenText: scene.onScreenText, visual: scene.visual }];
+      const sentences = splitSentences(text);
+      const qs = await queriesForSentences(this.ctx, sentences, bp.scenes.find((x) => x.n === scene.n)?.stockQuery || 'documentary', videoId);
+      const shortShots = layoutShots(sentences.map((t2, i) => ({ text: t2, query: qs[i]! })), d);
+      await fetchShotVisuals(this.ctx, shortShots, { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used: usedClips, notes });
+      extraShots.push(...shortShots);
+      const one: TimedScene[] = [{ n: scene.n, start: 0, duration: d, audioPath: wav, voiceover: text, onScreenText: scene.onScreenText, visual: shortShots.find((x) => x.visual)?.visual ?? scene.visual, shots: shortShots }];
       const path = resolve(dir, `short-${k}.mp4`);
       await this.renderTimeline(one, saudio, path, { ...dims(size, true), palette, preset, endCard: 'القصة كاملة على القناة', assPath: resolve(dir, `short-${k}.ass`) });
       this.ctx.cost.record({ provider: tts.name, operation: 'tts.short', videoId, units: text.length, unit: 'characters', usd: 0 });
@@ -366,16 +422,18 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const subtitleAccuracy = Math.round((Math.min(subWords.length, voWords.length) / Math.max(1, voWords.length)) * 100);
     const avSyncDiffSec = Number(Math.abs(durationSec - t).toFixed(2));
     if (avSyncDiffSec > 1) notes.push(`Video/audio length differ by ${avSyncDiffSec}s`);
-    const stockShare = visuals.size / Math.max(1, timed.length);
-    const visualScore = statSync(videoPath).size > 10_000 ? Math.round(55 + 25 * stockShare) : 0;
-    if (stockShare < 1) notes.push(`${timed.length - visuals.size}/${timed.length} scenes use text cards on gradients (original, copyright-safe).`);
-    if (visuals.size) notes.push(`${visuals.size} scenes use free stock footage — check none shows identifiable people/brands in a misleading way.`);
+    const shotsAll = [...allShots(), ...extraShots];
+    const visualScore = statSync(videoPath).size > 10_000 ? visualScoreFor(allShots()) : 0;
+    const withStock = allShots().filter((x) => x.visual).length;
+    notes.push(`${allShots().length} shots (one per sentence, ~${(t / Math.max(1, allShots().length)).toFixed(1)}s each); ${withStock} with stock footage.`);
+    if (withStock) notes.push('Stock footage used — check none shows identifiable people/brands in a misleading way.');
     notes.push('Subtitles are timed from the script, not speech recognition; they match because TTS reads the script verbatim.');
 
     const assets: MediaAsset[] = [
       { id: 'bg-gradients', kind: 'video', path: videoPath, license: 'generated-owned', source: 'ffmpeg-gradients', aiGenerated: false },
       { id: 'voice', kind: 'voice', path: voice, license: 'generated-owned', source: tts.name, aiGenerated: true },
-      ...[...visuals.values()].map((v) => v.asset),
+      ...uniqueAssets(shotsAll),
+      ...(thumb.asset ? [thumb.asset] : []),
     ];
     return {
       videoPath, thumbnailPath, captionsPath,
@@ -384,7 +442,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       scenes: timed.map(({ n, start, duration, audioPath, visual }) => ({ n, start: Number(start.toFixed(2)), duration: Number(duration.toFixed(2)), audioPath, visual: visual ? `${visual.kind}:${visual.asset.id}` : 'text-card' })),
       shorts,
       voice: { provider: tts.name, voice: voiceName, synthetic: true },
-      visualMode: visuals.size === 0 ? 'text-cards' : visuals.size === timed.length ? 'stock' : 'mixed',
+      visualMode: withStock === 0 ? 'text-cards' : withStock === allShots().length ? 'stock' : 'mixed',
       assets,
       measurements: { audio, audioScore, visualScore, subtitleAccuracy, avSyncDiffSec, notes },
     };

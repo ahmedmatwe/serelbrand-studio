@@ -65,11 +65,13 @@ test('render: uses stock footage per scene (looping short clips), falls back to 
   const out = ctx.repos.artifacts.latest<RenderOutput>(r.videoId, 'render')!.data;
   try {
     assert.ok(r.steps.every((s) => s.status === 'succeeded'), JSON.stringify(r.steps));
-    assert.equal(out.visualMode, 'mixed');
-    assert.equal(out.scenes.filter((s) => s.visual === 'text-card').length, 1, 'finland scene fell back');
-    assert.ok(out.scenes.filter((s) => s.visual.startsWith('video:')).length >= 3);
-    assert.equal(out.scenes.filter((s) => s.visual.startsWith('image:')).length, 1, 'photo scene rendered with Ken Burns');
-    assert.ok(out.measurements.visualScore > 55);
+    assert.notEqual(out.visualMode, 'text-cards');
+    const shotNote = out.measurements.notes.find((n) => /shots \(one per sentence/.test(n));
+    assert.ok(shotNote, 'one shot per sentence');
+    const nShots = Number(shotNote!.match(/^(\d+) shots/)![1]);
+    assert.ok(nShots > out.scenes.length * 2, `cuts every few seconds (${nShots} shots for ${out.scenes.length} scenes)`);
+    assert.ok(out.measurements.visualScore >= 85);
+    assert.ok(out.assets.filter((a) => a.license === 'pexels').length >= 3, 'several distinct clips');
     const d = await probeDuration(out.videoPath);
     assert.ok(Math.abs(d - out.scenes.reduce((a, s) => a + s.duration, 0)) < 1, '3s clips loop to fill longer scenes');
     const c = ctx.repos.artifacts.latest<ComplianceReport>(r.videoId, 'compliance_report')!.data;

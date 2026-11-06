@@ -18,9 +18,26 @@ export interface AssStyle {
   marginV: number;
   bold?: boolean;
   boxed?: boolean;
+  /** Karaoke "not yet spoken" colour (defaults to `color`). */
+  secondary?: string;
+  shadow?: number;
 }
 
-export interface AssEvent { start: number; end: number; style: string; text: string; fadeMs?: number }
+export interface AssEvent { start: number; end: number; style: string; text: string; fadeMs?: number; /** Word-by-word highlight (\k timing proportional to word length). */ karaoke?: boolean }
+
+/** Karaoke text: each word gets {\kN} (centiseconds) so it switches from Secondary to Primary colour when spoken. */
+export function karaokeText(text: string, durationSec: number): string {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const weight = (w: string) => Math.max(2, [...w].length);
+  const total = words.reduce((a, w) => a + weight(w), 0);
+  const cs = Math.max(1, Math.round(durationSec * 100));
+  let used = 0;
+  return words.map((w, i) => {
+    const k = i === words.length - 1 ? cs - used : Math.round((cs * weight(w)) / total);
+    used += k;
+    return `{\\k${Math.max(1, k)}}${assText(w)}`;
+  }).join(' ');
+}
 
 /** #RRGGBB → ASS &H00BBGGRR */
 export function assColor(hex: string, alpha = 0): string {
@@ -47,7 +64,7 @@ export function assText(t: string): string {
 
 export function buildAss(o: { width: number; height: number; styles: AssStyle[]; events: AssEvent[] }): string {
   const style = (s: AssStyle) =>
-    `Style: ${s.name},${s.font},${s.size},${assColor(s.color)},${assColor(s.color)},${assColor(s.outline)},${assColor('#000000', s.boxed ? 0x60 : 0x80)},${s.bold ? -1 : 0},0,0,0,100,100,0,0,${s.boxed ? 3 : 1},${s.outlineWidth},0,${s.alignment},60,60,${s.marginV},-1`; // Encoding -1 = libass autodetects base direction (RTL for Arabic)
+    `Style: ${s.name},${s.font},${s.size},${assColor(s.color)},${assColor(s.secondary ?? s.color)},${assColor(s.outline)},${assColor('#000000', s.boxed ? 0x60 : 0x80)},${s.bold ? -1 : 0},0,0,0,100,100,0,0,${s.boxed ? 3 : 1},${s.outlineWidth},${s.shadow ?? 0},${s.alignment},60,60,${s.marginV},-1`; // Encoding -1 = libass autodetects base direction (RTL for Arabic)
   return [
     '[Script Info]',
     'ScriptType: v4.00+',
@@ -64,7 +81,7 @@ export function buildAss(o: { width: number; height: number; styles: AssStyle[];
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
     ...o.events
       .filter((e) => e.end > e.start && e.text.trim())
-      .map((e) => `Dialogue: 0,${assTime(e.start)},${assTime(e.end)},${e.style},,0,0,0,,${e.fadeMs ? `{\\fad(${e.fadeMs},${e.fadeMs})}` : ''}${assText(e.text)}`),
+      .map((e) => `Dialogue: 0,${assTime(e.start)},${assTime(e.end)},${e.style},,0,0,0,,${e.fadeMs ? `{\\fad(${e.fadeMs},${e.fadeMs})}` : ''}${e.karaoke ? karaokeText(e.text, e.end - e.start) : assText(e.text)}`),
     '',
   ].join('\n');
 }
