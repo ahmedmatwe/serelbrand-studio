@@ -23,3 +23,22 @@ test('wikimedia: maps results with attribution, filters licenses and small files
   const desc = composeDescription({ description: 'd', hashtags: [], chapters: [] }, undefined, r);
   assert.ok(desc.includes('Wikimedia Commons') && desc.includes('Steve J — CC BY 2.0'));
 });
+
+test('cloudflare image: posts the prompt with safety rules, writes the image, never leaks the token', async () => {
+  const { CloudflareImage, SAFE_SUFFIX } = await import('../../src/providers/image/cloudflare.ts');
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const calls: { url: string; body: { prompt: string }; auth: string }[] = [];
+  const ok = (async (url: string, init: RequestInit) => { calls.push({ url, body: JSON.parse(String(init.body)), auth: (init.headers as Record<string, string>).authorization! }); return new Response(JSON.stringify({ result: { image: Buffer.from('JPEGDATA').toString('base64') } })); }) as unknown as typeof fetch;
+  const d = mkdtempSync(join(tmpdir(), 'cf-'));
+  const img = new CloudflareImage({ accountId: 'acc1', token: 'SECRET-TOKEN', fetchImpl: ok, sleep: async () => {} });
+  const a = await img.generate('old wooden door desk in a garage', join(d, 'x.jpg'));
+  assert.equal(readFileSync(a.path, 'utf8'), 'JPEGDATA');
+  assert.ok(calls[0]!.url.includes('/accounts/acc1/ai/run/@cf/black-forest-labs/flux-1-schnell'));
+  assert.ok(calls[0]!.body.prompt.endsWith(SAFE_SUFFIX));
+  assert.equal(calls[0]!.auth, 'Bearer SECRET-TOKEN');
+  const bad = (async () => new Response(JSON.stringify({ errors: [{ message: 'Authentication error' }] }), { status: 401 })) as unknown as typeof fetch;
+  await assert.rejects(new CloudflareImage({ accountId: 'a', token: 'SECRET-TOKEN', fetchImpl: bad, sleep: async () => {} }).generate('x', join(d, 'y.jpg')), (e: Error) => !e.message.includes('SECRET-TOKEN') && e.message.includes('401'));
+  rmSync(d, { recursive: true, force: true });
+});

@@ -54,7 +54,18 @@ export async function renderThumbnail(ctx: AgentContext, o: {
   const assPath = resolve(o.dir, 'thumb.ass');
   const stock = ctx.providers.stock;
   let photo: { path: string; asset: MediaAsset } | undefined;
-  if (stock.download) {
+  // 1) A custom AI image made for this video (Cloudflare FLUX, free) — no text, no real faces/logos.
+  if (ctx.providers.image.name !== 'mock-image' && o.concept.aiPrompt) {
+    try {
+      const a = await ctx.providers.image.generate(`${o.concept.aiPrompt}. Composition: main subject on the left third, darker empty area on the right for a headline`, resolve(o.dir, 'thumb-ai.jpg'));
+      photo = { path: a.path, asset: a };
+      o.notes.push('Thumbnail: custom AI background (Cloudflare FLUX).');
+    } catch (err) {
+      o.notes.push(`Thumbnail AI image failed (${(err as Error).message.slice(0, 80)}) — using a stock photo.`);
+    }
+  }
+  // 2) Otherwise a relevant stock photo.
+  if (!photo && stock.download) {
     const [joined] = await queriesForSentences(ctx, [`${o.concept.mainVisual} — ${o.title}`], 'business office', o.videoId, o.title);
     let pick: MediaAsset | undefined;
     for (const query of queryParts(joined!)) {

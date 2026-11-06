@@ -11,6 +11,8 @@ const EnvSchema = z.object({
   LLM_PROVIDER: z.enum(['mock', 'gemini']).default('mock'),
   TTS_PROVIDER: z.enum(['mock', 'macos', 'gemini']).default('mock'),
   IMAGE_PROVIDER: providerMode.default('mock'),
+  CLOUDFLARE_ACCOUNT_ID: z.string().optional(),
+  CLOUDFLARE_API_TOKEN: z.string().optional(),
   STOCK_PROVIDER: z.enum(['mock', 'pexels', 'pixabay']).default('mock'),
   YOUTUBE_PROVIDER: providerMode.default('mock'),
   TRENDS_PROVIDER: providerMode.default('mock'),

@@ -15,6 +15,7 @@ import { FallbackTTS, GeminiTTS } from './providers/tts/gemini-tts.ts';
 import { RateLimiter } from './core/retry.ts';
 import { PexelsStock } from './providers/stock/pexels.ts';
 import { WikimediaStock } from './providers/stock/wikimedia.ts';
+import { CloudflareImage } from './providers/image/cloudflare.ts';
 import { PixabayStock } from './providers/stock/pixabay.ts';
 import { RealYouTube } from './providers/youtube/youtube.ts';
 import { MockWeb, RealWeb } from './providers/web/web.ts';
@@ -92,7 +93,7 @@ export function createContext(opts: CreateContextOptions = {}): AgentContext & {
           ? new FallbackTTS(new GeminiTTS({ apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_TTS_MODEL, voice: env.GEMINI_TTS_VOICE, style: env.GEMINI_TTS_STYLE, sleep: opts.sleep }), new MacSayTTS(env.MACOS_VOICE))
           : new GeminiTTS({ apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_TTS_MODEL, voice: env.GEMINI_TTS_VOICE, style: env.GEMINI_TTS_STYLE, sleep: opts.sleep }))
         : new MacSayTTS(env.MACOS_VOICE),
-    image: real(env.IMAGE_PROVIDER) ? notYet('IMAGE_PROVIDER') : new MockImage(),
+    image: real(env.IMAGE_PROVIDER) && env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN ? new CloudflareImage({ accountId: env.CLOUDFLARE_ACCOUNT_ID, token: env.CLOUDFLARE_API_TOKEN, sleep: opts.sleep }) : new MockImage(),
     stock: !real(env.STOCK_PROVIDER)
       ? new MockStock()
       : env.STOCK_PROVIDER === 'pixabay' ? new PixabayStock(env.PIXABAY_API_KEY!, { cacheDir: resolve(config.rootDir, 'data/stock-cache') }) : new PexelsStock(env.PEXELS_API_KEY!),
