@@ -1,0 +1,20 @@
+# Manual check that the Cloudflare secrets work (one small test image, uploaded as an artifact).
+name: check-keys
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  cloudflare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: npm ci --no-audit --no-fund
+      - run: node --no-warnings scripts/check-cloudflare.ts
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: cloudflare-test, path: preview, if-no-files-found: ignore, retention-days: 3 }
