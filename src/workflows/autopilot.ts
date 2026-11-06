@@ -184,7 +184,12 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
         const vid = ctx.repos.videos.create({ title, format, niche });
         ctx.repos.artifacts.save({ videoId: vid.id, kind: 'calendar_entry', agent: 'autopilot', data: plan });
         const r = await produceVideo(ctx, { title, videoId: vid.id, format, niche, render: true, renderSize: o.renderSize ?? 'full' });
-        if (!r.completed) rep.errors.push(`produce "${plan.title}": ${r.steps.find((s) => s.status !== 'succeeded')?.error}`);
+        if (!r.completed) {
+          const why = `${r.steps.find((s) => s.status !== 'succeeded')?.error}`;
+          rep.errors.push(`produce "${plan.title}": ${why}`);
+          // A crashed production doesn't use up the day either: the next cycle tries another topic.
+          ctx.repos.artifacts.save({ videoId: r.videoId, kind: 'auto_blocked', agent: 'autopilot', data: { blockers: [`production failed: ${why.slice(0, 200)}`] } });
+        }
         const fc = ctx.repos.artifacts.latest<FactCheckReport>(r.videoId, 'fact_check')?.data;
         try { writePackage(ctx, r.videoId); } catch (err) { rep.errors.push(`package: ${(err as Error).message}`); }
         rep.produced = {

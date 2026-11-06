@@ -47,7 +47,7 @@ export class GeminiLLM implements LLMProvider {
     this.o = {
       fetchImpl: o.fetchImpl ?? fetch,
       baseUrl: o.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta',
-      repairAttempts: o.repairAttempts ?? 1,
+      repairAttempts: o.repairAttempts ?? 3,
       timeoutMs: o.timeoutMs ?? 180_000,
       apiKey: o.apiKey,
       models: o.models,
@@ -117,7 +117,9 @@ export class GeminiLLM implements LLMProvider {
     let outTok = 0;
     let lastIssues = '';
     for (let attempt = 0; attempt <= this.o.repairAttempts; attempt++) {
-      const r = await this.callWithFallback(models, req.system, prompt, req.maxOutputTokens ?? 16_384);
+      // Each repair attempt starts from the next model, so one model's bad streak can't sink the task.
+      const order = [...models.slice(attempt % models.length), ...models.slice(0, attempt % models.length)];
+      const r = await this.callWithFallback(order, req.system, prompt, req.maxOutputTokens ?? 16_384);
       model = r.model;
       inTok += r.inTok;
       outTok += r.outTok;
