@@ -7,13 +7,13 @@ import { ProviderError } from '../../core/errors.ts';
 const MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024;
 
 /** Streams a stock file into the local cache (atomic rename). Only https + allow-listed hosts. */
-export async function downloadToCache(o: { provider: string; url: string; file: string; cacheDir: string; allowedHosts: RegExp; fetchImpl: typeof fetch }): Promise<string> {
+export async function downloadToCache(o: { provider: string; url: string; file: string; cacheDir: string; allowedHosts: RegExp; fetchImpl: typeof fetch; headers?: Record<string, string> }): Promise<string> {
   const url = new URL(o.url);
   if (url.protocol !== 'https:' || !o.allowedHosts.test(url.hostname)) throw new ProviderError(o.provider, `Refusing to download from ${url.hostname}`, false);
   mkdirSync(o.cacheDir, { recursive: true });
   const out = resolve(o.cacheDir, o.file);
   if (existsSync(out) && statSync(out).size > 0) return out;
-  const res = await o.fetchImpl(url, { signal: AbortSignal.timeout(300_000) });
+  const res = await o.fetchImpl(url, { headers: o.headers, signal: AbortSignal.timeout(300_000) });
   if (!res.ok || !res.body) throw new ProviderError(o.provider, `Download failed: HTTP ${res.status}`, res.status >= 500);
   const len = Number(res.headers.get('content-length') ?? 0);
   if (len > MAX_DOWNLOAD_BYTES) throw new ProviderError(o.provider, `File too large (${Math.round(len / 1e6)} MB)`, false);

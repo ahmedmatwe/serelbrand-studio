@@ -324,6 +324,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     let timed: TimedScene[];
     let t = 0;
     let voiceName = '';
+    const voicesUsed: string[] = [];
     const voiceAll = async (provider: TTSProvider) => {
       const out: TimedScene[] = [];
       let start = 0;
@@ -334,6 +335,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
           const dirs = group.map((g) => script.scenes.find((x) => x.n === g.n)?.delivery);
           const direction = { tone: dirs[0]?.tone, pace: dirs[0]?.pace, emphasis: dirs.flatMap((d) => d?.emphasis ?? []).slice(0, 6) };
           const r = await provider.synthesize(group.map((g) => g.voiceover).join('\n\n'), resolve(dir, `batch-${bi + 1}.aiff`), direction);
+          voicesUsed.push(r.voice);
           const parts = group.map((g) => resolve(dir, `scene-${g.n}.batch.wav`));
           await splitBatch(r.audioPath, group.map((g) => g.voiceover), parts);
           group.forEach((g, i) => pre.set(g.n, { audioPath: parts[i]!, durationSec: 0, characters: g.voiceover.length, voice: r.voice }));
@@ -350,6 +352,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
           r = await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}-retry${attempt + 1}.aiff`), sc?.delivery);
         }
         voiceName = r.voice;
+        voicesUsed.push(r.voice);
         const wav = resolve(dir, `scene-${s.n}.wav`);
         if (existsSync(r.audioPath)) {
           // Dramatic silence after big lines; a normal breath otherwise.
@@ -366,7 +369,14 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       return { out, total: start };
     };
     try {
-      const v = await voiceAll(tts);
+      let v = await voiceAll(tts);
+      // The voice model changed part-way (a daily quota ran out): re-voice everything with one model.
+      const models = new Set(voicesUsed);
+      if (models.size > 1) {
+        notes.push(`Voice model switched mid-video (${[...models].join(' → ')}) — re-voiced the whole video with one model.`);
+        voicesUsed.length = 0;
+        v = await voiceAll(tts);
+      }
       timed = v.out; t = v.total;
     } catch (err) {
       if (!(tts instanceof FallbackTTS)) throw err;

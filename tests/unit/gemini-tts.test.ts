@@ -46,3 +46,22 @@ test('gemini tts: non-retryable error surfaces immediately', async () => {
   await assert.rejects(tts.synthesize('x', '/tmp/x.aiff'), /HTTP 400/);
   assert.equal(n, 1);
 });
+
+test('gemini-tts: daily quota on one model moves to the next; WAV replies are kept as-is', async () => {
+  const urls: string[] = [];
+  const wav = pcmToWav(Buffer.alloc(24000 * 2), 24000);
+  const replies = [
+    new Response(JSON.stringify({ error: { message: 'Quota exceeded ... requests per day limit exceeded on Free Tier' } }), { status: 429 }),
+    new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/wav', data: wav.toString('base64') } }] } }] }), { status: 200 }),
+  ];
+  const f = (async (url: string) => { urls.push(url); return replies.shift()!; }) as unknown as typeof fetch;
+  const dir = mkdtempSync(join(tmpdir(), 'tts-'));
+  const tts = new GeminiTTS({ apiKey: 'k', model: 'a-tts, b-tts', voice: 'Charon', style: '', fetchImpl: f, sleep: async () => {}, limiter: new RateLimiter(100, 100) });
+  const r = await tts.synthesize('مرحبا', join(dir, 'x.aiff'));
+  assert.ok(urls[0]!.includes('/a-tts:') && urls[1]!.includes('/b-tts:'));
+  assert.equal(r.voice, 'Charon (b-tts)');
+  assert.ok(Math.abs(r.durationSec - 1) < 0.01);
+  assert.equal(readFileSync(r.audioPath).subarray(0, 4).toString('latin1'), 'RIFF');
+  assert.equal(readFileSync(r.audioPath).length, wav.length, 'not double-wrapped');
+  rmSync(dir, { recursive: true, force: true });
+});

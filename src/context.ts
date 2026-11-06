@@ -14,6 +14,7 @@ import { MacSayTTS } from './providers/tts/macos-say.ts';
 import { FallbackTTS, GeminiTTS } from './providers/tts/gemini-tts.ts';
 import { RateLimiter } from './core/retry.ts';
 import { PexelsStock } from './providers/stock/pexels.ts';
+import { WikimediaStock } from './providers/stock/wikimedia.ts';
 import { PixabayStock } from './providers/stock/pixabay.ts';
 import { RealYouTube } from './providers/youtube/youtube.ts';
 import { MockWeb, RealWeb } from './providers/web/web.ts';
@@ -97,6 +98,7 @@ export function createContext(opts: CreateContextOptions = {}): AgentContext & {
       : env.STOCK_PROVIDER === 'pixabay' ? new PixabayStock(env.PIXABAY_API_KEY!, { cacheDir: resolve(config.rootDir, 'data/stock-cache') }) : new PexelsStock(env.PEXELS_API_KEY!),
     youtube: real(env.YOUTUBE_PROVIDER) ? realYouTube() : new MockYouTube(),
     web: env.DRY_RUN ? new MockWeb() : new RealWeb(),
+    photos: env.DRY_RUN ? undefined : new WikimediaStock(),
   };
 
   const queue = new JobQueue({

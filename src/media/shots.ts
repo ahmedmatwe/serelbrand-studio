@@ -51,7 +51,7 @@ export function layoutShots(sentences: { text: string; query: string }[], durati
   return shots;
 }
 
-const ShotQueriesLLM = z.object({ queries: z.array(z.object({ i: z.number().int(), query: z.string().min(2), alt: z.string().default('') })) });
+const ShotQueriesLLM = z.object({ queries: z.array(z.object({ i: z.number().int(), query: z.string().min(2), alt: z.string().default(''), entity: z.string().default('') })) });
 
 /** A shot query may carry a simpler fallback: "primary || alt". */
 export const queryParts = (q: string) => q.split('||').map((x) => x.trim()).filter(Boolean);
@@ -88,7 +88,8 @@ export async function queriesForSentences(ctx: AgentContext, sentences: string[]
       system:
         'You are a documentary video editor choosing stock footage. For EACH Arabic sentence give: query = a concrete English stock-footage search (2–4 words) of what the viewer should literally SEE while it is spoken, and alt = a simpler 1–2 word fallback that surely exists in stock libraries. ' +
         'Rules: show real, filmable things (people, places, objects, actions) that match the sentence AND the video topic; turn abstract ideas into a literal scene (e.g. "humble beginnings" → "small garage workshop", "huge success" → "busy office team celebrating", "competition" → "chess game closeup"). ' +
-        'Never abstract textures, crystals, particles, fractals or generic backgrounds. No brand names, logos, celebrities or on-screen text. Vary the visuals; never repeat a query twice in a row. Output JSON only.',
+        'Never abstract textures, crystals, particles, fractals or generic backgrounds. No brand names, logos, celebrities or on-screen text in query/alt. Vary the visuals; never repeat a query twice in a row. ' +
+        'entity = if the sentence explicitly names a real person, company, product, building or place, its common English Wikipedia name (e.g. "Jeff Bezos", "Toyota Prius", "Amazon Spheres"); otherwise "". Output JSON only.',
       prompt: JSON.stringify({ videoTopic: topic, sentences: batch.map((s, j) => ({ i: i + j, text: s })) }),
       schema: ShotQueriesLLM,
       vars: { sentences: batch, offset: i },
@@ -96,7 +97,7 @@ export async function queriesForSentences(ctx: AgentContext, sentences: string[]
       maxOutputTokens: 8000,
     }).catch(() => undefined);
     const clean = (x: string) => x.replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim();
-    for (const q of res?.data.queries ?? []) if (q.i >= 0 && q.i < out.length && clean(q.query)) out[q.i] = [clean(q.query), clean(q.alt), out[q.i]!].filter(Boolean).join(' || ');
+    for (const q of res?.data.queries ?? []) if (q.i >= 0 && q.i < out.length && clean(q.query)) out[q.i] = [clean(q.entity) ? `wm:${clean(q.entity)}` : '', clean(q.query), clean(q.alt), out[q.i]!].filter(Boolean).join(' || ');
   }
   return out;
 }
@@ -117,17 +118,34 @@ export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { ta
     }
     return results.get(q)!;
   };
+  const photos = ctx.providers.photos;
+  const photoResults = new Map<string, MediaAsset[]>();
+  const photoSearch = async (q: string) => {
+    if (!photoResults.has(q)) photoResults.set(q, await photos!.search(q, 'image', { perPage: 10, targetWidth: o.targetWidth }).catch(() => []));
+    return photoResults.get(q)!;
+  };
   let misses = 0;
   for (const s of shots) {
     // Primary query, then the simpler fallback, then the scene-level query — only relevant clips count.
     let pick: MediaAsset | undefined;
+    let from = stock;
     for (const q of queryParts(s.query)) {
+      if (q.startsWith('wm:')) {
+        // A real photo of the named person/company/product — only when its tags name it fully.
+        const entity = q.slice(3);
+        if (!photos?.download) continue;
+        const need = entity.split(/\s+/).filter((w) => w.length > 2).length;
+        const found = (await photoSearch(entity)).filter((a) => (relevance(a, entity) ?? 0) >= Math.min(2, Math.max(1, need)));
+        pick = pickRelevant(found, entity, o.used);
+        if (pick) { from = photos; break; }
+        continue;
+      }
       pick = pickRelevant(await search(q), q, o.used, s.variant);
-      if (pick) break;
+      if (pick) { from = stock; break; }
     }
     if (!pick) { misses++; continue; }
     try {
-      const path = await stock.download(pick, o.cacheDir);
+      const path = await from.download!(pick, o.cacheDir);
       o.used.add(pick.id);
       s.visual = { kind: pick.kind === 'video' ? 'video' : 'image', path, asset: { ...pick, path } };
     } catch {

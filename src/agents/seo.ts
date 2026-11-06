@@ -40,6 +40,7 @@ export function composeDescription(
   const creditsFor = (src: string) => [...new Map(stockAssets.filter((a) => a.source === src && a.pageUrl).map((a) => [a.pageUrl, `- ${a.attribution ?? src}: ${a.pageUrl}`])).values()];
   const credits = creditsFor('pexels');
   const pixabay = creditsFor('pixabay');
+  const commons = creditsFor('wikimedia');
   const sources = (factCheck?.claims ?? []).filter((c) => c.status === 'verified' && c.sourceUrl).map((c) => `- ${c.sourceTitle ?? c.sourceUrl}: ${c.sourceUrl}`);
   return [
     seo.description,
@@ -47,6 +48,7 @@ export function composeDescription(
     sources.length ? '\n📚 المصادر:\n' + [...new Set(sources)].join('\n') : '',
     credits.length ? '\n🎬 لقطات مجانية من Pexels (https://www.pexels.com):\n' + credits.join('\n') : '',
     pixabay.length ? '\n🎬 لقطات مجانية من Pixabay (https://pixabay.com):\n' + pixabay.join('\n') : '',
+    commons.length ? '\n📷 صور من Wikimedia Commons:\n' + commons.join('\n') : '',
     '\n' + seo.hashtags.join(' '),
   ].filter(Boolean).join('\n');
 }

@@ -26,7 +26,7 @@ const EnvSchema = z.object({
   AUTO_VERIFY: z.string().default('false').transform((v) => v.toLowerCase() === 'true'),
   /** Autopilot approves videos that pass EVERY gate (no human). */
   AUTO_APPROVE: z.string().default('false').transform((v) => v.toLowerCase() === 'true'),
-  GEMINI_TTS_MODEL: z.string().default('gemini-2.5-flash-preview-tts'),
+  GEMINI_TTS_MODEL: z.string().default('gemini-3.8-flash-tts,gemini-3.1-flash-tts-preview,gemini-3.8-flash-lite-tts,gemini-2.5-flash-preview-tts'),
   GEMINI_TTS_VOICE: z.string().default('Charon'),
   GEMINI_TTS_STYLE: z.string().default('اقرأ النص التالي بصوت راوي وثائقي عربي، هادئ وطبيعي وواثق، بإيقاع متوسط وبدون مبالغة:'),
   ANTHROPIC_API_KEY: z.string().optional(),

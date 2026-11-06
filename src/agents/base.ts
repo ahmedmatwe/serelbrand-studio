@@ -29,6 +29,8 @@ export interface AgentContext {
     tts: TTSProvider;
     image: ImageProvider;
     stock: StockProvider;
+    /** Real photos of named people/companies/products (Wikimedia Commons). Absent in offline runs. */
+    photos?: StockProvider;
     youtube: YouTubeProvider;
     web: WebProvider;
   };

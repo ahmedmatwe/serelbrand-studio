@@ -27,6 +27,7 @@ export function pcmToWav(pcm: Buffer, sampleRate = SAMPLE_RATE): Buffer {
 
 export interface GeminiTTSOptions {
   apiKey: string;
+  /** One model or a comma-separated fallback list (each model has its own free daily quota). */
   model: string;
   voice: string;
   /** Natural-language direction prepended to the text (Gemini TTS is steerable by prompt). */
@@ -46,9 +47,15 @@ export class GeminiTTS implements TTSProvider {
     this.o = { ...o, fetchImpl: o.fetchImpl ?? fetch, limiter: o.limiter ?? new RateLimiter(2, 6 / 60) };
   }
 
+  private readonly models: string[] = [];
+  private idx = 0;
+  /** Model currently used (sticky until its daily quota runs out). */
+  get model(): string { return this.models[this.idx]!; }
+
   private async once(text: string, direction?: VoiceDirection): Promise<Buffer> {
+    if (!this.models.length) this.models.push(...this.o.model.split(',').map((m) => m.trim()).filter(Boolean));
     await this.o.limiter.take();
-    const res = await this.o.fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.o.model)}:generateContent`, {
+    const res = await this.o.fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': this.o.apiKey },
       body: JSON.stringify({
@@ -57,23 +64,33 @@ export class GeminiTTS implements TTSProvider {
       }),
       signal: AbortSignal.timeout(600_000),
     }).catch((err: Error) => { throw new ProviderError('gemini-tts', `Network error: ${err.message}`, true, { cause: err }); });
-    const j = (await res.json().catch(() => ({}))) as { candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[]; error?: { message?: string } };
+    const j = (await res.json().catch(() => ({}))) as { candidates?: { content?: { parts?: { inlineData?: { data?: string; mimeType?: string } }[] } }[]; error?: { message?: string } };
     const msg = j.error?.message ?? res.statusText;
-    // The free tier's DAILY voice quota: retrying minutes later is pointless — fail fast with the reset time.
-    if (res.status === 429 && /per day|PerDay/i.test(msg)) throw new ProviderError('gemini-tts', `TTS_DAILY_QUOTA: ${msg.slice(0, 300)}`, false);
+    // Daily free quota of this model used up → move to the next model (its quota is separate).
+    if (res.status === 429 && /per day|PerDay/i.test(msg)) {
+      if (this.idx < this.models.length - 1) { this.idx++; return this.once(text, direction); }
+      throw new ProviderError('gemini-tts', `TTS_DAILY_QUOTA: ${msg.slice(0, 300)}`, false);
+    }
+    if (res.status === 404 && this.idx < this.models.length - 1) { this.idx++; return this.once(text, direction); }
     if (!res.ok) throw new ProviderError('gemini-tts', `HTTP ${res.status}: ${msg}`, res.status === 429 || res.status >= 500);
-    const b64 = j.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData?.data;
-    if (!b64) throw new ProviderError('gemini-tts', 'No audio in response', true);
-    return Buffer.from(b64, 'base64');
+    const part = j.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData;
+    if (!part?.data) throw new ProviderError('gemini-tts', 'No audio in response', true);
+    const buf = Buffer.from(part.data, 'base64');
+    // Newer models return a complete WAV; older ones raw 16-bit PCM (audio/l16; rate=24000).
+    if (buf.subarray(0, 4).toString('latin1') === 'RIFF') return buf;
+    const rate = Number(part.mimeType?.match(/rate=(\d+)/)?.[1] ?? SAMPLE_RATE);
+    return pcmToWav(buf, rate);
   }
 
   async synthesize(text: string, outPath: string, direction?: VoiceDirection): Promise<TTSResult> {
-    const pcm = await withRetry(() => this.once(text, direction), { attempts: 3, baseDelayMs: 20_000, sleep: this.o.sleep });
+    const wav = await withRetry(() => this.once(text, direction), { attempts: 3, baseDelayMs: 20_000, sleep: this.o.sleep });
     // Separate file name so the renderer's own "<scene>.wav" conversion never overwrites the source.
     const path = outPath.replace(/\.[^./]+$/, '') + '.gemini.wav';
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, pcmToWav(pcm));
-    return { audioPath: path, durationSec: pcm.length / (SAMPLE_RATE * 2), characters: text.length, voice: this.o.voice };
+    writeFileSync(path, wav);
+    const rate = wav.readUInt32LE(24) || SAMPLE_RATE;
+    const channels = wav.readUInt16LE(22) || 1;
+    return { audioPath: path, durationSec: Math.max(0, wav.length - 44) / (rate * 2 * channels), characters: text.length, voice: `${this.o.voice} (${this.model})` };
   }
 }
 
