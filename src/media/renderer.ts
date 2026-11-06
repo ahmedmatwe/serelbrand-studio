@@ -437,18 +437,25 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
         // Opening scene too long: narrate the hook + the first sentences as a dedicated Short.
         shorts.push(await narratedShort(1, shortScript(script.hooks[0] ?? '', timed.map((s) => s.voiceover).join(' '), 120), timed[0]!, script.hooks[0] ?? script.mainTitle));
       }
-      // Extra Shorts: one per scene that carries a curiosity gap (each a self-contained mini-story).
+      // Always 3 Shorts per long video: scenes with a curiosity gap first, then reveal/escalation beats,
+      // then any other scene — each narrated as a self-contained mini-story with its own hook.
+      const want = input.shortsPerLong ?? 3;
       const used = new Set(shorts.flatMap((x) => x.scenes));
-      const extra = script.scenes.filter((sc) => sc.curiosityGap && !used.has(sc.n)).slice(0, Math.max(0, (input.shortsPerLong ?? 3) - 1));
-      for (const [i, sc] of extra.entries()) {
+      const rank = (sc: Script['scenes'][number]) => (sc.curiosityGap ? 0 : sc.beat === 'reveal' ? 1 : sc.beat === 'escalation' ? 2 : 3);
+      const candidates = script.scenes.filter((sc) => !used.has(sc.n) && sc.beat !== 'cta' && countWordsSimple(sc.voiceover) >= 40).sort((a, b) => rank(a) - rank(b));
+      const spareHooks = script.hooks.slice(1);
+      for (const sc of candidates) {
+        if (shorts.length >= want) break;
         const scene = timed.find((t) => t.n === sc.n);
         if (!scene) continue;
+        const hook = sc.curiosityGap || spareHooks.shift() || sc.onScreenText || script.mainTitle;
         try {
-          shorts.push(await narratedShort(i + 2, shortScript(sc.curiosityGap!, sc.voiceover, 120), scene, sc.curiosityGap!));
+          shorts.push(await narratedShort(shorts.length + 1, shortScript(hook, sc.voiceover, 120), scene, hook));
         } catch (err) {
-          notes.push(`Extra Short ${i + 2} skipped: ${(err as Error).message.slice(0, 100)}`);
+          notes.push(`Short from scene ${sc.n} skipped: ${(err as Error).message.slice(0, 100)}`);
         }
       }
+      if (shorts.length < want) notes.push(`Only ${shorts.length}/${want} Shorts could be cut from this video.`);
     }
 
     // 6) Measurements (feed the Quality agent).
@@ -499,3 +506,5 @@ export async function sceneAudioProblem(path: string, text: string, wordsPerMinu
   if (expected > 3 && dur > expected * 2.5) return `stretched (${dur.toFixed(1)}s, expected ~${expected.toFixed(0)}s)`;
   return undefined;
 }
+
+const countWordsSimple = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;

@@ -108,7 +108,7 @@ test('render: if the primary voice fails mid-video, ALL scenes are re-voiced wit
 import { MockLLM as ML } from '../../src/providers/llm/mock.ts';
 import { MOCK_FIXTURES as MF } from '../../src/providers/llm/fixtures.ts';
 
-test('render: long scenes → hook Short + one extra Short per curiosity-gap scene', { timeout: 300_000 }, async () => {
+test('render: long video always yields 3 Shorts — hook, curiosity-gap scenes first, then other scenes', { timeout: 300_000 }, async () => {
   const long = (t: string) => Array(8).fill(t).join(' ');
   const base = MF['script.write']!({}) as { scenes: { voiceover: string }[] };
   const bp = MF['production.blueprint']!({}) as { scenes: { voiceover: string }[] };
@@ -121,9 +121,10 @@ test('render: long scenes → hook Short + one extra Short per curiosity-gap sce
   const r = await produceVideo(ctx, { title: 'قصة نوكيا', render: true, renderSize: 'preview' });
   const out = ctx.repos.artifacts.latest<RenderOutput>(r.videoId, 'render')!.data;
   try {
-    assert.equal(out.shorts.length, 2, JSON.stringify(out.measurements.notes));
+    assert.equal(out.shorts.length, 3, JSON.stringify(out.measurements.notes));
     assert.ok(out.shorts.every((s) => s.durationSec <= 59));
-    assert.deepEqual(out.shorts.map((s) => s.scenes[0]), [1, 3]);
+    assert.deepEqual(out.shorts.slice(0, 2).map((s) => s.scenes[0]), [1, 3]);
+    assert.equal(new Set(out.shorts.map((s) => s.scenes[0])).size, 3, 'each Short tells a different scene');
   } finally {
     rmSync(resolve(ROOT, 'data/renders', r.videoId), { recursive: true, force: true });
     ctx.close();
