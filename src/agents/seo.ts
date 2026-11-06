@@ -1,6 +1,7 @@
 import { Agent } from './base.ts';
 import { SeoLLM, type Blueprint, type FactCheckReport, type Script, type SeoPackage } from './schemas.ts';
 import { loadPrompt } from '../prompts.ts';
+import { titleProblems } from './stage-checks.ts';
 
 export interface SeoInput { videoId: string; script: Script; blueprint: Blueprint; factCheck?: FactCheckReport }
 
@@ -63,9 +64,27 @@ export class SeoAgent extends Agent<SeoInput, SeoPackage> {
       schema: SeoLLM,
       videoId: input.videoId,
     });
+    // Stage gate: the title must match the video and avoid clickbait — fix it now.
+    let data = res.data;
+    if (titleProblems(data.primaryTitle, input.script).length) {
+      const alt = [...data.altTitles, ...input.script.altTitles, input.script.mainTitle].find((t) => !titleProblems(t, input.script).length);
+      if (alt) data = { ...data, primaryTitle: alt, altTitles: [data.primaryTitle, ...data.altTitles.filter((t) => t !== alt)] };
+      else {
+        const re = await this.ctx.providers.llm.generateJson({
+          task: 'seo.retitle',
+          tier: 'light',
+          system: loadPrompt('seo'),
+          prompt: JSON.stringify({ instruction: 'Rewrite primaryTitle (and altTitles) to fix these problems. Return the full package.', problems: titleProblems(data.primaryTitle, input.script), package: data, scenes: input.script.scenes.map((s) => s.voiceover.slice(0, 200)) }),
+          schema: SeoLLM,
+          videoId: input.videoId,
+          vars: { previous: data },
+        }).catch(() => undefined);
+        if (re && titleProblems(re.data.primaryTitle, input.script).length < titleProblems(data.primaryTitle, input.script).length) data = re.data;
+      }
+    }
     const chapters = input.script.format === 'long' ? buildChapters(input.script, input.blueprint) : [];
-    const fullDescription = composeDescription({ ...res.data, chapters }, input.factCheck);
+    const fullDescription = composeDescription({ ...data, chapters }, input.factCheck);
     this.ctx.repos.videos.update(input.videoId, { status: 'packaged' });
-    return { ...res.data, chapters, fullDescription };
+    return { ...data, chapters, fullDescription };
   }
 }

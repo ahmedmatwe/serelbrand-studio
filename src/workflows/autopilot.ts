@@ -145,9 +145,13 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   // 3) Production: one per day — the long video (with its 3 Shorts) or a 3-Shorts pack.
   //    Only autopilot productions count (they carry a calendar entry); manual tests don't block the day.
   const planned = new Set(ctx.repos.artifacts.listKind('calendar_entry').map((a) => a.video_id));
-  const producedToday = ctx.repos.videos.list().some((v) => planned.has(v.id) && v.created_at.slice(0, 10) === day(now));
+  // A video the final gate blocked does not count: the next cycle makes a different topic instead
+  // (max 3 attempts a day, so the free API quotas are never burnt in a loop).
+  const todays = ctx.repos.videos.list().filter((v) => planned.has(v.id) && v.created_at.slice(0, 10) === day(now));
+  const producedToday = todays.some((v) => !ctx.repos.artifacts.latest(v.id, 'auto_blocked'));
   if (o.produce === false) rep.skippedProductionReason = 'production disabled for this run';
   else if (producedToday && !o.force) rep.skippedProductionReason = 'already produced a video today';
+  else if (todays.length >= 3 && !o.force) rep.skippedProductionReason = '3 attempts today were blocked by the quality gate — trying again tomorrow';
   else {
     try {
       const niche = ctx.config.channel.niche ?? 'business-stories';
@@ -199,6 +203,7 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
           } else {
             rep.produced.autoApproved = false;
             rep.produced.autoApproveBlockedBy = blockers;
+            ctx.repos.artifacts.save({ videoId: r.videoId, kind: 'auto_blocked', agent: 'autopilot', data: { blockers } });
           }
         }
       }
@@ -215,7 +220,7 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     if (n) rep.needsFactReview.push({ videoId: v.id, title: v.title, claims: n });
   }
   if (rep.produced?.autoApproved) notify('سر البراند: فيديو اتنشر تلقائياً', `${rep.produced.title.slice(0, 60)}${rep.produced.publishAt ? ` — هيظهر ${rep.produced.publishAt.slice(0, 16).replace('T', ' ')} UTC` : ' (private)'}`);
-  else if (rep.produced?.autoApproveBlockedBy) notify('سر البراند: فيديو اتوقف', `مش هيتنشر تلقائياً: ${rep.produced.autoApproveBlockedBy[0]?.slice(0, 90)} — شوفه في لوحة التحكم`);
+  else if (rep.produced?.autoApproveBlockedBy) notify('سر البراند: فيديو اتوقف', `مش هيتنشر: ${rep.produced.autoApproveBlockedBy[0]?.slice(0, 90)} — الدورة الجاية هتعمل موضوع تاني`);
   else if (rep.produced) notify('سر البراند: فيديو جديد جاهز', `${rep.produced.title.slice(0, 60)} — محتاج مراجعتك في لوحة التحكم`);
   else if (rep.pendingApprovals || rep.needsFactReview.length) notify('سر البراند', `فيه ${rep.pendingApprovals + rep.needsFactReview.length} فيديو مستني مراجعتك`);
   const locked = rep.published.filter((id) => (ctx.repos.artifacts.latest<PublishLog>(id, 'publish_log')?.data.warnings ?? []).some((w) => w.startsWith('YOUTUBE_LOCKED_PRIVATE')));

@@ -110,9 +110,12 @@ jobs:
         if: always()
         run: |
           mkdir -p preview
-          for v in $(ls -d data/renders/*/ 2>/dev/null | tail -1); do
+          for v in $(ls -td data/renders/*/ 2>/dev/null | head -1); do
             [ -f "$v/thumbnail.png" ] && cp "$v/thumbnail.png" preview/ || true
             f=$(ls "$v"/*.mp4 2>/dev/null | head -1); [ -n "$f" ] && node_modules/ffmpeg-static/ffmpeg -loglevel error -ss 3 -i "$f" -frames:v 1 preview/frame.png || true
+            # The full videos too, so a blocked video can still be watched (kept 3 days).
+            cp "$v"/*.mp4 preview/ 2>/dev/null || true
+            cp reports/packages/*"$(basename "$v")".md preview/ 2>/dev/null || true
           done
       - uses: actions/upload-artifact@v4
         if: always()

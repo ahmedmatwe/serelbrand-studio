@@ -106,3 +106,16 @@ test('auto-verifier: cuts only the sentence carrying an unproven claim', async (
   const none = cutClaimSentences(script, [{ claim: 'تيم كوك يدير شركة أبل منذ سنوات', sceneN: 1 }]);
   assert.equal(none.removed.length, 0);
 });
+
+test('stage checks: script and title problems are found before the final gate', async () => {
+  const { scriptProblems, titleProblems } = await import('../../src/agents/stage-checks.ts');
+  const scene = (voiceover: string) => ({ n: 1, purpose: 'p', voiceover, onScreenText: '', transition: '', chapter: '', beat: 'hook' as const, delivery: { tone: '', pace: 'medium' as const, emphasis: [], pauseAfter: false } });
+  const good = { hooks: ['إزاي شركة صغيرة في جراج بقت أكبر متجر في العالم؟'], opening: 'في الفيديو ده هتعرف إزاي أمازون بدأت وإيه القرارات اللي كبّرتها', scenes: [scene('بدأت أمازون كمتجر كتب على الإنترنت سنة 1994 في جراج صغير.')], cta: 'اشترك', ending: 'شكراً' };
+  assert.deepEqual(scriptProblems(good), []);
+  const bad = { ...good, hooks: [Array(40).fill('كلمة').join(' ')], scenes: [scene('اتصل بينا على 01001234567 دلوقتي. اتصل بينا على 01001234567 دلوقتي.')] };
+  const p = scriptProblems(bad);
+  assert.ok(p.some((x) => x.startsWith('Hook 1')));
+  assert.ok(p.some((x) => x.startsWith('Policy risk')));
+  assert.deepEqual(titleProblems('قصة أمازون: إزاي بدأت في جراج صغير', good), []);
+  assert.ok(titleProblems('فضيحة تسلا الكبرى', good).length >= 1);
+});

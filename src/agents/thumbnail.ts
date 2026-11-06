@@ -22,16 +22,24 @@ export class ThumbnailAgent extends Agent<ThumbnailInput, ThumbnailOutput> {
   readonly artifactKind = 'thumbnails';
 
   protected async execute(input: ThumbnailInput): Promise<ThumbnailOutput> {
-    const res = await this.ctx.providers.llm.generateJson({
+    const max = this.ctx.config.thresholds.packaging.maxThumbnailWords;
+    const ask = async (fix?: string[]) => (await this.ctx.providers.llm.generateJson({
       task: 'thumbnail.concepts',
       tier: 'light',
       system: loadPrompt('thumbnail'),
-      prompt: JSON.stringify(input),
+      prompt: JSON.stringify(fix ? { ...input, fixTheseProblems: fix } : input),
       schema: ThumbnailLLM,
       videoId: input.videoId,
-    });
-    const max = this.ctx.config.thresholds.packaging.maxThumbnailWords;
-    const concepts = res.data.concepts.map((c) => validateConcept(c, max));
+    })).data.concepts.map((c) => validateConcept(c, max));
+    let concepts = await ask();
+    // Stage gate: every concept must be valid (≤ max words, no logos/faces, accuracy note) — redo the bad ones now.
+    const bad = concepts.filter((c) => !c.valid);
+    if (bad.length) {
+      const redo = await ask(bad.map((c) => `"${c.text}": ${c.problems.join('; ')}`)).catch(() => []);
+      const good = [...concepts.filter((c) => c.valid), ...redo.filter((c) => c.valid)];
+      if (good.length >= 3) concepts = good.slice(0, 5);
+      else if (good.length > concepts.filter((c) => c.valid).length) concepts = [...good, ...bad].slice(0, 5);
+    }
     // Prefer valid concepts with the fewest words (most readable on mobile).
     const ranked = concepts.map((c, i) => ({ c, i })).filter((x) => x.c.valid).sort((a, b) => a.c.textWordCount - b.c.textWordCount);
     return { concepts, recommendedIndex: ranked[0]?.i ?? -1 };

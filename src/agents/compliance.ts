@@ -37,12 +37,22 @@ export interface ComplianceReport {
 const PENALTY: Record<Severity, number> = { low: 2, medium: 6, high: 15, critical: 40 };
 
 // Keyword lists are a first-pass heuristic only. They flag for human review; they do not replace it.
-const CLICKBAIT = ['لن تصدق', 'صادم', 'صدمة', 'فضيحة', 'مضمون', '100%', 'حصري', 'عاجل', 'سر خطير'];
+export const CLICKBAIT = ['لن تصدق', 'صادم', 'صدمة', 'فضيحة', 'مضمون', '100%', 'حصري', 'عاجل', 'سر خطير'];
 const PROFANITY = ['لعنة', 'قذر', 'حقير', 'تافه'];
 const HATE = ['حثالة', 'أعراق أدنى', 'يجب إبادة'];
 const DANGEROUS = ['طريقة صنع قنبلة', 'تصنيع سلاح', 'جرعة قاتلة', 'انتحار', 'مخدرات', 'تفجير'];
 const SENSITIVE = ['حرب', 'قتل', 'دماء', 'إرهاب', 'طائفي'];
 const PII = [/\b\d{10,}\b/, /[\w.+-]+@[\w-]+\.[\w.]+/, /\+\d{6,}/];
+
+/** Words in the spoken text that risk policy strikes or demonetization (fixed at the script stage). */
+export function policyHits(text: string): { word: string; kind: 'hate' | 'dangerous' | 'profanity' | 'pii' }[] {
+  const out: { word: string; kind: 'hate' | 'dangerous' | 'profanity' | 'pii' }[] = [];
+  for (const w of HATE) if (text.includes(w)) out.push({ word: w, kind: 'hate' });
+  for (const w of DANGEROUS) if (text.includes(w)) out.push({ word: w, kind: 'dangerous' });
+  for (const w of PROFANITY) if (text.includes(w)) out.push({ word: w, kind: 'profanity' });
+  for (const re of PII) { const m = text.match(re); if (m) out.push({ word: m[0], kind: 'pii' }); }
+  return out;
+}
 const ALLOWED_LICENSES = new Set(['generated-owned', 'pexels', 'pixabay', 'cc0', 'licensed']);
 
 /** Light Arabic stemming: strip diacritics and common prefixes (و ف ب ك ل ال) when enough of the word remains. */

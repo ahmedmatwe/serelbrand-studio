@@ -1,6 +1,7 @@
 import { Agent, countWords } from './base.ts';
 import { ScriptLLM, type Script } from './schemas.ts';
 import { loadPrompt } from '../prompts.ts';
+import { scriptProblems } from './stage-checks.ts';
 
 export interface ScriptInput { videoId: string; title: string; angle?: string; format: 'long' | 'short'; audience?: string }
 
@@ -51,6 +52,27 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
       });
       if (countWords(spokenText(exp.data)) > words) data = exp.data;
     }
+    // Stage gate: check the script now and fix the exact problems (up to 2 rewrites, keep the best).
+    let problems = scriptProblems(data, target);
+    for (let i = 0; i < 2 && problems.length; i++) {
+      const rev = await this.ctx.providers.llm.generateJson({
+        task: 'script.revise',
+        tier: 'writing',
+        system: loadPrompt('scriptwriter'),
+        prompt: JSON.stringify({ instruction: 'Fix ONLY these problems and return the complete script. Keep the facts, structure, length and tone; do not add new numbers or claims.', problems, script: data }),
+        schema: ScriptLLM,
+        maxOutputTokens: 16000,
+        videoId: input.videoId,
+        vars: { previous: data },
+      }).catch(() => undefined);
+      if (!rev) break;
+      const next = scriptProblems(rev.data, target);
+      // Accept only a real improvement that did not gut the script.
+      if (next.length >= problems.length || countWords(spokenText(rev.data)) < countWords(spokenText(data)) * 0.8) break;
+      data = rev.data;
+      problems = next;
+    }
+    if (problems.length) this.ctx.logger.child('scriptwriter').warn('script problems left after fixing', { videoId: input.videoId, problems });
     const wordCount = countWords(spokenText(data));
     const estimatedDurationSec = Math.round((wordCount / t.arabicWordsPerMinute) * 60);
     this.ctx.repos.videos.update(input.videoId, { status: 'scripted', title: data.mainTitle });

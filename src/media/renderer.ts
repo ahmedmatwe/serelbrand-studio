@@ -328,7 +328,14 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       let start = 0;
       for (const s of bp.scenes) {
         const sc = script.scenes.find((x) => x.n === s.n);
-        const r = await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}.aiff`), sc?.delivery);
+        let r = await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}.aiff`), sc?.delivery);
+        // Stage gate: a scene whose audio is silent, cut off or stretched is re-recorded right away (up to 2x).
+        for (let attempt = 0; attempt < 2 && existsSync(r.audioPath) && !provider.name.startsWith('mock'); attempt++) {
+          const problem = await sceneAudioProblem(r.audioPath, s.voiceover, this.ctx.config.thresholds.script.arabicWordsPerMinute);
+          if (!problem) break;
+          this.ctx.logger.child('renderer').warn('re-recording scene audio', { videoId, scene: s.n, problem });
+          r = await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}-retry${attempt + 1}.aiff`), sc?.delivery);
+        }
         voiceName = r.voice;
         const wav = resolve(dir, `scene-${s.n}.wav`);
         if (existsSync(r.audioPath)) {
@@ -481,4 +488,14 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       measurements: { audio, audioScore, visualScore, subtitleAccuracy, avSyncDiffSec, notes },
     };
   }
+}
+
+/** Why a narrated scene sounds broken (silent, cut off, or far too slow), or undefined when it is fine. */
+export async function sceneAudioProblem(path: string, text: string, wordsPerMinute: number): Promise<string | undefined> {
+  const [vol, dur] = await Promise.all([volumeStats(path), probeDuration(path)]);
+  if (!Number.isFinite(vol.meanDb) || vol.meanDb < -45) return `silent (${vol.meanDb.toFixed(0)} dB)`;
+  const expected = (text.trim().split(/\s+/).length / wordsPerMinute) * 60;
+  if (expected > 3 && dur < expected * 0.45) return `cut off (${dur.toFixed(1)}s, expected ~${expected.toFixed(0)}s)`;
+  if (expected > 3 && dur > expected * 2.5) return `stretched (${dur.toFixed(1)}s, expected ~${expected.toFixed(0)}s)`;
+  return undefined;
 }
