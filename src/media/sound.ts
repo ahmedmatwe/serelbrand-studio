@@ -56,10 +56,15 @@ export async function mixSoundtrack(o: { voice: string; durationSec: number; cue
   const mixIn = ['[voice]'];
   let idx = 1;
   if (o.musicPath) {
-    // aloop (not -stream_loop): -stream_loop keeps decoding forever and stalls the graph.
-    inputs.push('-i', o.musicPath);
-    parts.push(`[${idx}:a]aloop=loop=-1:size=2e9,aformat=sample_rates=48000:channel_layouts=stereo,atrim=duration=${o.durationSec.toFixed(2)},volume=0.22,afade=t=in:d=2,afade=t=out:st=${Math.max(0, o.durationSec - 3).toFixed(2)}:d=3[mus]`);
-    parts.push('[mus][key]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=350[ducked]');
+    // The bed is prepared in its own short ffmpeg run (looped + trimmed to the exact length), so the main
+    // graph only reads a finite file — looping inside the graph (aloop/-stream_loop) can stall it.
+    const bed = resolve(o.dir, 'music-bed.wav');
+    await ffmpeg(['-stream_loop', '-1', '-i', o.musicPath, '-t', o.durationSec.toFixed(2), '-af', `aformat=sample_rates=48000:channel_layouts=stereo,volume=0.22,afade=t=in:d=2,afade=t=out:st=${Math.max(0, o.durationSec - 3).toFixed(2)}:d=3`, '-ar', '48000', '-ac', '2', bed], { timeoutMs: 5 * 60_000 });
+    inputs.push('-i', bed);
+    parts.push(`[${idx}:a]anull[mus]`);
+    // sidechaincompress never ends once its key (the voice) hits EOF: pad the key forever and trim the output.
+    parts.push('[key]apad[keyp]');
+    parts.push(`[mus][keyp]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=350,atrim=duration=${o.durationSec.toFixed(2)}[ducked]`);
     mixIn.push('[ducked]');
     idx++;
   } else {
@@ -79,7 +84,20 @@ export async function mixSoundtrack(o: { voice: string; durationSec: number; cue
     im.forEach((c, i) => parts.push(`[i${i}]adelay=${Math.round(c.at * 1000)}:all=1[id${i}]`));
     mixIn.push(...im.map((_, i) => `[id${i}]`));
   } else parts.push(`[${iIdx}:a]anullsink`);
-  parts.push(`${mixIn.join('')}amix=inputs=${mixIn.length}:normalize=0:duration=first,loudnorm=I=-14:TP=-1.5:LRA=11[out]`);
-  await ffmpeg([...inputs, '-filter_complex', parts.join(';'), '-map', '[out]', '-t', o.durationSec.toFixed(2), '-ar', '48000', '-c:a', 'aac', '-b:a', '192k', o.out]);
+  // Trim inside the graph (not with output -t): loudnorm keeps a 3 s look-ahead, and an output -t that
+  // stops reading mid-buffer deadlocks the graph.
+  parts.push(`${mixIn.join('')}amix=inputs=${mixIn.length}:normalize=0:duration=first,atrim=duration=${o.durationSec.toFixed(2)},loudnorm=I=-14:TP=-1.5:LRA=11[out]`);
+  await ffmpeg(['-nostdin', ...inputs, '-filter_complex', parts.join(';'), '-map', '[out]', '-ar', '48000', '-c:a', 'aac', '-b:a', '192k', o.out], { timeoutMs: 15 * 60_000 });
   return { musicUsed: Boolean(o.musicPath), cues: o.cues.length };
+}
+
+/** Like mixSoundtrack, but a music problem never costs the video: it falls back to voice + SFX. */
+export async function mixSoundtrackSafe(o: Parameters<typeof mixSoundtrack>[0]) {
+  try {
+    return await mixSoundtrack(o);
+  } catch (err) {
+    if (!o.musicPath) throw err;
+    const r = await mixSoundtrack({ ...o, musicPath: undefined });
+    return { ...r, musicError: (err as Error).message.slice(0, 160) };
+  }
 }

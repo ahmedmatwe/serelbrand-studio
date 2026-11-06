@@ -11,7 +11,7 @@ import { buildAss, chunkSubtitles, type AssEvent, type AssStyle } from './ass.ts
 import { ffmpeg, filterPath, probeDuration, volumeStats, type VolumeStats } from './ffmpeg.ts';
 import { fetchShotVisuals, layoutShots, queriesForSentences, splitSentences, type Shot } from './shots.ts';
 import { renderThumbnail } from './thumbnail.ts';
-import { cuesFor, mixSoundtrack, pickMusic } from './sound.ts';
+import { cuesFor, mixSoundtrackSafe, pickMusic } from './sound.ts';
 import { z } from 'zod';
 
 export type RenderSize = 'full' | 'preview';
@@ -247,7 +247,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       const d = Math.min(s.duration, SHORT_MAX_SEC + 1);
       if (s.duration > SHORT_MAX_SEC + 1) o.notes.push(`Scene ${s.n} is ${Math.round(s.duration)}s — trimmed to ${SHORT_MAX_SEC + 1}s`);
       const audio = resolve(o.dir, `short-${s.n}.m4a`);
-      await ffmpeg(['-i', s.audioPath, '-t', String(d), '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11', '-ar', '48000', '-c:a', 'aac', '-b:a', '160k', audio]);
+      await ffmpeg(['-nostdin', '-i', s.audioPath, '-af', `atrim=duration=${d},loudnorm=I=-14:TP=-1.5:LRA=11`, '-ar', '48000', '-c:a', 'aac', '-b:a', '160k', audio]);
       const path = resolve(o.dir, `short-${s.n}.mp4`);
       await this.renderTimeline([{ ...s, start: 0, duration: d, shots: trimShots(s.shots, d) }], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
       const sc = script.scenes.find((x) => x.n === s.n);
@@ -407,7 +407,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const soundtrack = resolve(dir, 'soundtrack.m4a');
     const musicPath = pickMusic(resolve(this.ctx.config.rootDir, 'music'), bp.music.mood + ' ' + (script.scenes[0]?.delivery?.tone ?? ''), script.mainTitle.length);
     const beats = timed.map((s) => ({ start: s.start, beat: script.scenes.find((x) => x.n === s.n)?.beat }));
-    const mix = await mixSoundtrack({ voice, durationSec: t, cues: cuesFor(beats), musicPath, dir, out: soundtrack });
+    const mix = await mixSoundtrackSafe({ voice, durationSec: t, cues: cuesFor(beats), musicPath, dir, out: soundtrack });
     notes.push(mix.musicUsed ? `Music bed: ${musicPath!.split('/').pop()} (ducked under the voice).` : 'No music bed (add licensed tracks to music/). SFX added.');
     const subs = await this.renderTimeline(timed, soundtrack, videoPath, { ...main, palette, preset, assPath: resolve(dir, 'video.ass') });
     const captionsPath = resolve(dir, 'captions.srt');
@@ -428,7 +428,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       else await ffmpeg(['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono', '-t', String(Math.max(1, r.durationSec) + 0.6), wav]);
       const d = Math.min(await probeDuration(wav), SHORT_MAX_SEC + 1);
       const saudio = resolve(dir, `short-${k}.m4a`);
-      await ffmpeg(['-i', wav, '-t', String(d), '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11', '-ar', '48000', '-c:a', 'aac', '-b:a', '160k', saudio]);
+      await ffmpeg(['-nostdin', '-i', wav, '-af', `atrim=duration=${d},loudnorm=I=-14:TP=-1.5:LRA=11`, '-ar', '48000', '-c:a', 'aac', '-b:a', '160k', saudio]);
       const sentences = splitSentences(text);
       const qs = await queriesForSentences(this.ctx, sentences, bp.scenes.find((x) => x.n === scene.n)?.stockQuery || 'documentary', videoId, title);
       const shortShots = layoutShots(sentences.map((t2, i) => ({ text: t2, query: qs[i]! })), d);

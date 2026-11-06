@@ -53,3 +53,16 @@ test('footage: unrelated clips are rejected, relevant ones preferred', async () 
   assert.equal(pickRelevant([crystals], 'small garage workshop', new Set()), undefined, 'never a random unrelated clip');
   assert.deepEqual(queryParts('old garage workshop || garage || documentary'), ['old garage workshop', 'garage', 'documentary']);
 });
+
+test('sound: voice + looped music + SFX mix always finishes (sidechain/loudnorm EOF regression)', { timeout: 60_000 }, async () => {
+  const { mixSoundtrack } = await import('../../src/media/sound.ts');
+  const d = mkdtempSync(join(tmpdir(), 'mix-'));
+  try {
+    const voice = join(d, 'v.wav'); const music = join(d, 'm.mp3');
+    await ffmpeg(['-f', 'lavfi', '-i', 'sine=f=220:d=6', voice]);
+    await ffmpeg(['-f', 'lavfi', '-i', 'sine=f=440:d=2', music]); // shorter than the video → must loop
+    const r = await mixSoundtrack({ voice, durationSec: 6, cues: [{ at: 0, kind: 'impact' }, { at: 3, kind: 'whoosh' }], musicPath: music, dir: d, out: join(d, 'o.m4a') });
+    assert.equal(r.musicUsed, true);
+    assert.ok(Math.abs((await probeDuration(join(d, 'o.m4a'))) - 6) < 0.3);
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
