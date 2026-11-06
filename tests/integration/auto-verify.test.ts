@@ -43,7 +43,7 @@ test('auto-verify: verbatim-quoted facts pass; single-source statistic stays unv
   (ctx.providers as { web: WebProvider }).web = fakeWeb;
   await steps.scriptwriter(ctx, { videoId: v.id });
   await steps['fact-checker'](ctx, { videoId: v.id });
-  const out = (await steps['auto-verifier'](ctx, { videoId: v.id, maxRounds: 1 })) as AutoVerifyOutput;
+  const out = (await steps['auto-verifier'](ctx, { videoId: v.id, maxRounds: 1, cutUnproven: false })) as AutoVerifyOutput;
 
   const byText = (t: string) => out.claims.find((c) => c.claim.includes(t))!;
   assert.equal(byText('1865').status, 'verified');
@@ -70,5 +70,27 @@ test('auto-verify: a judge quote that is NOT in the page is ignored (no hallucin
   await steps['fact-checker'](ctx, { videoId: v.id });
   const out = (await steps['auto-verifier'](ctx, { videoId: v.id, maxRounds: 0 })) as AutoVerifyOutput;
   assert.ok(out.claims.filter((c) => c.type !== 'opinion').every((c) => c.status === 'unverified'));
+  ctx.close();
+});
+
+test('auto-verify: after the last round the unproven sentence is cut, so only proven facts remain', async () => {
+  const llm = new MockLLM(fixtures({ n: 0 }));
+  const origGen = llm.generateJson.bind(llm);
+  llm.generateJson = (async (req: Parameters<typeof origGen>[0]) => {
+    if (req.task !== 'factcheck.judge') return origGen(req);
+    const { claim, sourceText } = JSON.parse(req.prompt) as { claim: string; sourceText: string };
+    const year = claim.match(/\d{4}/)?.[0];
+    const line = year ? sourceText.split('\n').find((l) => l.includes(year)) ?? '' : '';
+    return { data: req.schema.parse({ verdict: line ? 'supported' : 'not_found', quote: line, correction: null }), usage: { inputTokens: 1, outputTokens: 1, model: 'judge' } };
+  }) as typeof llm.generateJson;
+  const ctx = testContext({ llm });
+  (ctx.providers as { web: WebProvider }).web = fakeWeb;
+  const v = ctx.repos.videos.create({ title: 'نوكيا', format: 'long' });
+  await steps.scriptwriter(ctx, { videoId: v.id });
+  await steps['fact-checker'](ctx, { videoId: v.id });
+  const out = (await steps['auto-verifier'](ctx, { videoId: v.id, maxRounds: 0 })) as AutoVerifyOutput;
+  assert.ok(out.claims.every((c) => c.status === 'verified' || c.status === 'not_applicable'), JSON.stringify(out.claims.map((c) => [c.claim, c.status])));
+  assert.ok(out.removedClaims.length >= 1);
+  assert.equal(out.overall, 'verified');
   ctx.close();
 });

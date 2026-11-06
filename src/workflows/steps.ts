@@ -20,15 +20,16 @@ import { PublisherAgent } from '../publishing/publisher.ts';
 import { AnalyticsAgent } from '../analytics/analytics.ts';
 import { OptimizationAgent } from '../analytics/optimization.ts';
 import { AutoVerifierAgent } from '../agents/auto-verifier.ts';
+import { CreativeBriefAgent } from '../agents/creative-brief.ts';
 import { RendererAgent, type RenderOutput, type RenderSize } from '../media/renderer.ts';
 
 export const AGENT_NAMES = [
-  'niche-selector', 'trend-research', 'content-strategy', 'scriptwriter', 'fact-checker', 'auto-verifier',
+  'niche-selector', 'trend-research', 'content-strategy', 'creative-brief', 'scriptwriter', 'fact-checker', 'auto-verifier',
   'production-planner', 'thumbnail', 'seo', 'renderer', 'compliance', 'quality', 'publisher', 'analytics', 'optimization',
 ] as const;
 
 /** Production chain for one video, in dependency order. */
-export const PRODUCTION_CHAIN = ['scriptwriter', 'fact-checker', 'production-planner', 'thumbnail', 'seo', 'compliance', 'quality'] as const;
+export const PRODUCTION_CHAIN = ['creative-brief', 'scriptwriter', 'fact-checker', 'production-planner', 'thumbnail', 'seo', 'compliance', 'quality'] as const;
 
 function need<T>(ctx: AgentContext, videoId: string, kind: string): T {
   const a = ctx.repos.artifacts.latest<T>(videoId, kind);
@@ -43,6 +44,11 @@ export const steps = {
     const ideas = ctx.repos.artifacts.latest<{ ideas: never[] }>(null, 'topic_ideas')?.data.ideas;
     return new ContentStrategyAgent(ctx).run({ ...p, ideas });
   },
+  'creative-brief': (ctx: AgentContext, p: { videoId: string }) => {
+    const v = ctx.repos.videos.get(p.videoId);
+    if (!v) throw new StudioError('NOT_FOUND', `Video ${p.videoId} not found`);
+    return new CreativeBriefAgent(ctx).run({ videoId: v.id, title: v.title, format: v.format });
+  },
   scriptwriter: (ctx: AgentContext, p: { videoId: string }) => {
     const v = ctx.repos.videos.get(p.videoId);
     if (!v) throw new StudioError('NOT_FOUND', `Video ${p.videoId} not found`);
@@ -50,7 +56,7 @@ export const steps = {
   },
   'fact-checker': (ctx: AgentContext, p: { videoId: string }) =>
     new FactCheckerAgent(ctx).run({ videoId: p.videoId, script: need<Script>(ctx, p.videoId, 'script') }),
-  'auto-verifier': (ctx: AgentContext, p: { videoId: string; maxRounds?: number }) => new AutoVerifierAgent(ctx).run(p),
+  'auto-verifier': (ctx: AgentContext, p: { videoId: string; maxRounds?: number; cutUnproven?: boolean }) => new AutoVerifierAgent(ctx).run(p),
   'production-planner': (ctx: AgentContext, p: { videoId: string }) =>
     new ProductionPlannerAgent(ctx).run({ videoId: p.videoId, script: need<Script>(ctx, p.videoId, 'script') }),
   thumbnail: (ctx: AgentContext, p: { videoId: string }) => {

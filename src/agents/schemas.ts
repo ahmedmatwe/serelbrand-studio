@@ -19,6 +19,9 @@ export const TopicIdeaLLM = z.object({
   emotionalTrigger: z.string(),
   contentGap: z.string(),
   explanation: z.string(),
+  virality: level.default('medium'),
+  easeOfProduction: level.default('medium'),
+  seriesPotential: level.default('medium'),
 });
 export const TrendResearchLLM = z.object({ ideas: z.array(TopicIdeaLLM).min(3) });
 export type TopicIdea = z.infer<typeof TopicIdeaLLM> & { opportunityScore: number; scoreBreakdown: Record<string, number> };
@@ -47,6 +50,31 @@ export interface CalendarEntry {
   linkedLongTitle?: string;
 }
 
+// ---------- Creative brief (strategy + titles) ----------
+export const TitleOption = z.object({
+  title: z.string().min(5),
+  type: z.enum(['curiosity', 'shock', 'educational', 'emotional', 'number', 'seo']),
+  psychology: z.string(),
+  strength: z.number().min(1).max(10),
+  bestFor: z.enum(['search', 'suggested', 'both']),
+});
+export const BriefLLM = z.object({
+  centralIdea: z.string(),
+  promise: z.string(),
+  bigQuestion: z.string(),
+  emotions: z.array(z.string()).min(1),
+  targetViewer: z.string(),
+  clickReason: z.string(),
+  stayReason: z.string(),
+  twist: z.string(),
+  cta: z.string(),
+  uniqueAngle: z.string(),
+  titles: z.array(TitleOption).min(12),
+  best3: z.array(z.string()).min(3).max(3),
+  claimsToVerify: z.array(z.object({ claim: z.string(), kind: z.enum(['fact', 'number', 'quote', 'story', 'conclusion']), sourceType: z.string() })).default([]),
+});
+export type Brief = z.infer<typeof BriefLLM>;
+
 // ---------- Script ----------
 export const ScriptLLM = z.object({
   hooks: z.array(z.string().min(10)).min(3),
@@ -60,6 +88,17 @@ export const ScriptLLM = z.object({
     onScreenText: z.string().default(''),
     curiosityGap: z.string().optional(),
     transition: z.string(),
+    /** Chapter this scene belongs to (YouTube chapters + package report). */
+    chapter: z.string().default(''),
+    /** Story beat: drives pacing, SFX hits and music. */
+    beat: z.enum(['hook', 'setup', 'escalation', 'reveal', 'payoff', 'cta']).default('setup'),
+    /** Voice direction for this scene (sent to the TTS as a style prompt). */
+    delivery: z.object({
+      tone: z.string().default('هادئ وواثق'),
+      pace: z.enum(['slow', 'medium', 'fast']).default('medium'),
+      emphasis: z.array(z.string()).default([]),
+      pauseAfter: z.boolean().default(false),
+    }).default({ tone: 'هادئ وواثق', pace: 'medium', emphasis: [], pauseAfter: false }),
   })).min(3),
   cta: z.string(),
   ending: z.string(),
@@ -136,6 +175,12 @@ export const ThumbnailLLM = z.object({
     emotion: z.string(),
     ctrRationale: z.string(),
     accuracyNote: z.string(),
+    expression: z.string().default(''),
+    curiosityElement: z.string().default(''),
+    mobileReadability: z.string().default(''),
+    avoid: z.string().default(''),
+    /** Prompt for an AI image tool — leaves empty space for the text, no text in the image. */
+    aiPrompt: z.string().default(''),
   })).min(3).max(5),
 });
 export type ThumbnailConcept = z.infer<typeof ThumbnailLLM>['concepts'][number] & { textWordCount: number; valid: boolean; problems: string[] };
@@ -152,5 +197,13 @@ export const SeoLLM = z.object({
   endScreen: z.string(),
   playlist: z.string(),
   followUps: z.array(z.string()),
+  firstTwoLines: z.string().default(''),
+  primaryKeywords: z.array(z.string()).default([]),
+  secondaryKeywords: z.array(z.string()).default([]),
+  engagementPrompts: z.array(z.string()).default([]),
+  shortForm: z.object({ shorts: z.string(), tiktok: z.string(), reels: z.string() }).default({ shorts: '', tiktok: '', reels: '' }),
+  communityPosts: z.array(z.string()).default([]),
+  promotion48h: z.array(z.string()).default([]),
+  abTest: z.object({ titles: z.array(z.string()), thumbnails: z.array(z.string()) }).default({ titles: [], thumbnails: [] }),
 });
 export type SeoPackage = z.infer<typeof SeoLLM> & { chapters: { startSec: number; label: string }[]; fullDescription: string };

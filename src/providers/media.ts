@@ -42,7 +42,9 @@ export class MockTrends implements TrendsProvider {
 
 // ---------- TTS ----------
 export interface TTSResult { audioPath: string; durationSec: number; characters: number; voice: string }
-export interface TTSProvider { readonly name: string; synthesize(text: string, outPath: string): Promise<TTSResult> }
+/** Per-line voice direction (tone, pace, emphasis) — honoured by steerable voices such as Gemini TTS. */
+export interface VoiceDirection { tone?: string; pace?: 'slow' | 'medium' | 'fast'; emphasis?: string[]; pauseAfter?: boolean }
+export interface TTSProvider { readonly name: string; synthesize(text: string, outPath: string, direction?: VoiceDirection): Promise<TTSResult> }
 
 export class MockTTS implements TTSProvider {
   readonly name = 'mock-tts';
@@ -118,6 +120,8 @@ export interface UploadRequest {
   defaultLanguage: string;
   captionsPath?: string;
   captionsLanguage?: string;
+  /** Extra caption tracks (e.g. English translation). */
+  extraCaptions?: { path: string; language: string; name: string }[];
 }
 export interface UploadResult { youtubeVideoId: string; visibility: Visibility; publishAt?: string; warnings?: string[] }
 

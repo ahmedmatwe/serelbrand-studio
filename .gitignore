@@ -9,3 +9,5 @@ reports/daily/
 reports/generated/
 .claude/
 *.command
+reports/packages/
+.DS_Store

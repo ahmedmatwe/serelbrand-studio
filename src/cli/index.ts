@@ -52,6 +52,7 @@ Workflows (Orchestrator)
   publish <videoId>                           Upload an approved video (mock in dry-run)
   analytics <videoId> --hours <n>             Capture checkpoints due by hour n, then diagnose
   report <videoId>                            Write reports/generated/<videoId>.html
+  package <videoId>                           Write the 17-part production package (reports/packages/)
 
 Autopilot
   autopilot [--preview]                       One cycle: upload approved → analytics → produce today's video → report
@@ -197,6 +198,12 @@ async function main() {
         out(`Checkpoint ${o.checkpointHours}h · confidence ${Math.round(o.confidence * 100)}% · sample ${o.sampleSize}`);
         for (const d of o.diagnoses) out(`- ${d.finding}\n    ${d.recommendations.map((x) => `${x.variable}: ${x.action}`).join('\n    ')}`);
         for (const c of o.caveats) out(`  ⚠ ${c}`);
+        break;
+      }
+      case 'package': {
+        if (!a1) throw new StudioError('USAGE', 'Usage: package <videoId>');
+        const { writePackage } = await import('../reports/package.ts');
+        out(`Production package: ${writePackage(ctx, a1)}`);
         break;
       }
       case 'report': {

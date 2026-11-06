@@ -15,7 +15,7 @@ import { spokenText } from './scriptwriter.ts';
 import { countWords } from './base.ts';
 import type { WebPage } from '../providers/web/web.ts';
 
-export interface AutoVerifyInput { videoId: string; maxRounds?: number }
+export interface AutoVerifyInput { videoId: string; maxRounds?: number; /** Delete sentences of claims still unproven after the last round (default true). */ cutUnproven?: boolean }
 export interface AutoVerifyOutput extends FactCheckReport { rounds: number; removedClaims: string[] }
 
 const toLatinDigits = (s: string) => s.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
@@ -70,8 +70,8 @@ export class AutoVerifierAgent extends Agent<AutoVerifyInput, AutoVerifyOutput> 
     const pages: WebPage[] = [];
     if (c.sourceUrl?.startsWith('https://')) pages.push(await web.fetchText(c.sourceUrl).catch(() => ({ url: c.sourceUrl!, text: '' })));
     const q = c.searchQuery || c.claim;
-    pages.push(...(await web.wikipedia(q, 'en', 2).catch(() => [])));
-    pages.push(...(await web.wikipedia(c.claim.slice(0, 120), 'ar', 1).catch(() => [])));
+    pages.push(...(await web.wikipedia(q, 'en', 3).catch(() => [])));
+    pages.push(...(await web.wikipedia(c.claim.slice(0, 120), 'ar', 2).catch(() => [])));
     const keywords = [...q.split(/\s+/), ...claimNumbers(c.claim)];
     const out: NonNullable<CheckedClaim['evidence']> = [];
     const seen = new Set<string>();
@@ -116,7 +116,7 @@ export class AutoVerifierAgent extends Agent<AutoVerifyInput, AutoVerifyOutput> 
   }
 
   protected async execute(input: AutoVerifyInput): Promise<AutoVerifyOutput> {
-    const maxRounds = input.maxRounds ?? 2;
+    const maxRounds = input.maxRounds ?? 3;
     const removed: string[] = [];
     let report = this.ctx.repos.artifacts.latest<FactCheckReport>(input.videoId, 'fact_check')!.data;
     let claims: CheckedClaim[] = [];
@@ -144,6 +144,53 @@ export class AutoVerifierAgent extends Agent<AutoVerifyInput, AutoVerifyOutput> 
       removed.push(...bad.map((c) => c.claim));
       report = await new FactCheckerAgent(this.ctx).run({ videoId: input.videoId, script: this.ctx.repos.artifacts.latest<Script>(input.videoId, 'script')!.data });
     }
+    // Last resort: cut the exact sentence that carries each claim still unproven (if the cut is small).
+    const bad = claims.filter((c) => c.status === 'unverified' || c.status === 'needs_review');
+    if (bad.length && input.cutUnproven !== false) {
+      const script = this.ctx.repos.artifacts.latest<Script>(input.videoId, 'script')!.data;
+      const cut = cutClaimSentences(script, bad);
+      const before = countWords(spokenText(script));
+      if (cut.removed.length === bad.length && cut.removedWords <= before * 0.15) {
+        const wpm = this.ctx.config.thresholds.script.arabicWordsPerMinute;
+        const wordCount = countWords(spokenText(cut.script));
+        this.ctx.repos.artifacts.save({ videoId: input.videoId, kind: 'script', agent: this.name, data: { ...cut.script, wordCount, estimatedDurationSec: Math.round((wordCount / wpm) * 60) } });
+        removed.push(...bad.map((c) => c.claim));
+        claims = claims.filter((c) => !bad.includes(c));
+      }
+    }
     return { claims, ...summarize(claims), rounds: round, removedClaims: removed };
   }
+}
+
+const norm = (t: string) => t.replace(/[\p{M}\u0640]/gu, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
+const tokens = (t: string) => new Set(norm(t).split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1));
+
+/** Removes, per claim, the one sentence (in its scene, else anywhere) whose words best cover the claim. */
+export function cutClaimSentences(script: Script, claims: Pick<CheckedClaim, 'claim' | 'sceneN'>[]) {
+  const scenes = script.scenes.map((s) => ({ ...s, sentences: s.voiceover.split(/(?<=[.!؟?…])\s+/u) }));
+  const removed: string[] = [];
+  let removedWords = 0;
+  for (const c of claims) {
+    const ct = tokens(c.claim);
+    const nums = claimNumbers(c.claim);
+    let best: { si: number; i: number; score: number } | undefined;
+    scenes.forEach((s, si) => s.sentences.forEach((sent, i) => {
+      if (!sent) return;
+      const st = tokens(sent);
+      let hit = 0;
+      for (const w of ct) if (st.has(w)) hit++;
+      let score = ct.size ? hit / ct.size : 0;
+      if (nums.length && nums.every((n) => sent.includes(n))) score += 0.3;
+      if (c.sceneN && s.n === c.sceneN) score += 0.1;
+      if (!best || score > best.score) best = { si, i, score };
+    }));
+    if (!best || best.score < 0.5) continue;
+    const sent = scenes[best.si]!.sentences[best.i]!;
+    if (scenes[best.si]!.sentences.filter(Boolean).length <= 1) continue; // never empty a scene
+    removedWords += countWords(sent);
+    scenes[best.si]!.sentences[best.i] = '';
+    removed.push(c.claim);
+  }
+  const out: Script = { ...script, scenes: scenes.map(({ sentences, ...s }) => ({ ...s, voiceover: sentences.filter(Boolean).join(' ') })) };
+  return { script: out, removed, removedWords };
 }

@@ -34,7 +34,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     const { env } = this.ctx.config;
     if ((visibility === 'public' || scheduled) && !env.ALLOW_PUBLIC_PUBLISHING) throw new PublishBlockedError('Public publishing is disabled (ALLOW_PUBLIC_PUBLISHING=false)');
 
-    const render = this.ctx.repos.artifacts.latest<{ videoPath: string; thumbnailPath?: string; captionsPath?: string; shorts?: { path: string; title: string }[]; packOnly?: boolean; assets?: { source: string; attribution?: string; pageUrl?: string }[] }>(videoId, 'render');
+    const render = this.ctx.repos.artifacts.latest<{ videoPath: string; thumbnailPath?: string; captionsPath?: string; captionsEnPath?: string; shorts?: { path: string; title: string }[]; packOnly?: boolean; assets?: { source: string; attribution?: string; pageUrl?: string }[] }>(videoId, 'render');
     if (!render && !env.DRY_RUN) throw new PublishBlockedError('No rendered video file yet (rendering arrives in phase 4)');
 
     const seo = this.ctx.repos.artifacts.latest<SeoPackage>(videoId, 'seo_package')!.data;
@@ -52,6 +52,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
           videoPath: pack ? render!.data.shorts![0]!.path : render?.data.videoPath ?? `mock://render/${videoId}.mp4`,
           thumbnailPath: pack ? undefined : render?.data.thumbnailPath || undefined,
           captionsPath: pack ? undefined : render?.data.captionsPath || undefined,
+          extraCaptions: !pack && render?.data.captionsEnPath ? [{ path: render.data.captionsEnPath, language: 'en', name: 'English' }] : undefined,
           title: pack ? shortTitle(render!.data.shorts![0]!.title) : seo.primaryTitle,
           description: pack ? `${description}\n#Shorts` : description,
           tags: seo.tags,

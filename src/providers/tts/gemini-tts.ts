@@ -2,7 +2,16 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ProviderError } from '../../core/errors.ts';
 import { RateLimiter, withRetry } from '../../core/retry.ts';
-import type { TTSProvider, TTSResult } from '../media.ts';
+import type { TTSProvider, TTSResult, VoiceDirection } from '../media.ts';
+
+const PACE_AR = { slow: 'ببطء ووقفات واضحة', medium: 'بسرعة متوسطة طبيعية', fast: 'بسرعة وحماس' } as const;
+
+/** Turns a scene's direction into a natural-language performance note for the voice model. */
+export function directionNote(d?: VoiceDirection): string {
+  if (!d) return '';
+  const parts = [d.tone ? `النبرة: ${d.tone}` : '', d.pace ? `اقرأ ${PACE_AR[d.pace]}` : '', d.emphasis?.length ? `شدّد على: ${d.emphasis.join('، ')}` : '', d.pauseAfter ? 'اسكت لحظة بعد آخر جملة' : ''].filter(Boolean);
+  return parts.length ? ` (${parts.join('. ')})` : '';
+}
 
 const SAMPLE_RATE = 24_000; // Gemini TTS returns 16-bit mono PCM at 24 kHz
 
@@ -37,13 +46,13 @@ export class GeminiTTS implements TTSProvider {
     this.o = { ...o, fetchImpl: o.fetchImpl ?? fetch, limiter: o.limiter ?? new RateLimiter(2, 6 / 60) };
   }
 
-  private async once(text: string): Promise<Buffer> {
+  private async once(text: string, direction?: VoiceDirection): Promise<Buffer> {
     await this.o.limiter.take();
     const res = await this.o.fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.o.model)}:generateContent`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': this.o.apiKey },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: `${this.o.style}\n\n${text}` }] }],
+        contents: [{ parts: [{ text: `${this.o.style}${directionNote(direction)}\n\n${text}` }] }],
         generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: this.o.voice } } } },
       }),
       signal: AbortSignal.timeout(300_000),
@@ -55,8 +64,8 @@ export class GeminiTTS implements TTSProvider {
     return Buffer.from(b64, 'base64');
   }
 
-  async synthesize(text: string, outPath: string): Promise<TTSResult> {
-    const pcm = await withRetry(() => this.once(text), { attempts: 3, baseDelayMs: 20_000, sleep: this.o.sleep });
+  async synthesize(text: string, outPath: string, direction?: VoiceDirection): Promise<TTSResult> {
+    const pcm = await withRetry(() => this.once(text, direction), { attempts: 3, baseDelayMs: 20_000, sleep: this.o.sleep });
     // Separate file name so the renderer's own "<scene>.wav" conversion never overwrites the source.
     const path = outPath.replace(/\.[^./]+$/, '') + '.gemini.wav';
     mkdirSync(dirname(path), { recursive: true });
@@ -78,7 +87,7 @@ export class FallbackTTS implements TTSProvider {
     this.fallback = fallback;
     this.name = primary.name;
   }
-  synthesize(text: string, outPath: string) {
-    return this.primary.synthesize(text, outPath);
+  synthesize(text: string, outPath: string, direction?: VoiceDirection) {
+    return this.primary.synthesize(text, outPath, direction);
   }
 }

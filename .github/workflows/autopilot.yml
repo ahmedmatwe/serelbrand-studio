@@ -60,6 +60,7 @@ jobs:
             git fetch -q origin state
             git show origin/state:studio.db > data/studio.db
             git archive origin/state reports | tar -x 2>/dev/null || true
+            mkdir -p music && git archive origin/state music 2>/dev/null | tar -x 2>/dev/null || true
             echo "state restored ($(du -h data/studio.db | cut -f1))"
           else
             echo "no state yet — starting fresh"
@@ -81,7 +82,7 @@ jobs:
             git worktree add -q --orphan -b state /tmp/state && cd /tmp/state
           fi
           cp "$GITHUB_WORKSPACE/data/studio.db" studio.db
-          mkdir -p reports && cp -r "$GITHUB_WORKSPACE/reports/daily" reports/ 2>/dev/null || true
+          mkdir -p reports && cp -r "$GITHUB_WORKSPACE/reports/daily" "$GITHUB_WORKSPACE/reports/packages" reports/ 2>/dev/null || true
           git add -A && (git diff --cached --quiet || git commit -qm "state: $(date -u +%FT%H:%MZ)")
           git push -q origin state
 

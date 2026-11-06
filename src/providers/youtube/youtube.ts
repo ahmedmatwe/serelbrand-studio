@@ -118,17 +118,21 @@ export class RealYouTube implements YouTubeProvider {
       });
       if (!r.ok) warnings.push(`Thumbnail not set (HTTP ${r.status}) — custom thumbnails need a phone-verified channel (youtube.com/verify)`);
     }
-    if (req.captionsPath) {
-      const boundary = `yas${Date.now()}`;
+    const tracks = [
+      ...(req.captionsPath ? [{ path: req.captionsPath, language: req.captionsLanguage ?? req.defaultLanguage, name: 'العربية' }] : []),
+      ...(req.extraCaptions ?? []),
+    ];
+    for (const tr of tracks) {
+      const boundary = `yas${Date.now()}${tr.language}`;
       const body = Buffer.concat([
-        Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ snippet: { videoId, language: req.captionsLanguage ?? req.defaultLanguage, name: 'العربية', isDraft: false } })}\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`),
-        readFileSync(req.captionsPath),
+        Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ snippet: { videoId, language: tr.language, name: tr.name, isDraft: false } })}\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`),
+        readFileSync(tr.path),
         Buffer.from(`\r\n--${boundary}--`),
       ]);
       const r = await this.o.fetchImpl(`${API}/upload/youtube/v3/captions?part=snippet&uploadType=multipart`, {
         method: 'POST', headers: await this.auth({ 'content-type': `multipart/related; boundary=${boundary}` }), body,
       });
-      if (!r.ok) warnings.push(`Captions not uploaded (HTTP ${r.status})`);
+      if (!r.ok) warnings.push(`Captions (${tr.language}) not uploaded (HTTP ${r.status})`);
     }
     return { youtubeVideoId: videoId, visibility: req.visibility, publishAt: req.publishAt, warnings };
   }

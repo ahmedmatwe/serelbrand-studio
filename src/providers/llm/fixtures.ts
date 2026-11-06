@@ -136,6 +136,29 @@ export const MOCK_FIXTURES: Record<string, MockFixture> = {
     ],
   }),
 
+  'brief.create': () => ({
+    centralIdea: 'نوكيا كانت ملكة الموبايلات وخسرت كل حاجة لأنها اتأخرت في فهم السوق الجديد.',
+    promise: 'هتفهم القرارات اللي خسّرت نوكيا السوق، والدرس اللي ينفعك في شغلك.',
+    bigQuestion: 'إزاي شركة كانت في كل جيب تقريباً خسرت كل حاجة في سنين قليلة؟',
+    emotions: ['الحنين', 'الدهشة'],
+    targetViewer: 'شباب 18–34 في مصر والخليج مهتمين بالبيزنس والتقنية',
+    clickReason: 'الحنين لنوكيا والفضول لمعرفة سبب السقوط',
+    stayReason: 'القصة متصاعدة وكل جزء بيفتح سؤال جديد',
+    twist: 'الشركة مكانتش ضعيفة تقنياً، المشكلة كانت في توقيت القرار',
+    cta: 'قولّي في الكومنتات: أنهي شركة نحكي قصتها المرة الجاية؟',
+    uniqueAngle: 'تحليل القرارات نفسها بدل سرد التاريخ',
+    titles: [
+      ['قصة نوكيا: إزاي خسرت أكبر شركة موبايلات في العالم؟', 'curiosity'], ['نوكيا: من القمة للبيع في سنين قليلة', 'curiosity'],
+      ['الغلطة اللي خسّرت نوكيا السوق', 'shock'], ['ليه نوكيا مقدرتش تنافس الآيفون؟', 'shock'],
+      ['درس نوكيا: النجاح ممكن يعمي الشركات', 'educational'], ['إزاي بتسقط الشركات العملاقة؟ نوكيا مثال', 'educational'],
+      ['الموبايل اللي كان في إيد كل الناس… راح فين؟', 'emotional'], ['نوكيا: حكاية شركة كلنا حبيناها', 'emotional'],
+      ['3 قرارات خسّرت نوكيا كل حاجة', 'number'], ['من 1865 لـ 2013: رحلة نوكيا', 'number'],
+      ['سقوط نوكيا', 'seo'], ['قصة شركة نوكيا', 'seo'],
+    ].map(([title, type], i) => ({ title, type, psychology: 'الفضول والحنين', strength: 9 - (i % 4), bestFor: i % 3 === 0 ? 'both' : i % 3 === 1 ? 'suggested' : 'search' })),
+    best3: ['قصة نوكيا: إزاي خسرت أكبر شركة موبايلات في العالم؟', 'الغلطة اللي خسّرت نوكيا السوق', '3 قرارات خسّرت نوكيا كل حاجة'],
+    claimsToVerify: [{ claim: 'نوكيا تأسست 1865', kind: 'fact', sourceType: 'Wikipedia / Britannica' }],
+  }),
+
   'script.write': () => ({
     hooks: [
       'واحد من كل ثلاثة موبايلات في العالم كان نوكيا… فين راحت؟',
@@ -161,6 +184,7 @@ export const MOCK_FIXTURES: Record<string, MockFixture> = {
   'script.expand': (vars) => vars.previous,
   // Offline: the fixer cannot invent text, so it returns the script unchanged.
   'script.fixclaims': (vars) => vars.previous,
+  'captions.translate': (vars) => ({ lines: ((vars.lines as string[]) ?? []).map((_, i) => `English caption ${i + 1}`) }),
   // Offline shot planner: generic but varied queries, one per sentence.
   'production.shots': (vars) => ({ queries: ((vars.sentences as string[]) ?? []).map((_, j) => ({ i: (vars.offset as number) + j, query: ['city skyline', 'office desk', 'old phones', 'warehouse boxes', 'people walking'][j % 5]! })) }),
   // Offline judge: never supports anything (no real evidence in dry-run).

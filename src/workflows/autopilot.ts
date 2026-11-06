@@ -19,6 +19,8 @@ import { approve } from '../publishing/approval.ts';
 import { learnPublishSlots } from '../analytics/optimization.ts';
 import type { PrePublicationReport } from '../reports/prepublication.ts';
 import type { RenderOutput } from '../media/renderer.ts';
+import { qcBlockers, qualityChecklist } from '../reports/qc.ts';
+import { writePackage } from '../reports/package.ts';
 import { steps } from './steps.ts';
 
 export interface CycleOptions {
@@ -173,6 +175,7 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
         const r = await produceVideo(ctx, { title, videoId: vid.id, format, niche, render: true, renderSize: o.renderSize ?? 'full' });
         if (!r.completed) rep.errors.push(`produce "${plan.title}": ${r.steps.find((s) => s.status !== 'succeeded')?.error}`);
         const fc = ctx.repos.artifacts.latest<FactCheckReport>(r.videoId, 'fact_check')?.data;
+        try { writePackage(ctx, r.videoId); } catch (err) { rep.errors.push(`package: ${(err as Error).message}`); }
         rep.produced = {
           videoId: r.videoId,
           title: ctx.repos.videos.get(r.videoId)?.title ?? plan.title,
@@ -182,7 +185,9 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
         // Full automation (opt-in): approve only when every gate passes, then upload right away.
         if (ctx.config.env.AUTO_APPROVE && r.report) {
           const render = ctx.repos.artifacts.latest<RenderOutput>(r.videoId, 'render')?.data;
-          const blockers = r.approval ? autoApproveBlockers(r.report, render, ctx.config.thresholds.quality.minScoreToPublish) : ['no approval request (blocked)', ...r.report.hardBlockers];
+          const qc = qualityChecklist(ctx, r.videoId);
+          ctx.repos.artifacts.save({ videoId: r.videoId, kind: 'qc_checklist', agent: 'autopilot', data: qc });
+          const blockers = r.approval ? [...autoApproveBlockers(r.report, render, ctx.config.thresholds.quality.minScoreToPublish), ...qcBlockers(qc)] : ['no approval request (blocked)', ...r.report.hardBlockers];
           if (!blockers.length && r.approval) {
             const publishAt = ctx.config.env.ALLOW_PUBLIC_PUBLISHING ? r.report.proposedPublishAt : undefined;
             approve(ctx, r.approval.id, { by: 'autopilot', visibility: 'private', publishAt, acceptRisks: true, note: 'Auto-approved: every quality, compliance and fact gate passed' });

@@ -10,6 +10,8 @@ import { buildAss, chunkSubtitles, type AssEvent, type AssStyle } from './ass.ts
 import { ffmpeg, filterPath, probeDuration, volumeStats, type VolumeStats } from './ffmpeg.ts';
 import { fetchShotVisuals, layoutShots, queriesForSentences, splitSentences, type Shot } from './shots.ts';
 import { renderThumbnail } from './thumbnail.ts';
+import { cuesFor, mixSoundtrack, pickMusic } from './sound.ts';
+import { z } from 'zod';
 
 export type RenderSize = 'full' | 'preview';
 export interface RenderInput { videoId: string; size?: RenderSize; shorts?: boolean; /** Shorts to cut per long video (default 3). */ shortsPerLong?: number }
@@ -25,6 +27,7 @@ export interface RenderOutput {
   videoPath: string;
   thumbnailPath: string;
   captionsPath: string;
+  captionsEnPath?: string;
   durationSec: number;
   size: { width: number; height: number };
   scenes: (Omit<TimedScene, 'voiceover' | 'onScreenText' | 'visual'> & { visual: string })[];
@@ -198,6 +201,27 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     return subs;
   }
 
+  private async translateCaptions(videoId: string, subs: { start: number; end: number; text: string }[], out: string, notes: string[]): Promise<string | undefined> {
+    if (!subs.length) return undefined;
+    const lines: string[] = [];
+    for (let i = 0; i < subs.length; i += 80) {
+      const batch = subs.slice(i, i + 80).map((x) => x.text);
+      const r = await this.ctx.providers.llm.generateJson({
+        task: 'captions.translate',
+        tier: 'light',
+        system: 'Translate each Arabic caption line into short, natural English subtitles. Keep the same number of lines and order. Do not add or remove information. Output JSON only.',
+        prompt: JSON.stringify({ lines: batch }),
+        schema: z.object({ lines: z.array(z.string()) }),
+        vars: { lines: batch },
+        videoId,
+      }).catch(() => undefined);
+      if (!r || r.data.lines.length !== batch.length) { notes.push('English captions skipped (translation mismatch).'); return undefined; }
+      lines.push(...r.data.lines);
+    }
+    writeFileSync(out, toSrt(subs.map((x, i) => ({ ...x, text: lines[i]! }))), 'utf8');
+    return out;
+  }
+
   /** One stock clip per sentence for every scene (queries from the LLM, clips never reused when avoidable). */
   private async planShots(videoId: string, scenes: TimedScene[], bp: Blueprint, size: RenderSize, notes: string[], used: Set<string>) {
     const perScene = scenes.map((s) => splitSentences(s.voiceover));
@@ -303,11 +327,13 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       const out: TimedScene[] = [];
       let start = 0;
       for (const s of bp.scenes) {
-        const r = await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}.aiff`));
+        const sc = script.scenes.find((x) => x.n === s.n);
+        const r = await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}.aiff`), sc?.delivery);
         voiceName = r.voice;
         const wav = resolve(dir, `scene-${s.n}.wav`);
         if (existsSync(r.audioPath)) {
-          await ffmpeg(['-i', r.audioPath, '-af', 'apad=pad_dur=0.45', '-ar', '48000', '-ac', '1', wav]);
+          // Dramatic silence after big lines; a normal breath otherwise.
+          await ffmpeg(['-i', r.audioPath, '-af', `apad=pad_dur=${sc?.delivery?.pauseAfter ? 1.1 : 0.45}`, '-ar', '48000', '-ac', '1', wav]);
         } else {
           // Mock TTS produces no file: use silence of the estimated length so the pipeline is still exercised.
           await ffmpeg(['-f', 'lavfi', '-i', `anullsrc=r=48000:cl=mono`, '-t', String(Math.max(1, r.durationSec) + 0.45), wav]);
@@ -347,9 +373,17 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     // 3) Main 16:9 video.
     const main = dims(size, false);
     const videoPath = resolve(dir, 'video.mp4');
-    const subs = await this.renderTimeline(timed, voice, videoPath, { ...main, palette, preset, assPath: resolve(dir, 'video.ass') });
+    // Sound design: whooshes on scene changes, impacts on reveals, optional ducked music bed from music/.
+    const soundtrack = resolve(dir, 'soundtrack.m4a');
+    const musicPath = pickMusic(resolve(this.ctx.config.rootDir, 'music'), bp.music.mood + ' ' + (script.scenes[0]?.delivery?.tone ?? ''), script.mainTitle.length);
+    const beats = timed.map((s) => ({ start: s.start, beat: script.scenes.find((x) => x.n === s.n)?.beat }));
+    const mix = await mixSoundtrack({ voice, durationSec: t, cues: cuesFor(beats), musicPath, dir, out: soundtrack });
+    notes.push(mix.musicUsed ? `Music bed: ${musicPath!.split('/').pop()} (ducked under the voice).` : 'No music bed (add licensed tracks to music/). SFX added.');
+    const subs = await this.renderTimeline(timed, soundtrack, videoPath, { ...main, palette, preset, assPath: resolve(dir, 'video.ass') });
     const captionsPath = resolve(dir, 'captions.srt');
     writeFileSync(captionsPath, toSrt(subs), 'utf8');
+    // Second caption track in English (same timings) so non-Arabic viewers and search can use it.
+    const captionsEnPath = await this.translateCaptions(videoId, subs, resolve(dir, 'captions.en.srt'), notes);
 
     // 4) Thumbnail PNG (1280x720): real photo + big outlined text + attention ring + channel badge.
     const thumb = await renderThumbnail(this.ctx, { dir, videoId, concept, title: script.mainTitle, palette, font: FONT, used: usedClips, notes });
@@ -436,7 +470,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       ...(thumb.asset ? [thumb.asset] : []),
     ];
     return {
-      videoPath, thumbnailPath, captionsPath,
+      videoPath, thumbnailPath, captionsPath, captionsEnPath,
       durationSec: Number(durationSec.toFixed(2)),
       size: main,
       scenes: timed.map(({ n, start, duration, audioPath, visual }) => ({ n, start: Number(start.toFixed(2)), duration: Number(duration.toFixed(2)), audioPath, visual: visual ? `${visual.kind}:${visual.asset.id}` : 'text-card' })),

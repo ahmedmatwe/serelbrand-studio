@@ -27,7 +27,7 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
       task: 'script.write',
       tier: 'writing',
       system: loadPrompt('scriptwriter'),
-      prompt: JSON.stringify({ ...input, ...pack, targetWords: target, dialect: this.ctx.config.channel.dialect }),
+      prompt: JSON.stringify({ ...input, ...pack, brief: this.ctx.repos.artifacts.latest(input.videoId, 'brief')?.data, targetWords: target, dialect: this.ctx.config.channel.dialect }),
       schema: ScriptLLM,
       maxOutputTokens: 16000,
       videoId: input.videoId,
