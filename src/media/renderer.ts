@@ -4,7 +4,8 @@ import { Agent } from '../agents/base.ts';
 import type { Blueprint, Script } from '../agents/schemas.ts';
 import type { ThumbnailOutput } from '../agents/thumbnail.ts';
 import { StudioError } from '../core/errors.ts';
-import type { MediaAsset, TTSProvider } from '../providers/media.ts';
+import type { MediaAsset, TTSProvider, TTSResult } from '../providers/media.ts';
+import { batchScenes, splitBatch } from './voice-batch.ts';
 import { FallbackTTS } from '../providers/tts/gemini-tts.ts';
 import { buildAss, chunkSubtitles, type AssEvent, type AssStyle } from './ass.ts';
 import { ffmpeg, filterPath, probeDuration, volumeStats, type VolumeStats } from './ffmpeg.ts';
@@ -326,9 +327,21 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const voiceAll = async (provider: TTSProvider) => {
       const out: TimedScene[] = [];
       let start = 0;
+      // Gemini's free tier allows ~10 voice requests a day: voice scenes in a few batches, then split.
+      const pre = new Map<number, TTSResult>();
+      if (provider.name.startsWith('gemini')) {
+        for (const [bi, group] of batchScenes(bp.scenes).entries()) {
+          const dirs = group.map((g) => script.scenes.find((x) => x.n === g.n)?.delivery);
+          const direction = { tone: dirs[0]?.tone, pace: dirs[0]?.pace, emphasis: dirs.flatMap((d) => d?.emphasis ?? []).slice(0, 6) };
+          const r = await provider.synthesize(group.map((g) => g.voiceover).join('\n\n'), resolve(dir, `batch-${bi + 1}.aiff`), direction);
+          const parts = group.map((g) => resolve(dir, `scene-${g.n}.batch.wav`));
+          await splitBatch(r.audioPath, group.map((g) => g.voiceover), parts);
+          group.forEach((g, i) => pre.set(g.n, { audioPath: parts[i]!, durationSec: 0, characters: g.voiceover.length, voice: r.voice }));
+        }
+      }
       for (const s of bp.scenes) {
         const sc = script.scenes.find((x) => x.n === s.n);
-        let r = await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}.aiff`), sc?.delivery);
+        let r = pre.get(s.n) ?? await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}.aiff`), sc?.delivery);
         // Stage gate: a scene whose audio is silent, cut off or stretched is re-recorded right away (up to 2x).
         for (let attempt = 0; attempt < 2 && existsSync(r.audioPath) && !provider.name.startsWith('mock'); attempt++) {
           const problem = await sceneAudioProblem(r.audioPath, s.voiceover, this.ctx.config.thresholds.script.arabicWordsPerMinute);

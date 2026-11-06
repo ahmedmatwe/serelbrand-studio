@@ -58,7 +58,10 @@ export class GeminiTTS implements TTSProvider {
       signal: AbortSignal.timeout(300_000),
     }).catch((err: Error) => { throw new ProviderError('gemini-tts', `Network error: ${err.message}`, true, { cause: err }); });
     const j = (await res.json().catch(() => ({}))) as { candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[]; error?: { message?: string } };
-    if (!res.ok) throw new ProviderError('gemini-tts', `HTTP ${res.status}: ${j.error?.message ?? res.statusText}`, res.status === 429 || res.status >= 500);
+    const msg = j.error?.message ?? res.statusText;
+    // The free tier's DAILY voice quota: retrying minutes later is pointless — fail fast with the reset time.
+    if (res.status === 429 && /per day|PerDay/i.test(msg)) throw new ProviderError('gemini-tts', `TTS_DAILY_QUOTA: ${msg.slice(0, 300)}`, false);
+    if (!res.ok) throw new ProviderError('gemini-tts', `HTTP ${res.status}: ${msg}`, res.status === 429 || res.status >= 500);
     const b64 = j.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData?.data;
     if (!b64) throw new ProviderError('gemini-tts', 'No audio in response', true);
     return Buffer.from(b64, 'base64');
@@ -90,4 +93,11 @@ export class FallbackTTS implements TTSProvider {
   synthesize(text: string, outPath: string, direction?: VoiceDirection) {
     return this.primary.synthesize(text, outPath, direction);
   }
+}
+
+/** Seconds until the quota resets, parsed from Google's "Please retry in 11h37m27s" (default: 12h). */
+export function quotaResetSeconds(message: string): number {
+  const m = message.match(/retry in\s+(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?/i);
+  if (!m || (!m[1] && !m[2] && !m[3])) return 12 * 3600;
+  return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Math.ceil(Number(m[3] ?? 0));
 }

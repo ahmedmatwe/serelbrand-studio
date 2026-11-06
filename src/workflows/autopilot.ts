@@ -20,13 +20,14 @@ import { learnPublishSlots } from '../analytics/optimization.ts';
 import type { PrePublicationReport } from '../reports/prepublication.ts';
 import type { RenderOutput } from '../media/renderer.ts';
 import { qcBlockers, qualityChecklist } from '../reports/qc.ts';
+import { quotaResetSeconds } from '../providers/tts/gemini-tts.ts';
 import { writePackage } from '../reports/package.ts';
 import { steps } from './steps.ts';
 
 export interface CycleOptions {
   now?: Date;
   /** Skip production (e.g. analytics-only runs). */
-  produce?: boolean; /** Produce even if today's video already exists (manual test run). */ force?: boolean;
+  productionBudgetMs?: number; produce?: boolean; /** Produce even if today's video already exists (manual test run). */ force?: boolean;
   notify?: (title: string, body: string) => void;
   renderSize?: 'full' | 'preview';
 }
@@ -40,6 +41,8 @@ export interface CycleReport {
   pendingApprovals: number;
   needsFactReview: { videoId: string; title: string; claims: number }[];
   errors: string[];
+  /** Videos blocked in this run before a later attempt (if any) succeeded. */
+  blockedAttempts: { title: string; reason: string }[];
 }
 
 const LOCK_STALE_MS = 3 * 3600_000;
@@ -123,7 +126,7 @@ export function todaysPlan(strategy: StrategyOutput | undefined, producedTitles:
 export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise<CycleReport> {
   const now = o.now ?? new Date();
   const notify = o.notify ?? macNotify;
-  const rep: CycleReport = { startedAt: now.toISOString(), published: [], analyticsUpdated: [], produced: null, pendingApprovals: 0, needsFactReview: [], errors: [] };
+  const rep: CycleReport = { startedAt: now.toISOString(), published: [], analyticsUpdated: [], produced: null, pendingApprovals: 0, needsFactReview: [], errors: [], blockedAttempts: [] };
   const log = ctx.logger.child('autopilot');
 
   // 1) Approved → upload (private).
@@ -151,15 +154,25 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
 
   // 3) Production: one per day — the long video (with its 3 Shorts) or a 3-Shorts pack.
   //    Only autopilot productions count (they carry a calendar entry); manual tests don't block the day.
+  // A blocked or crashed video doesn't use up the day: another topic is tried right away in the same run
+  // (max 3 attempts a day and a time budget, so the free API quotas are never burnt in a loop).
   const planned = new Set(ctx.repos.artifacts.listKind('calendar_entry').map((a) => a.video_id));
-  // A video the final gate blocked does not count: the next cycle makes a different topic instead
-  // (max 3 attempts a day, so the free API quotas are never burnt in a loop).
-  const todays = ctx.repos.videos.list().filter((v) => planned.has(v.id) && v.created_at.slice(0, 10) === day(now));
-  const producedToday = todays.some((v) => !ctx.repos.artifacts.latest(v.id, 'auto_blocked'));
-  if (o.produce === false) rep.skippedProductionReason = 'production disabled for this run';
-  else if (producedToday && !o.force) rep.skippedProductionReason = 'already produced a video today';
-  else if (todays.length >= 3 && !o.force) rep.skippedProductionReason = '3 attempts today were blocked by the quality gate — trying again tomorrow';
-  else {
+  const t0 = Date.now();
+  const budgetMs = o.productionBudgetMs ?? 100 * 60_000;
+  let attempts = 0;
+  let succeeded = false;
+  for (;;) {
+    const todays = ctx.repos.videos.list().filter((v) => planned.has(v.id) && v.created_at.slice(0, 10) === day(now));
+    const producedToday = todays.some((v) => !ctx.repos.artifacts.latest(v.id, 'auto_blocked'));
+    if (o.produce === false) { rep.skippedProductionReason = 'production disabled for this run'; break; }
+    const quota = ctx.repos.artifacts.latest<{ until: string }>(null, 'tts_quota_exhausted')?.data;
+    if (quota && quota.until > now.toISOString()) { rep.skippedProductionReason = `voice quota used up — waiting until ${quota.until.slice(0, 16)} UTC`; break; }
+    if (succeeded || attempts >= 3) break;
+    if (!o.force && producedToday) { if (!attempts) rep.skippedProductionReason = 'already produced a video today'; break; }
+    if (!o.force && todays.length >= 3) { rep.skippedProductionReason = '3 attempts today were blocked — trying again tomorrow'; break; }
+    if (attempts && Date.now() - t0 > budgetMs) { rep.skippedProductionReason = 'no time left in this run for another attempt — the next cycle continues'; break; }
+    if (attempts) ctx.logger.child('autopilot').warn('previous video blocked — trying another topic now', { attempt: attempts + 1 });
+    attempts++;
     try {
       const niche = ctx.config.channel.niche ?? 'business-stories';
       let strategy = ctx.repos.artifacts.latest<StrategyOutput>(null, 'content_strategy')?.data;
@@ -177,15 +190,20 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
         strategy = await replan();
         plan = todaysPlan(strategy, produced, now);
       }
-      if (!plan) rep.skippedProductionReason = 'no unproduced topic left in the calendar';
+      if (!plan) { rep.skippedProductionReason = 'no unproduced topic left in the calendar'; break; }
       else {
         const format = plan.format;
         const title = format === 'short' ? `${plan.title.replace(/^Short:\s*/, '')} — ${plan.linkedLongTitle ?? plan.pillar}` : plan.title;
         const vid = ctx.repos.videos.create({ title, format, niche });
         ctx.repos.artifacts.save({ videoId: vid.id, kind: 'calendar_entry', agent: 'autopilot', data: plan });
+        planned.add(vid.id);
         const r = await produceVideo(ctx, { title, videoId: vid.id, format, niche, render: true, renderSize: o.renderSize ?? 'full' });
         if (!r.completed) {
           const why = `${r.steps.find((s) => s.status !== 'succeeded')?.error}`;
+          if (why.includes('TTS_DAILY_QUOTA')) {
+            const until = new Date(Date.now() + quotaResetSeconds(why) * 1000 + 5 * 60_000).toISOString();
+            ctx.repos.artifacts.save({ videoId: null, kind: 'tts_quota_exhausted', agent: 'autopilot', data: { until } });
+          }
           rep.errors.push(`produce "${plan.title}": ${why}`);
           // A crashed production doesn't use up the day either: the next cycle tries another topic.
           ctx.repos.artifacts.save({ videoId: r.videoId, kind: 'auto_blocked', agent: 'autopilot', data: { blockers: [`production failed: ${why.slice(0, 200)}`] } });
@@ -211,6 +229,7 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
             if (pub.status === 'succeeded') rep.published.push(r.videoId);
             else rep.errors.push(`publish ${r.videoId}: ${pub.error}`);
             rep.produced.autoApproved = true;
+            succeeded = true;
             rep.produced.publishAt = publishAt;
           } else {
             rep.produced.autoApproved = false;
@@ -222,6 +241,9 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     } catch (err) {
       rep.errors.push(`production: ${(err as Error).message}`);
     }
+    // Without full automation a human reviews each video: one per cycle is enough.
+    if (!ctx.config.env.AUTO_APPROVE) break;
+    if (rep.produced && !rep.produced.autoApproved) rep.blockedAttempts.push({ title: rep.produced.title, reason: rep.produced.autoApproveBlockedBy?.[0] ?? rep.errors.at(-1) ?? 'failed' });
   }
 
   // 4) What needs the human.
