@@ -9,7 +9,7 @@ import type { ThumbnailConcept } from '../agents/schemas.ts';
 import type { MediaAsset } from '../providers/media.ts';
 import { assColor, assText } from './ass.ts';
 import { ffmpeg, filterPath } from './ffmpeg.ts';
-import { queriesForSentences } from './shots.ts';
+import { pickRelevant, queriesForSentences, queryParts } from './shots.ts';
 
 const W = 1280, H = 720;
 
@@ -55,10 +55,14 @@ export async function renderThumbnail(ctx: AgentContext, o: {
   const stock = ctx.providers.stock;
   let photo: { path: string; asset: MediaAsset } | undefined;
   if (stock.download) {
-    const [query] = await queriesForSentences(ctx, [`${o.concept.mainVisual} — ${o.title}`], 'business success', o.videoId);
-    const imgs = await stock.search(query!, 'image', { orientation: 'landscape', targetWidth: 1920, perPage: 10 }).catch(() => []);
-    const vids = imgs.length ? [] : await stock.search(query!, 'video', { orientation: 'landscape', targetWidth: 1920, perPage: 5 }).catch(() => []);
-    const pick = [...imgs, ...vids].find((a) => !o.used.has(a.id)) ?? [...imgs, ...vids][0];
+    const [joined] = await queriesForSentences(ctx, [`${o.concept.mainVisual} — ${o.title}`], 'business office', o.videoId, o.title);
+    let pick: MediaAsset | undefined;
+    for (const query of queryParts(joined!)) {
+      const imgs = await stock.search(query, 'image', { orientation: 'landscape', targetWidth: 1920, perPage: 10 }).catch(() => []);
+      const vids = imgs.length ? [] : await stock.search(query, 'video', { orientation: 'landscape', targetWidth: 1920, perPage: 5 }).catch(() => []);
+      pick = pickRelevant([...imgs, ...vids], query, o.used);
+      if (pick) break;
+    }
     if (pick) {
       try {
         const p = await stock.download(pick, resolve(ctx.config.rootDir, 'data/stock-cache'));

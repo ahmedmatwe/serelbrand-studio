@@ -3,12 +3,22 @@
  * fix the exact problems (instead of discovering them at the final gate). Pure checks live here.
  */
 import { countWords } from './base.ts';
+
+const EGYPTIAN = ['إزاي', 'ازاي', 'ليه', 'ده', 'دي', 'دول', 'اللي', 'مش', 'عشان', 'علشان', 'كده', 'كدا', 'بتاع', 'بتاعة', 'دلوقتي', 'إيه', 'ايه', 'فين', 'امتى', 'إمتى', 'خالص', 'أوي', 'زي', 'بس'];
+const FUSHA = ['لماذا', 'كيف', 'هذا', 'هذه', 'هؤلاء', 'الذي', 'التي', 'الذين', 'ليس', 'ليست', 'لأن', 'هكذا', 'الآن', 'ماذا', 'أين', 'متى', 'جداً', 'جدا', 'مثل', 'سوف', 'لقد'];
+const tokensOf = (t: string) => t.replace(/[\p{M}\u0640]/gu, '').split(/[^\p{L}]+/u).filter(Boolean);
+/** Words of the wrong register for the channel dialect (fusha ↔ Egyptian colloquial). */
+export function wrongRegisterWords(text: string, dialect: string): string[] {
+  const wrong = /egypt|masri|مصري/i.test(dialect) ? FUSHA : EGYPTIAN;
+  const set = new Set(wrong.map((w) => w.replace(/[\p{M}]/gu, '')));
+  return tokensOf(text).filter((w) => set.has(w));
+}
 import type { Script } from './schemas.ts';
 import { spokenText } from './scriptwriter.ts';
 import { duplicateSentenceRatio, policyHits, titleSupport, CLICKBAIT } from './compliance.ts';
 
 /** Problems in a script that can be fixed by rewriting (not facts — those go to the verifier). */
-export function scriptProblems(s: Pick<Script, 'hooks' | 'opening' | 'scenes' | 'cta' | 'ending'>, target?: { minWords: number; maxWords: number }): string[] {
+export function scriptProblems(s: Pick<Script, 'hooks' | 'opening' | 'scenes' | 'cta' | 'ending'>, target?: { minWords: number; maxWords: number }, dialect?: string): string[] {
   const p: string[] = [];
   const hook = s.hooks[0] ?? '';
   if (countWords(hook) > 30) p.push(`Hook 1 has ${countWords(hook)} words: make it ≤ 25 words, start with the shock/question directly.`);
@@ -18,6 +28,11 @@ export function scriptProblems(s: Pick<Script, 'hooks' | 'opening' | 'scenes' | 
   const text = spokenText(s);
   const dup = duplicateSentenceRatio(text);
   if (dup >= 0.1) p.push(`${Math.round(dup * 100)}% of sentences are repeated: remove the repetition and filler, replace it with new information.`);
+  if (dialect) {
+    const wrong = wrongRegisterWords([...s.hooks, text].join(' '), dialect);
+    // A couple of borderline words are fine; a pattern means mixed register.
+    if (wrong.length >= 3) p.push(`Mixed Arabic register: the channel uses "${dialect}" but these words don't fit it: ${[...new Set(wrong)].slice(0, 8).join('، ')}. Rewrite them in the channel register everywhere.`);
+  }
   for (const h of policyHits(text)) p.push(`Policy risk: "${h.word}" (${h.kind}) — rephrase neutrally or remove.`);
   if (target) {
     const w = countWords(text);
@@ -27,8 +42,9 @@ export function scriptProblems(s: Pick<Script, 'hooks' | 'opening' | 'scenes' | 
 }
 
 /** Problems in a title (misleading vs the script, clickbait words). */
-export function titleProblems(title: string, script: Pick<Script, 'opening' | 'scenes' | 'cta' | 'ending'>): string[] {
+export function titleProblems(title: string, script: Pick<Script, 'opening' | 'scenes' | 'cta' | 'ending'>, dialect?: string): string[] {
   const p: string[] = [];
+  if (dialect) { const w = wrongRegisterWords(title, dialect); if (w.length) p.push(`Title register doesn't match the channel (${dialect}): ${w.join('، ')}`); }
   const support = titleSupport(title, spokenText(script));
   if (support < 0.4) p.push(`Only ${Math.round(support * 100)}% of the title's words appear in the video — the title must describe what the video really says.`);
   for (const w of CLICKBAIT) if (title.includes(w)) p.push(`Clickbait phrase "${w}" — use a specific, truthful promise.`);

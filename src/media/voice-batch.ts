@@ -7,8 +7,11 @@ import { ffmpeg, probeDuration } from './ffmpeg.ts';
 
 const words = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
 
-/** Contiguous groups of scenes, balanced by word count, at most `maxWords` words each (≥ 1 scene per group). */
-export function batchScenes<T extends { voiceover: string }>(scenes: T[], maxWords = 650): T[][] {
+/**
+ * Contiguous groups of scenes, balanced by word count, ~`maxWords` words each (≥ 1 scene per group).
+ * 450 words ≈ 3.5 min of audio — safely inside one TTS response; a cut-off tail is caught by the audio gate.
+ */
+export function batchScenes<T extends { voiceover: string }>(scenes: T[], maxWords = 450): T[][] {
   const total = scenes.reduce((a, s) => a + words(s.voiceover), 0);
   const groups = Math.max(1, Math.ceil(total / maxWords));
   const target = total / groups;

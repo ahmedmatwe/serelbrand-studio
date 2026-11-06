@@ -185,6 +185,7 @@ export const MOCK_FIXTURES: Record<string, MockFixture> = {
   // Offline: the fixer cannot invent text, so it returns the script unchanged.
   'script.fixclaims': (vars) => vars.previous,
   'script.revise': (vars) => vars.previous,
+  'script.smooth': (vars) => vars.previous,
   'seo.retitle': (vars) => vars.previous,
   'captions.translate': (vars) => ({ lines: ((vars.lines as string[]) ?? []).map((_, i) => `English caption ${i + 1}`) }),
   // Offline shot planner: generic but varied queries, one per sentence.

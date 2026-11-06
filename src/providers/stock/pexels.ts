@@ -65,14 +65,14 @@ export class PexelsStock implements StockProvider {
         const f = pickVideoFile(v.video_files, target);
         return f ? [{
           id: `pexels-video-${v.id}`, kind: 'video' as const, path: f.link, license: 'pexels' as const, source: 'pexels',
-          attribution: `${v.user.name} on Pexels`, pageUrl: v.url, authorUrl: v.user.url, width: f.width!, height: f.height!, durationSec: v.duration, aiGenerated: false,
+          attribution: `${v.user.name} on Pexels`, pageUrl: v.url, authorUrl: v.user.url, width: f.width!, height: f.height!, durationSec: v.duration, aiGenerated: false, tags: slugTags(v.url),
         }] : [];
       });
     }
     const data = await this.get<{ photos: PexelsPhoto[] }>(`https://api.pexels.com/v1/search?${q}`);
     return data.photos.map((p) => ({
       id: `pexels-photo-${p.id}`, kind: 'image' as const, path: target > 1200 ? p.src.large2x : p.src.large, license: 'pexels' as const, source: 'pexels',
-      attribution: `${p.photographer} on Pexels`, pageUrl: p.url, authorUrl: p.photographer_url, width: p.width, height: p.height, aiGenerated: false,
+      attribution: `${p.photographer} on Pexels`, pageUrl: p.url, authorUrl: p.photographer_url, width: p.width, height: p.height, aiGenerated: false, tags: slugTags(p.url),
     }));
   }
 
@@ -83,3 +83,6 @@ export class PexelsStock implements StockProvider {
     return downloadToCache({ provider: 'pexels', url: asset.path, file: `${asset.id}-${asset.width ?? 0}.${ext}`, cacheDir, allowedHosts: ALLOWED_DOWNLOAD_HOSTS, fetchImpl: this.fetchImpl });
   }
 }
+
+/** Pexels page URLs carry a description slug: /video/a-man-typing-on-laptop-123/ → [a, man, typing, …]. */
+const slugTags = (url?: string) => (url?.split('/').filter(Boolean).pop() ?? '').split('-').filter((w) => w && !/^\d+$/.test(w)).map((w) => w.toLowerCase());

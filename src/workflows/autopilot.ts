@@ -162,7 +162,9 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   let attempts = 0;
   let succeeded = false;
   for (;;) {
-    const todays = ctx.repos.videos.list().filter((v) => planned.has(v.id) && v.created_at.slice(0, 10) === day(now));
+    // Attempts that died only because the free voice quota was used up don't count toward the 3/day limit.
+    const quotaOnly = (id: string) => (ctx.repos.artifacts.latest<{ blockers: string[] }>(id, 'auto_blocked')?.data.blockers ?? []).some((b) => b.includes('TTS_DAILY_QUOTA'));
+    const todays = ctx.repos.videos.list().filter((v) => planned.has(v.id) && v.created_at.slice(0, 10) === day(now) && !quotaOnly(v.id));
     const producedToday = todays.some((v) => !ctx.repos.artifacts.latest(v.id, 'auto_blocked'));
     if (o.produce === false) { rep.skippedProductionReason = 'production disabled for this run'; break; }
     const quota = ctx.repos.artifacts.latest<{ until: string }>(null, 'tts_quota_exhausted')?.data;

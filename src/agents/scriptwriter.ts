@@ -53,7 +53,7 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
       if (countWords(spokenText(exp.data)) > words) data = exp.data;
     }
     // Stage gate: check the script now and fix the exact problems (up to 2 rewrites, keep the best).
-    let problems = scriptProblems(data, target);
+    let problems = scriptProblems(data, target, this.ctx.config.channel.dialect);
     for (let i = 0; i < 2 && problems.length; i++) {
       const rev = await this.ctx.providers.llm.generateJson({
         task: 'script.revise',
@@ -66,7 +66,7 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
         vars: { previous: data },
       }).catch(() => undefined);
       if (!rev) break;
-      const next = scriptProblems(rev.data, target);
+      const next = scriptProblems(rev.data, target, this.ctx.config.channel.dialect);
       // Accept only a real improvement that did not gut the script.
       if (next.length >= problems.length || countWords(spokenText(rev.data)) < countWords(spokenText(data)) * 0.8) break;
       data = rev.data;

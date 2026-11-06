@@ -115,6 +115,31 @@ export class AutoVerifierAgent extends Agent<AutoVerifyInput, AutoVerifyOutput> 
     return claims;
   }
 
+  /**
+   * After sentences were cut, let the model repair only the joins so the story still flows.
+   * Accepted only if it adds no new numbers/years and barely changes the length — otherwise the cut script stays.
+   */
+  private async smoothTransitions(script: Script, videoId: string): Promise<Script> {
+    const r = await this.ctx.providers.llm.generateJson({
+      task: 'script.smooth',
+      tier: 'writing',
+      system: loadPrompt('script-fixer'),
+      prompt: JSON.stringify({ instruction: 'Some sentences were removed from this script. Fix ONLY the transitions so every scene reads naturally (adjust connecting words, at most one short linking phrase per scene). Do NOT add any fact, number, date, name or claim. Return the complete script.', script }),
+      schema: ScriptLLM,
+      videoId,
+      maxOutputTokens: 16000,
+      vars: { previous: script },
+    }).catch(() => undefined);
+    if (!r) return script;
+    const before = spokenText(script);
+    const after = spokenText(r.data);
+    const nums = new Set(claimNumbers(before));
+    const newNumbers = claimNumbers(after).filter((n) => !nums.has(n));
+    const ratio = countWords(after) / Math.max(1, countWords(before));
+    if (newNumbers.length || ratio < 0.9 || ratio > 1.08) return script;
+    return { ...script, ...r.data, format: script.format, wordCount: script.wordCount, estimatedDurationSec: script.estimatedDurationSec };
+  }
+
   protected async execute(input: AutoVerifyInput): Promise<AutoVerifyOutput> {
     const maxRounds = input.maxRounds ?? 3;
     const removed: string[] = [];
@@ -152,8 +177,9 @@ export class AutoVerifierAgent extends Agent<AutoVerifyInput, AutoVerifyOutput> 
       const before = countWords(spokenText(script));
       if (cut.removed.length === bad.length && cut.removedWords <= before * 0.15) {
         const wpm = this.ctx.config.thresholds.script.arabicWordsPerMinute;
-        const wordCount = countWords(spokenText(cut.script));
-        this.ctx.repos.artifacts.save({ videoId: input.videoId, kind: 'script', agent: this.name, data: { ...cut.script, wordCount, estimatedDurationSec: Math.round((wordCount / wpm) * 60) } });
+        const smooth = await this.smoothTransitions(cut.script, input.videoId);
+        const wordCount = countWords(spokenText(smooth));
+        this.ctx.repos.artifacts.save({ videoId: input.videoId, kind: 'script', agent: this.name, data: { ...smooth, wordCount, estimatedDurationSec: Math.round((wordCount / wpm) * 60) } });
         removed.push(...bad.map((c) => c.claim));
         claims = claims.filter((c) => !bad.includes(c));
       }

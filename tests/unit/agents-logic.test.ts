@@ -119,3 +119,12 @@ test('stage checks: script and title problems are found before the final gate', 
   assert.deepEqual(titleProblems('قصة أمازون: إزاي بدأت في جراج صغير', good), []);
   assert.ok(titleProblems('فضيحة تسلا الكبرى', good).length >= 1);
 });
+
+test('stage checks: mixed Arabic register is caught for the channel dialect', async () => {
+  const { wrongRegisterWords, titleProblems } = await import('../../src/agents/stage-checks.ts');
+  assert.deepEqual(wrongRegisterWords('لماذا انهارت الشركة؟ هذا هو السر', 'arabic-fusha-simplified'), []);
+  assert.deepEqual(wrongRegisterWords('إزاي الشركة دي انهارت؟ عشان كده', 'arabic-fusha-simplified'), ['إزاي', 'دي', 'عشان', 'كده']);
+  assert.deepEqual(wrongRegisterWords('لماذا انهارت؟', 'egyptian'), ['لماذا']);
+  const script = { opening: 'انهارت الشركة', scenes: [], cta: '', ending: '' };
+  assert.ok(titleProblems('إزاي انهارت الشركة', script, 'arabic-fusha-simplified').some((x) => x.includes('register')));
+});

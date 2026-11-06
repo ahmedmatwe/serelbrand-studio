@@ -9,8 +9,8 @@ import { resolve } from 'node:path';
 const CACHE_TTL_MS = 24 * 3600_000;
 
 type Rendition = { url: string; width: number; height: number; size: number };
-interface PixabayVideo { id: number; pageURL: string; duration: number; user: string; user_id: number; videos: Partial<Record<'large' | 'medium' | 'small' | 'tiny', Rendition>> }
-interface PixabayImage { id: number; pageURL: string; largeImageURL: string; imageWidth: number; imageHeight: number; user: string; user_id: number }
+interface PixabayVideo { id: number; pageURL: string; tags?: string; duration: number; user: string; user_id: number; videos: Partial<Record<'large' | 'medium' | 'small' | 'tiny', Rendition>> }
+interface PixabayImage { id: number; pageURL: string; tags?: string; largeImageURL: string; imageWidth: number; imageHeight: number; user: string; user_id: number }
 
 /** Smallest rendition at least `target` wide, else the largest available. Empty URLs are skipped. */
 export function pickRendition(v: PixabayVideo['videos'], target: number): Rendition | undefined {
@@ -72,7 +72,7 @@ export class PixabayStock implements StockProvider {
         return r ? [{
           id: `pixabay-video-${v.id}`, kind: 'video' as const, path: r.url, license: 'pixabay' as const, source: 'pixabay',
           attribution: `${v.user} on Pixabay`, pageUrl: v.pageURL, authorUrl: `https://pixabay.com/users/${encodeURIComponent(v.user)}-${v.user_id}/`,
-          width: r.width, height: r.height, durationSec: v.duration, aiGenerated: false,
+          width: r.width, height: r.height, durationSec: v.duration, aiGenerated: false, tags: splitTags(v.tags),
         }] : [];
       });
     }
@@ -80,7 +80,7 @@ export class PixabayStock implements StockProvider {
     return data.hits.map((h) => ({
       id: `pixabay-photo-${h.id}`, kind: 'image' as const, path: h.largeImageURL, license: 'pixabay' as const, source: 'pixabay',
       attribution: `${h.user} on Pixabay`, pageUrl: h.pageURL, authorUrl: `https://pixabay.com/users/${encodeURIComponent(h.user)}-${h.user_id}/`,
-      width: h.imageWidth, height: h.imageHeight, aiGenerated: false,
+      width: h.imageWidth, height: h.imageHeight, aiGenerated: false, tags: splitTags(h.tags),
     }));
   }
 
@@ -89,3 +89,5 @@ export class PixabayStock implements StockProvider {
     return downloadToCache({ provider: 'pixabay', url: asset.path, file: `${asset.id}-${asset.width ?? 0}.${ext}`, cacheDir, allowedHosts: /(^|\.)pixabay\.com$/i, fetchImpl: this.fetchImpl });
   }
 }
+
+const splitTags = (t?: string) => (t ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);

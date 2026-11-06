@@ -12,7 +12,7 @@ const w = (n: number) => ({ voiceover: Array(n).fill('كلمة').join(' ') });
 test('voice batch: a long video fits in few TTS requests, scenes stay in order', () => {
   const scenes = [w(150), w(160), w(140), w(170), w(150), w(160), w(150), w(140), w(150), w(130)];
   const groups = batchScenes(scenes);
-  assert.ok(groups.length <= 3, `${groups.length} batches`);
+  assert.ok(groups.length <= 4, `${groups.length} batches`);
   assert.deepEqual(groups.flat(), scenes);
   assert.equal(batchScenes([w(100), w(100), w(100)]).length, 1, 'a Shorts pack is one request');
 });
@@ -40,4 +40,16 @@ test('tts quota: reset time parsed from Google message', () => {
   assert.equal(quotaResetSeconds('Please retry in 11h37m27.68s.'), 11 * 3600 + 37 * 60 + 28);
   assert.equal(quotaResetSeconds('Please retry in 45s'), 45);
   assert.equal(quotaResetSeconds('no hint'), 12 * 3600);
+});
+
+test('footage: unrelated clips are rejected, relevant ones preferred', async () => {
+  const { pickRelevant, relevance, queryParts } = await import('../../src/media/shots.ts');
+  const mk = (id: string, tags: string[]) => ({ id, kind: 'video' as const, path: id, license: 'pixabay' as const, source: 'pixabay', aiGenerated: false, tags });
+  const crystals = mk('c', ['amethyst', 'crystal', 'purple']);
+  const garage = mk('g', ['garage', 'workshop', 'tools']);
+  assert.equal(relevance(crystals, 'small garage workshop'), 0);
+  assert.equal(relevance(garage, 'small garage workshop'), 2);
+  assert.equal(pickRelevant([crystals, garage], 'small garage workshop', new Set())?.id, 'g');
+  assert.equal(pickRelevant([crystals], 'small garage workshop', new Set()), undefined, 'never a random unrelated clip');
+  assert.deepEqual(queryParts('old garage workshop || garage || documentary'), ['old garage workshop', 'garage', 'documentary']);
 });

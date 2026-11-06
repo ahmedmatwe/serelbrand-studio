@@ -227,7 +227,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
   private async planShots(videoId: string, scenes: TimedScene[], bp: Blueprint, size: RenderSize, notes: string[], used: Set<string>) {
     const perScene = scenes.map((s) => splitSentences(s.voiceover));
     const fallbacks = scenes.flatMap((s, i) => perScene[i]!.map(() => { const b = bp.scenes.find((x) => x.n === s.n); return b?.stockQuery || b?.footage || 'documentary'; }));
-    const queries = await queriesForSentences(this.ctx, perScene.flat(), fallbacks, videoId);
+    const queries = await queriesForSentences(this.ctx, perScene.flat(), fallbacks, videoId, this.ctx.repos.videos.get(videoId)?.title ?? '');
     let k = 0;
     for (const [i, s] of scenes.entries()) {
       const sentences = perScene[i]!.map((text) => ({ text, query: queries[k++]! }));
@@ -420,7 +420,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       const saudio = resolve(dir, `short-${k}.m4a`);
       await ffmpeg(['-i', wav, '-t', String(d), '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11', '-ar', '48000', '-c:a', 'aac', '-b:a', '160k', saudio]);
       const sentences = splitSentences(text);
-      const qs = await queriesForSentences(this.ctx, sentences, bp.scenes.find((x) => x.n === scene.n)?.stockQuery || 'documentary', videoId);
+      const qs = await queriesForSentences(this.ctx, sentences, bp.scenes.find((x) => x.n === scene.n)?.stockQuery || 'documentary', videoId, title);
       const shortShots = layoutShots(sentences.map((t2, i) => ({ text: t2, query: qs[i]! })), d);
       await fetchShotVisuals(this.ctx, shortShots, { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used: usedClips, notes });
       extraShots.push(...shortShots);

@@ -51,13 +51,33 @@ export function layoutShots(sentences: { text: string; query: string }[], durati
   return shots;
 }
 
-const ShotQueriesLLM = z.object({ queries: z.array(z.object({ i: z.number().int(), query: z.string().min(2) })) });
+const ShotQueriesLLM = z.object({ queries: z.array(z.object({ i: z.number().int(), query: z.string().min(2), alt: z.string().default('') })) });
+
+/** A shot query may carry a simpler fallback: "primary || alt". */
+export const queryParts = (q: string) => q.split('||').map((x) => x.trim()).filter(Boolean);
+
+const STOP = new Set(['a', 'an', 'the', 'of', 'in', 'on', 'at', 'with', 'and', 'or', 'to', 'for', 'by', 'from', 'closeup', 'close', 'up', 'shot', 'footage', 'view', 'video']);
+const stem = (w: string) => w.toLowerCase().replace(/(ies|es|s|ing|ed)$/, '');
+/** How many meaningful query words appear in the clip's tags (0 = unrelated). Undefined when the clip has no tags. */
+export function relevance(asset: MediaAsset, query: string): number | undefined {
+  if (!asset.tags?.length) return undefined;
+  const tags = new Set(asset.tags.flatMap((t) => t.split(/\s+/)).map(stem));
+  return query.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 2 && !STOP.has(w)).map(stem).filter((w) => tags.has(w)).length;
+}
+
+/** Best unused clip for a query: relevant first (by tag overlap), then search order. Unrelated clips are never picked. */
+export function pickRelevant(list: MediaAsset[], query: string, used: Set<string>, variant = 0): MediaAsset | undefined {
+  const scored = list.map((a, idx) => ({ a, idx, r: relevance(a, query) }));
+  const ok = scored.filter((x) => x.r === undefined || x.r > 0).sort((x, y) => (y.r ?? 0.5) - (x.r ?? 0.5) || x.idx - y.idx);
+  const fresh = ok.filter((x) => !used.has(x.a.id));
+  return (fresh[Math.min(variant, Math.max(0, fresh.length - 1))] ?? fresh[0] ?? ok[0])?.a;
+}
 
 /**
  * Asks the LLM for a concrete English stock-footage query per sentence (what to SHOW while it is said).
  * Falls back to the scene-level query when the model omits a sentence.
  */
-export async function queriesForSentences(ctx: AgentContext, sentences: string[], fallback: string | string[], videoId: string): Promise<string[]> {
+export async function queriesForSentences(ctx: AgentContext, sentences: string[], fallback: string | string[], videoId: string, topic = ''): Promise<string[]> {
   if (!sentences.length) return [];
   const out = sentences.map((_, i) => (Array.isArray(fallback) ? fallback[i] ?? fallback[0] ?? 'documentary' : fallback));
   for (let i = 0; i < sentences.length; i += 60) {
@@ -66,14 +86,17 @@ export async function queriesForSentences(ctx: AgentContext, sentences: string[]
       task: 'production.shots',
       tier: 'light',
       system:
-        'You are a documentary video editor. For EACH Arabic sentence give ONE concrete English stock-footage search query (2–5 words) describing what the viewer should SEE while it is spoken: real objects, places, actions (e.g. "old garage workshop", "warehouse packages conveyor", "smartphone touchscreen closeup"). No brand names, logos, celebrities or text. Vary the visuals; never repeat the same query twice in a row. Output JSON only.',
-      prompt: JSON.stringify({ sentences: batch.map((s, j) => ({ i: i + j, text: s })) }),
+        'You are a documentary video editor choosing stock footage. For EACH Arabic sentence give: query = a concrete English stock-footage search (2–4 words) of what the viewer should literally SEE while it is spoken, and alt = a simpler 1–2 word fallback that surely exists in stock libraries. ' +
+        'Rules: show real, filmable things (people, places, objects, actions) that match the sentence AND the video topic; turn abstract ideas into a literal scene (e.g. "humble beginnings" → "small garage workshop", "huge success" → "busy office team celebrating", "competition" → "chess game closeup"). ' +
+        'Never abstract textures, crystals, particles, fractals or generic backgrounds. No brand names, logos, celebrities or on-screen text. Vary the visuals; never repeat a query twice in a row. Output JSON only.',
+      prompt: JSON.stringify({ videoTopic: topic, sentences: batch.map((s, j) => ({ i: i + j, text: s })) }),
       schema: ShotQueriesLLM,
       vars: { sentences: batch, offset: i },
       videoId,
       maxOutputTokens: 8000,
     }).catch(() => undefined);
-    for (const q of res?.data.queries ?? []) if (q.i >= 0 && q.i < out.length) out[q.i] = q.query.replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim() || out[q.i]!;
+    const clean = (x: string) => x.replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+    for (const q of res?.data.queries ?? []) if (q.i >= 0 && q.i < out.length && clean(q.query)) out[q.i] = [clean(q.query), clean(q.alt), out[q.i]!].filter(Boolean).join(' || ');
   }
   return out;
 }
@@ -96,8 +119,12 @@ export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { ta
   };
   let misses = 0;
   for (const s of shots) {
-    const list = await search(s.query);
-    const pick = list.find((a, idx) => !o.used.has(a.id) && idx >= Math.min(s.variant, list.length - 1)) ?? list.find((a) => !o.used.has(a.id)) ?? list[s.variant % Math.max(1, list.length)];
+    // Primary query, then the simpler fallback, then the scene-level query — only relevant clips count.
+    let pick: MediaAsset | undefined;
+    for (const q of queryParts(s.query)) {
+      pick = pickRelevant(await search(q), q, o.used, s.variant);
+      if (pick) break;
+    }
     if (!pick) { misses++; continue; }
     try {
       const path = await stock.download(pick, o.cacheDir);

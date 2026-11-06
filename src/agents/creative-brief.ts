@@ -14,7 +14,7 @@ export class CreativeBriefAgent extends Agent<BriefInput, Brief> {
       task: 'brief.create',
       tier: 'writing',
       system: loadPrompt('creative-brief'),
-      prompt: JSON.stringify({ topic: input.title, format: input.format, channel: channel.channelName, audience: channel.audience, countries: channel.targetCountries, style: 'documentary, cinematic, suspenseful, Egyptian-friendly Arabic' }),
+      prompt: JSON.stringify({ topic: input.title, format: input.format, channel: channel.channelName, audience: channel.audience, countries: channel.targetCountries, style: 'documentary, cinematic, suspenseful', dialect: channel.dialect, dialectRule: 'ALL titles and text must be in this exact Arabic register — never mix Egyptian colloquial with Modern Standard Arabic.' }),
       schema: BriefLLM,
       videoId: input.videoId,
       maxOutputTokens: 8000,

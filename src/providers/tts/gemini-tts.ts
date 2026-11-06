@@ -55,7 +55,7 @@ export class GeminiTTS implements TTSProvider {
         contents: [{ parts: [{ text: `${this.o.style}${directionNote(direction)}\n\n${text}` }] }],
         generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: this.o.voice } } } },
       }),
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.timeout(600_000),
     }).catch((err: Error) => { throw new ProviderError('gemini-tts', `Network error: ${err.message}`, true, { cause: err }); });
     const j = (await res.json().catch(() => ({}))) as { candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[]; error?: { message?: string } };
     const msg = j.error?.message ?? res.statusText;

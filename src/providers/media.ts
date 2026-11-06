@@ -71,6 +71,8 @@ export interface MediaAsset {
   width?: number;
   height?: number;
   durationSec?: number;
+  /** Words describing the content (Pixabay tags / Pexels URL slug) — used to reject irrelevant clips. */
+  tags?: string[];
 }
 
 export interface ImageProvider { readonly name: string; generate(prompt: string, outPath: string): Promise<MediaAsset> }

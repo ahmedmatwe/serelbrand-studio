@@ -64,22 +64,23 @@ export class SeoAgent extends Agent<SeoInput, SeoPackage> {
       schema: SeoLLM,
       videoId: input.videoId,
     });
-    // Stage gate: the title must match the video and avoid clickbait — fix it now.
+    // Stage gate: the title must match the video, the channel's register, and avoid clickbait — fix it now.
+    const dialect = this.ctx.config.channel.dialect;
     let data = res.data;
-    if (titleProblems(data.primaryTitle, input.script).length) {
-      const alt = [...data.altTitles, ...input.script.altTitles, input.script.mainTitle].find((t) => !titleProblems(t, input.script).length);
+    if (titleProblems(data.primaryTitle, input.script, dialect).length) {
+      const alt = [...data.altTitles, ...input.script.altTitles, input.script.mainTitle].find((t) => !titleProblems(t, input.script, dialect).length);
       if (alt) data = { ...data, primaryTitle: alt, altTitles: [data.primaryTitle, ...data.altTitles.filter((t) => t !== alt)] };
       else {
         const re = await this.ctx.providers.llm.generateJson({
           task: 'seo.retitle',
           tier: 'light',
           system: loadPrompt('seo'),
-          prompt: JSON.stringify({ instruction: 'Rewrite primaryTitle (and altTitles) to fix these problems. Return the full package.', problems: titleProblems(data.primaryTitle, input.script), package: data, scenes: input.script.scenes.map((s) => s.voiceover.slice(0, 200)) }),
+          prompt: JSON.stringify({ instruction: 'Rewrite primaryTitle (and altTitles) to fix these problems. Return the full package.', problems: titleProblems(data.primaryTitle, input.script, dialect), package: data, scenes: input.script.scenes.map((s) => s.voiceover.slice(0, 200)) }),
           schema: SeoLLM,
           videoId: input.videoId,
           vars: { previous: data },
         }).catch(() => undefined);
-        if (re && titleProblems(re.data.primaryTitle, input.script).length < titleProblems(data.primaryTitle, input.script).length) data = re.data;
+        if (re && titleProblems(re.data.primaryTitle, input.script, dialect).length < titleProblems(data.primaryTitle, input.script, dialect).length) data = re.data;
       }
     }
     const chapters = input.script.format === 'long' ? buildChapters(input.script, input.blueprint) : [];
