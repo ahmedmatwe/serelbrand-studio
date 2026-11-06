@@ -41,9 +41,10 @@ test('gemini: repairs schema mismatches with validation feedback', async () => {
 });
 
 test('gemini: gives up with ValidationError after repair attempts', async () => {
-  const { f } = fakeFetch(ok('{"bad":1}'), ok('{"bad":2}'));
+  const { f, calls } = fakeFetch(ok('{"bad":1}'), ok('{"bad":2}'), ok('{"bad":3}'), ok('{"bad":4}'));
   const llm = new GeminiLLM({ apiKey: 'k', models: { writing: 'm', light: 'm' }, fetchImpl: f });
   await assert.rejects(llm.generateJson(req), ValidationError);
+  assert.equal(calls.length, 4, '1 try + 3 repairs');
 });
 
 test('gemini: 429/5xx are retryable, 400/404/safety are not', async () => {
