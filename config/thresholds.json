@@ -1,0 +1,12 @@
+{
+  "compliance": { "minScoreToPublish": 90 },
+  "quality": { "minScoreToPublish": 85 },
+  "script": {
+    "arabicWordsPerMinute": 130,
+    "longForm": { "minMinutes": 8, "maxMinutes": 14 },
+    "short": { "maxSeconds": 60 }
+  },
+  "packaging": { "maxTitleChars": 70, "maxThumbnailWords": 5, "minAltTitles": 5, "minHooks": 3 },
+  "analytics": { "checkpointsHours": [1, 6, 24, 72, 168, 672], "minVideosForStrategicConclusion": 8 },
+  "jobs": { "maxAttempts": 3, "baseBackoffMs": 500 }
+}

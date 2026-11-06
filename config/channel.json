@@ -1,0 +1,35 @@
+{
+  "_note": "قناة جديدة: الهوية في branding/CHANNEL.md",
+  "channelName": "سر البراند",
+  "language": "ar",
+  "dialect": "arabic-fusha-simplified",
+  "targetCountries": [
+    "EG",
+    "SA",
+    "AE",
+    "KW",
+    "MA"
+  ],
+  "audience": {
+    "ageRange": "18-34",
+    "gender": "all",
+    "interests": [
+      "knowledge",
+      "stories",
+      "technology",
+      "history"
+    ]
+  },
+  "niche": "business-stories",
+  "formats": [
+    "long",
+    "short"
+  ],
+  "publishing": {
+    "longPerWeek": 3,
+    "shortsPerWeek": 21
+  },
+  "style": "documentary-storytelling",
+  "faceless": true,
+  "competitors": []
+}
