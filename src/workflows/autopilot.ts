@@ -110,7 +110,14 @@ export function todaysPlan(strategy: StrategyOutput | undefined, producedTitles:
   const long = strategy.calendar.find((c) => c.format === 'long' && c.date === today && fresh(c));
   if (long) return long;
   const short = strategy.calendar.find((c) => c.format === 'short' && c.date === today && fresh(c));
-  return short ?? strategy.calendar.find((c) => c.format === 'long' && c.date < today && fresh(c));
+  if (short) return short;
+  const missed = strategy.calendar.find((c) => c.format === 'long' && c.date < today && fresh(c));
+  if (missed) return missed;
+  // Today's topic was used (e.g. blocked → retry): pull the next upcoming topic forward, same format as today.
+  const todayFormat = strategy.calendar.find((c) => c.date === today)?.format;
+  if (!todayFormat) return undefined; // nothing planned for today (e.g. before the calendar starts)
+  const upcoming = strategy.calendar.filter((c) => c.date > today && fresh(c)).sort((a, b) => a.date.localeCompare(b.date));
+  return upcoming.find((c) => c.format === todayFormat) ?? upcoming[0];
 }
 
 export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise<CycleReport> {
@@ -170,7 +177,7 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
         strategy = await replan();
         plan = todaysPlan(strategy, produced, now);
       }
-      if (!plan) rep.skippedProductionReason = 'no long video scheduled for today';
+      if (!plan) rep.skippedProductionReason = 'no unproduced topic left in the calendar';
       else {
         const format = plan.format;
         const title = format === 'short' ? `${plan.title.replace(/^Short:\s*/, '')} — ${plan.linkedLongTitle ?? plan.pillar}` : plan.title;

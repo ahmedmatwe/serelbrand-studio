@@ -33,6 +33,7 @@ test('plan: long video on its day, Shorts pack otherwise, missed long caught up'
   assert.equal(todaysPlan(s, new Set(), new Date('2026-11-07'))?.title, 'A', 'long video day');
   assert.equal(todaysPlan(s, new Set(), new Date('2026-11-08'))?.title, 'S', 'other days: Shorts pack');
   assert.equal(todaysPlan(s, new Set(['S']), new Date('2026-11-09'))?.title, 'A', 'missed long video is caught up');
+  assert.ok(todaysPlan(s, new Set(['A', 'S']), new Date('2026-11-08')), 'today used (blocked → retry): an upcoming topic is pulled forward');
   assert.equal(todaysPlan(s, new Set(['A', 'S']), new Date('2026-11-10'))?.title, 'B');
 });
 
