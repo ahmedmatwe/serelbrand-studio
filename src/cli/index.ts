@@ -116,7 +116,7 @@ async function main() {
         const lock = resolve(ctx.config.rootDir, 'data/autopilot.lock');
         if (!acquireLock(lock)) { out('دورة تانية شغالة دلوقتي — اتخطيت'); break; }
         try {
-          const r = await runCycle(ctx, { renderSize: values.preview ? 'preview' : 'full' });
+          const r = await runCycle(ctx, { renderSize: values.preview ? 'preview' : 'full', force: process.env.FORCE_PRODUCE === 'true' });
           out({ published: r.published, analytics: r.analyticsUpdated.length, produced: r.produced, skipped: r.skippedProductionReason, pendingApprovals: r.pendingApprovals, needsFactReview: r.needsFactReview.length, errors: r.errors });
         } finally { releaseLock(lock); }
         break;

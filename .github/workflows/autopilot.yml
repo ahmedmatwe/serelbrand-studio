@@ -5,7 +5,12 @@ name: autopilot
 on:
   schedule:
     - cron: '20 */3 * * *'   # every 3 hours (UTC)
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Produce a video now (ignore the one-per-day limit)'
+        type: boolean
+        default: false
 
 concurrency:
   group: autopilot
@@ -67,6 +72,8 @@ jobs:
           fi
 
       - name: Autopilot cycle
+        env:
+          FORCE_PRODUCE: ${{ inputs.force || 'false' }}
         run: node --no-warnings src/cli/index.ts autopilot
 
       - name: Save state

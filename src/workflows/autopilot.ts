@@ -26,7 +26,7 @@ import { steps } from './steps.ts';
 export interface CycleOptions {
   now?: Date;
   /** Skip production (e.g. analytics-only runs). */
-  produce?: boolean;
+  produce?: boolean; /** Produce even if today's video already exists (manual test run). */ force?: boolean;
   notify?: (title: string, body: string) => void;
   renderSize?: 'full' | 'preview';
 }
@@ -147,7 +147,7 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   const planned = new Set(ctx.repos.artifacts.listKind('calendar_entry').map((a) => a.video_id));
   const producedToday = ctx.repos.videos.list().some((v) => planned.has(v.id) && v.created_at.slice(0, 10) === day(now));
   if (o.produce === false) rep.skippedProductionReason = 'production disabled for this run';
-  else if (producedToday) rep.skippedProductionReason = 'already produced a video today';
+  else if (producedToday && !o.force) rep.skippedProductionReason = 'already produced a video today';
   else {
     try {
       const niche = ctx.config.channel.niche ?? 'business-stories';
