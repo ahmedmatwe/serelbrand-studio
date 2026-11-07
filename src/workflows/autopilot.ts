@@ -140,9 +140,10 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
   const r = await ctx.providers.llm.generateJson({
     task: 'shorts.topics',
     tier: 'light',
-    system: 'You plan VIRAL YouTube Shorts for an Arabic business-stories channel (audience 18–34 in Egypt and the Gulf). Propose 6 topics, each about a DIFFERENT, very famous company, brand, product or founder that everyone in the Arab world knows (Apple, Coca-Cola, Toyota, Nike, McDonald\'s, Samsung, IKEA, Netflix, Rolex, Ferrari, Lego, Starbucks, …). ' +
-      'Each must be ONE real, documented, surprising fact a viewer will want to share — a hidden secret, an unbelievable origin, a near-bankruptcy, a famous blunder, a genius trick — that is stated on the subject\'s English Wikipedia article and can be told in 45 seconds. Avoid vague strategy talk. ' +
-      'Title in simple Modern Standard Arabic, 4–9 words, naming the subject, e.g. "سر شعار أمازون المبتسم", "لماذا لون فيسبوك أزرق؟", "الشركة التي رفضت شراء جوجل". subject = the exact English Wikipedia article title. angle = the specific fact. Never reuse a topic from `avoid`. JSON only.',
+    system: 'You plan VIRAL, USEFUL YouTube Shorts for an Arabic business channel (audience 18–34 in Egypt and the Gulf who want to earn more, start a project or grow at work). ' +
+      'Propose 6 topics. Each Short teaches ONE practical business lesson the viewer can apply in their own work or small project, proven by ONE real, documented story of a company or founder (the story must be on its English Wikipedia article): a decision that made millions, a mistake that destroyed a giant, a simple idea that changed everything. ' +
+      'The value is the LESSON, the story is the proof. Each topic must use a DIFFERENT company/founder and a DIFFERENT lesson (pricing, customers, quality, timing, focus, marketing, negotiation, saying no, persistence, cash flow…). ' +
+      'Title in simple Modern Standard Arabic, 5–10 words, promising the lesson and naming the subject, e.g. "الغلطة التي أفلست كوداك… احذرها في مشروعك", "درس من أمازون: لماذا تخسر لتربح؟", "كيف أنقذ قرار واحد شركة أبل". subject = the exact English Wikipedia article title. angle = the real story fact + the lesson. Never reuse a topic from `avoid`. JSON only.',
     prompt: JSON.stringify({ niche, avoid: avoid.slice(-150) }),
     schema: PackLLM,
     maxOutputTokens: 3000,

@@ -187,7 +187,7 @@ export const MOCK_FIXTURES: Record<string, MockFixture> = {
   'script.revise': (vars) => vars.previous,
   'research.queries': () => ({ queries: ['Nokia', 'Nokia mobile phones'] }),
   'shorts.topics': () => ({ topics: [
-    { title: 'سر شعار أمازون المبتسم', subject: 'Amazon (company)', angle: 'السهم في الشعار يربط حرف A بحرف Z' },
+    { title: 'سر شعار أمازون المبتسم', subject: 'Amazon (company)', angle: 'السهم في الشعار يربط حرف A بحرف Z — الدرس: هويتك تحكي وعدك' },
     { title: 'لماذا لون فيسبوك أزرق؟', subject: 'Facebook', angle: 'مؤسسه مصاب بعمى ألوان أحمر-أخضر' },
     { title: 'معلومة لا تعرفها عن كوكاكولا', subject: 'Coca-Cola', angle: 'كانت تباع في البداية كدواء في الصيدليات' },
     { title: 'سر اسم شركة نايكي', subject: 'Nike, Inc.', angle: 'الاسم مأخوذ من إلهة النصر' },
