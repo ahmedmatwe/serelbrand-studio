@@ -71,6 +71,8 @@ export class AutoVerifierAgent extends Agent<AutoVerifyInput, AutoVerifyOutput> 
     if (c.sourceUrl?.startsWith('https://')) pages.push(await web.fetchText(c.sourceUrl).catch(() => ({ url: c.sourceUrl!, text: '' })));
     const q = c.searchQuery || c.claim;
     pages.push(...(await web.wikipedia(q, 'en', 3).catch(() => [])));
+    // Also the pages the script was written from (after full pages, so an excerpt never hides a full page).
+    for (const r of this.ctx.repos.artifacts.latest<{ sources: { url: string; excerpt: string }[] }>(videoId, 'research')?.data.sources ?? []) pages.push({ url: r.url, text: r.excerpt });
     pages.push(...(await web.wikipedia(c.claim.slice(0, 120), 'ar', 2).catch(() => [])));
     const keywords = [...q.split(/\s+/), ...claimNumbers(c.claim)];
     const out: NonNullable<CheckedClaim['evidence']> = [];

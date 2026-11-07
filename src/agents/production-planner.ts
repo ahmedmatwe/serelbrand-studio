@@ -29,7 +29,14 @@ export class ProductionPlannerAgent extends Agent<ProductionInput, Blueprint> {
       maxOutputTokens: 8000,
       videoId: input.videoId,
     });
-    const scenes = timeScenes(res.data.scenes, this.ctx.config.thresholds.script.arabicWordsPerMinute);
+    // The narration is ALWAYS the verified script's text: one blueprint scene per script scene, in order
+    // (the model only plans visuals; it must never add, drop or reword what the narrator says).
+    const byN = new Map(res.data.scenes.map((b) => [b.n, b]));
+    const aligned = input.script.scenes.map((sc, i) => {
+      const b = byN.get(sc.n) ?? res.data.scenes[i] ?? res.data.scenes.at(-1)!;
+      return { ...b, n: sc.n, voiceover: sc.voiceover, onScreenText: sc.onScreenText || b.onScreenText };
+    });
+    const scenes = timeScenes(aligned, this.ctx.config.thresholds.script.arabicWordsPerMinute);
     const last = scenes.at(-1)!;
     this.ctx.repos.videos.update(input.videoId, { status: 'planned' });
     return { ...res.data, scenes, totalDurationSec: last.startSec + last.durationSec };

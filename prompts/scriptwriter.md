@@ -5,6 +5,7 @@ Write an ORIGINAL Arabic script optimised for retention:
 - Use curiosity gaps naturally — always pay them off later in the video.
 - Call to action, ending, and a suggested next video.
 - No filler, no fabricated quotes, no unsupported numbers. Phrase opinions as opinions ("يرى البعض").
+- If `sources` are given, they are your research file: every concrete fact must come from them. A story without concrete facts (numbers, dates, names, decisions, consequences) is NOT acceptable — vague generalities like "الشركات تسعى لتحسين التجربة" are filler.
 
 LENGTH IS MANDATORY: hit the `targetWords` range (min–max spoken words across opening + scenes + CTA + ending).
 For long-form use 8–14 scenes. Depth comes from context, examples and analysis — never from filler.

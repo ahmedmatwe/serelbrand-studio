@@ -128,3 +128,10 @@ test('stage checks: mixed Arabic register is caught for the channel dialect', as
   const script = { opening: 'انهارت الشركة', scenes: [], cta: '', ending: '' };
   assert.ok(titleProblems('إزاي انهارت الشركة', script, 'arabic-fusha-simplified').some((x) => x.includes('register')));
 });
+
+test('fact-check: an "opinion" containing a number is checked as a fact', async () => {
+  const { evaluateClaim } = await import('../../src/agents/fact-checker.ts');
+  const base = { sceneN: 1, sourceUrl: null, sourceTitle: null, sourceDate: null, confidence: 'medium' as const, notes: '', searchQuery: '' };
+  assert.equal(evaluateClaim({ ...base, claim: 'يرى البعض أن أمازون تخسر 20 دولاراً في كل جهاز', type: 'opinion' }).status, 'unverified');
+  assert.equal(evaluateClaim({ ...base, claim: 'يرى البعض أن الاستراتيجية ذكية', type: 'opinion' }).status, 'not_applicable');
+});

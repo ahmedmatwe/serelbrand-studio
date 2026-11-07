@@ -12,7 +12,8 @@ import { resolve } from 'node:path';
 import type { AgentContext } from '../agents/base.ts';
 import type { StrategyOutput } from '../agents/content-strategy.ts';
 import type { TrendResearchOutput } from '../agents/trend-research.ts';
-import type { FactCheckReport } from '../agents/schemas.ts';
+import type { CalendarEntry, FactCheckReport } from '../agents/schemas.ts';
+import { z } from 'zod';
 import type { PublishLog } from '../publishing/publisher.ts';
 import { postPublish, produceVideo, publish } from './orchestrator.ts';
 import { approve } from '../publishing/approval.ts';
@@ -123,6 +124,38 @@ export function todaysPlan(strategy: StrategyOutput | undefined, producedTitles:
   return upcoming.find((c) => c.format === todayFormat) ?? upcoming[0];
 }
 
+/** The long video due today (or a missed one), if any. */
+export function longPlan(strategy: StrategyOutput | undefined, producedTitles: Set<string>, now: Date) {
+  if (!strategy) return undefined;
+  const today = day(now);
+  const fresh = (c: { title: string }) => !producedTitles.has(c.title) && !isDuplicateTopic(c.title, producedTitles);
+  return strategy.calendar.find((c) => c.format === 'long' && c.date === today && fresh(c))
+    ?? strategy.calendar.find((c) => c.format === 'long' && c.date < today && fresh(c));
+}
+
+const PackLLM = z.object({ topics: z.array(z.object({ title: z.string().min(5), subject: z.string().min(2), angle: z.string() })).min(3) });
+/** Three DIFFERENT, clear, specific Shorts topics ("سر …", "لماذا …", "معلومة عن …"), never repeating past titles. */
+export async function planShortsPack(ctx: AgentContext, niche: string, avoid: string[]) {
+  const r = await ctx.providers.llm.generateJson({
+    task: 'shorts.topics',
+    tier: 'light',
+    system: 'You plan YouTube Shorts for an Arabic business-stories channel. Propose 5 Shorts topics, each about a DIFFERENT real company, brand, product or founder, with one clear surprising fact or secret that can be told in 45 seconds. Title in Arabic (Modern Standard, simple), 4–9 words, naming the subject explicitly, e.g. "سر شعار أمازون المبتسم", "لماذا لون فيسبوك أزرق؟", "معلومة لا تعرفها عن كوكاكولا". subject = the English Wikipedia name of the company/product/person. angle = the specific fact or secret. Never reuse a topic from `avoid`. JSON only.',
+    prompt: JSON.stringify({ niche, avoid: avoid.slice(-150) }),
+    schema: PackLLM,
+    maxOutputTokens: 3000,
+  }).catch(() => undefined);
+  const seen = new Set<string>();
+  const picked: { title: string; subject: string; angle: string }[] = [];
+  for (const t of r?.data.topics ?? []) {
+    const key = t.subject.toLowerCase();
+    if (seen.has(key) || isDuplicateTopic(t.title, new Set(avoid))) continue;
+    seen.add(key);
+    picked.push(t);
+    if (picked.length === 3) break;
+  }
+  return picked;
+}
+
 export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise<CycleReport> {
   const now = o.now ?? new Date();
   const notify = o.notify ?? macNotify;
@@ -152,27 +185,46 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   // Re-learn the best publishing hours from mature analytics (no-op until there is enough data).
   learnPublishSlots(ctx, ctx.config.thresholds.analytics.minVideosForStrategicConclusion);
 
-  // 3) Production: one per day — the long video (with its 3 Shorts) or a 3-Shorts pack.
-  //    Only autopilot productions count (they carry a calendar entry); manual tests don't block the day.
-  // A blocked or crashed video doesn't use up the day: another topic is tried right away in the same run
-  // (max 3 attempts a day and a time budget, so the free API quotas are never burnt in a loop).
+  // 3) Production, every day: a pack of 3 standalone Shorts (3 different topics), plus — on long-video days
+  //    (2 a week) — one standalone long video (no Shorts cut from it). A blocked or crashed video doesn't use
+  //    up the day: another topic is tried right away in the same run (max 3 failed attempts per format a day,
+  //    and a time budget, so the free API quotas are never burnt in a loop).
   const planned = new Set(ctx.repos.artifacts.listKind('calendar_entry').map((a) => a.video_id));
   const t0 = Date.now();
   const budgetMs = o.productionBudgetMs ?? 100 * 60_000;
   let attempts = 0;
-  let succeeded = false;
+  let forcedDone = false;
+  // Make sure a content calendar exists before deciding what is due today (first run / calendar ran out).
+  if (o.produce !== false) {
+    try {
+      const niche = ctx.config.channel.niche ?? 'business-stories';
+      const st = ctx.repos.artifacts.latest<StrategyOutput>(null, 'content_strategy')?.data;
+      if (!st || !st.calendar.some((c) => c.date >= day(now))) {
+        const avoid = [...ctx.repos.videos.list().map((v) => v.title), ...ctx.repos.artifacts.listKind<{ title: string }>('calendar_entry').map((a) => a.data.title)];
+        await steps['trend-research'](ctx, { niche });
+        await steps['content-strategy'](ctx, { niche, startDate: day(now), avoid });
+      }
+    } catch (err) { rep.errors.push(`planning: ${(err as Error).message}`); }
+  }
   for (;;) {
-    // Attempts that died only because the free voice quota was used up don't count toward the 3/day limit.
+    // Attempts that died only because the free voice quota was used up don't count toward the daily limit.
     const quotaOnly = (id: string) => (ctx.repos.artifacts.latest<{ blockers: string[] }>(id, 'auto_blocked')?.data.blockers ?? []).some((b) => b.includes('TTS_DAILY_QUOTA'));
     const todays = ctx.repos.videos.list().filter((v) => planned.has(v.id) && v.created_at.slice(0, 10) === day(now) && !quotaOnly(v.id));
-    const producedToday = todays.some((v) => !ctx.repos.artifacts.latest(v.id, 'auto_blocked'));
+    const ok = (f: string) => todays.some((v) => v.format === f && !ctx.repos.artifacts.latest(v.id, 'auto_blocked'));
+    const failed = (f: string) => todays.filter((v) => v.format === f && ctx.repos.artifacts.latest(v.id, 'auto_blocked')).length;
+    const strat = ctx.repos.artifacts.latest<StrategyOutput>(null, 'content_strategy')?.data;
+    const producedNow = new Set([...ctx.repos.videos.list().map((v) => v.title), ...ctx.repos.artifacts.listKind<{ title: string }>('calendar_entry').map((a) => a.data.title)]);
+    const longDue = !ok('long') && failed('long') < 3 && Boolean(longPlan(strat, producedNow, now));
+    const packDue = !ok('short') && failed('short') < 3;
     if (o.produce === false) { rep.skippedProductionReason = 'production disabled for this run'; break; }
     const quota = ctx.repos.artifacts.latest<{ until: string }>(null, 'tts_quota_exhausted')?.data;
     if (quota && quota.until > now.toISOString()) { rep.skippedProductionReason = `voice quota used up — waiting until ${quota.until.slice(0, 16)} UTC`; break; }
-    if (succeeded || attempts >= 3) break;
-    if (!o.force && producedToday) { if (!attempts) rep.skippedProductionReason = 'already produced a video today'; break; }
-    if (!o.force && todays.length >= 3) { rep.skippedProductionReason = '3 attempts today were blocked — trying again tomorrow'; break; }
+    if (attempts >= 5) break;
+    const forceNow = o.force && !forcedDone;
+    if (!forceNow && !longDue && !packDue) { if (!attempts) rep.skippedProductionReason = ok('short') ? "today's videos are already produced" : '3 attempts today were blocked — trying again tomorrow'; break; }
     if (attempts && Date.now() - t0 > budgetMs) { rep.skippedProductionReason = 'no time left in this run for another attempt — the next cycle continues'; break; }
+    forcedDone = true;
+    const want: 'long' | 'short' = longDue ? 'long' : 'short';
     if (attempts) ctx.logger.child('autopilot').warn('previous video blocked — trying another topic now', { attempt: attempts + 1 });
     attempts++;
     try {
@@ -186,16 +238,22 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
         return (await steps['content-strategy'](ctx, { niche, startDate: day(now), avoid: [...produced] })) as StrategyOutput;
       };
       if (!strategy || !strategy.calendar.some((c) => c.date >= day(now))) strategy = await replan();
-      let plan = todaysPlan(strategy, produced, now);
-      // Topics ran out (everything planned is already produced) → plan fresh, non-repeating ideas.
-      if (!plan && !strategy.calendar.some((c) => c.date >= day(now) && c.format === 'long' && !produced.has(c.title))) {
-        strategy = await replan();
-        plan = todaysPlan(strategy, produced, now);
+      let plan: CalendarEntry | undefined;
+      if (want === 'long') {
+        plan = longPlan(strategy, produced, now);
+        // Topics ran out (everything planned is already produced) → plan fresh, non-repeating ideas.
+        if (!plan && !strategy.calendar.some((c) => c.date >= day(now) && c.format === 'long' && !produced.has(c.title))) {
+          strategy = await replan();
+          plan = longPlan(strategy, produced, now);
+        }
+      } else {
+        const topics = await planShortsPack(ctx, niche, [...produced]);
+        if (topics.length === 3) plan = { day: 0, date: day(now), format: 'short', title: `شورتس: ${topics.map((t) => t.title).join(' | ')}`, pillar: 'shorts', kind: 'evergreen', topics };
       }
-      if (!plan) { rep.skippedProductionReason = 'no unproduced topic left in the calendar'; break; }
+      if (!plan) { rep.skippedProductionReason = want === 'long' ? 'no unproduced long topic left in the calendar' : 'could not plan 3 new Shorts topics'; break; }
       else {
         const format = plan.format;
-        const title = format === 'short' ? `${plan.title.replace(/^Short:\s*/, '')} — ${plan.linkedLongTitle ?? plan.pillar}` : plan.title;
+        const title = plan.title;
         const vid = ctx.repos.videos.create({ title, format, niche });
         ctx.repos.artifacts.save({ videoId: vid.id, kind: 'calendar_entry', agent: 'autopilot', data: plan });
         planned.add(vid.id);
@@ -231,7 +289,6 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
             if (pub.status === 'succeeded') rep.published.push(r.videoId);
             else rep.errors.push(`publish ${r.videoId}: ${pub.error}`);
             rep.produced.autoApproved = true;
-            succeeded = true;
             rep.produced.publishAt = publishAt;
           } else {
             rep.produced.autoApproved = false;

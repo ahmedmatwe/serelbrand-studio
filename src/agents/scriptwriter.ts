@@ -2,6 +2,7 @@ import { Agent, countWords } from './base.ts';
 import { ScriptLLM, type Script } from './schemas.ts';
 import { loadPrompt } from '../prompts.ts';
 import { scriptProblems } from './stage-checks.ts';
+import { researchTopic } from './research.ts';
 
 export interface ScriptInput { videoId: string; title: string; angle?: string; format: 'long' | 'short'; audience?: string }
 
@@ -20,15 +21,25 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
       input.format === 'long'
         ? { minWords: t.longForm.minMinutes * t.arabicWordsPerMinute, maxWords: t.longForm.maxMinutes * t.arabicWordsPerMinute }
         : { minWords: 240, maxWords: 3 * Math.floor(((t.short.maxSeconds - 8) / 60) * t.arabicWordsPerMinute) };
+    // A Shorts pack covers 3 DIFFERENT topics (planned by the autopilot), one Short each.
+    const topics = this.ctx.repos.artifacts.latest<{ topics?: { title: string; subject: string; angle: string }[] }>(input.videoId, 'calendar_entry')?.data.topics;
     // "short" = a Shorts pack: 3 independent mini-stories, each rendered as its own vertical Short.
     const pack = input.format === 'short'
-      ? { shortsPack: 'Write EXACTLY 3 scenes. Each scene is a complete, independent YouTube Short of 40–55 seconds (90–115 spoken words): curiosityGap = its hook question (the first line), voiceover = the full mini-story with a clear payoff, onScreenText = a 2–4 word title. Keep opening, cta and ending to one short sentence each.' }
+      ? { shortsPack: 'Write EXACTLY 3 scenes. Each scene is a complete, independent YouTube Short of 40–55 seconds (90–115 spoken words)' + (topics?.length === 3 ? ` — scene 1 is about "${topics[0]!.title}", scene 2 about "${topics[1]!.title}", scene 3 about "${topics[2]!.title}" (three DIFFERENT subjects; each scene tells only its own topic)` : '') + '. The FIRST sentence names the company/product explicitly and states the surprising fact or secret, so the viewer knows within 2 seconds what it is about; then the concrete story (who, when, what happened, numbers from the sources) and a clear payoff. curiosityGap = its hook question, onScreenText = the subject name (1–3 words). Keep opening, cta and ending to one short sentence each.', topics }
+      : {};
+    // Real sources first: facts in the script must come from them, so verification can confirm them.
+    const sources = topics?.length
+      ? (await Promise.all(topics.map((t) => researchTopic(this.ctx, input.videoId, `${t.subject} ${t.angle}`, t.title).catch(() => [])))).flat()
+      : await researchTopic(this.ctx, input.videoId, input.title, input.angle).catch(() => []);
+    if (topics?.length) this.ctx.repos.artifacts.save({ videoId: input.videoId, kind: 'research', agent: 'research', data: { queries: topics.map((t) => t.subject), sources } });
+    const sourcing = sources.length
+      ? { sources, sourceRule: 'Use these sources as your ONLY basis for facts: every number, date, name, quote and event in the script must appear in one of them. Build the story from their most surprising concrete facts (at least 6 distinct facts for a long video, at least 2 per Short). Never invent or round figures differently.' }
       : {};
     const res = await this.ctx.providers.llm.generateJson({
       task: 'script.write',
       tier: 'writing',
       system: loadPrompt('scriptwriter'),
-      prompt: JSON.stringify({ ...input, ...pack, brief: this.ctx.repos.artifacts.latest(input.videoId, 'brief')?.data, targetWords: target, dialect: this.ctx.config.channel.dialect }),
+      prompt: JSON.stringify({ ...input, ...pack, ...sourcing, brief: this.ctx.repos.artifacts.latest(input.videoId, 'brief')?.data, targetWords: target, dialect: this.ctx.config.channel.dialect }),
       schema: ScriptLLM,
       maxOutputTokens: 16000,
       videoId: input.videoId,
@@ -52,6 +63,8 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
       });
       if (countWords(spokenText(exp.data)) > words) data = exp.data;
     }
+    // A Shorts pack is exactly 3 Shorts, even if the model wrote more scenes.
+    if (input.format === 'short' && data.scenes.length > 3) data = { ...data, scenes: data.scenes.slice(0, 3) };
     // Stage gate: check the script now and fix the exact problems (up to 2 rewrites, keep the best).
     let problems = scriptProblems(data, target, this.ctx.config.channel.dialect);
     for (let i = 0; i < 2 && problems.length; i++) {

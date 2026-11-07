@@ -146,3 +146,29 @@ test('research: niche → trends → strategy produce channel-level artifacts', 
   assert.ok(s.summary.d30.short > 0);
   ctx.close();
 });
+
+test('qc: a video with too few verified facts is blocked even if nothing in it is false', async () => {
+  const { qualityChecklist, qcBlockers } = await import('../../src/reports/qc.ts');
+  const ctx = testContext();
+  const v = ctx.repos.videos.create({ title: 't', format: 'long' });
+  await steps.scriptwriter(ctx, { videoId: v.id });
+  const claim = (status: string) => ({ claim: 'x', sceneN: 1, type: 'fact', sourceUrl: null, sourceTitle: null, sourceDate: null, confidence: 'high', notes: '', searchQuery: '', status, humanReviewRequired: false, reasons: [] });
+  ctx.repos.artifacts.save({ videoId: v.id, kind: 'fact_check', agent: 't', data: { claims: [claim('verified'), claim('not_applicable'), claim('not_applicable')], overall: 'verified', summary: '' } });
+  assert.ok(qcBlockers(qualityChecklist(ctx, v.id)).some((b) => b.includes('معلومات حقيقية مؤكدة')));
+  ctx.repos.artifacts.save({ videoId: v.id, kind: 'fact_check', agent: 't', data: { claims: [1, 2, 3, 4].map(() => claim('verified')), overall: 'verified', summary: '' } });
+  assert.ok(!qcBlockers(qualityChecklist(ctx, v.id)).some((b) => b.includes('معلومات حقيقية مؤكدة')));
+  ctx.close();
+});
+
+test('blueprint: narration is always the verified script text, one scene per script scene', async () => {
+  const ctx = testContext();
+  const v = ctx.repos.videos.create({ title: 't', format: 'long' });
+  await steps.scriptwriter(ctx, { videoId: v.id });
+  const script = ctx.repos.artifacts.latest<Script>(v.id, 'script')!.data;
+  const edited = { ...script, scenes: script.scenes.slice(0, 2).map((s) => ({ ...s, voiceover: s.voiceover + ' (نص بعد التحقق)' })) };
+  ctx.repos.artifacts.save({ videoId: v.id, kind: 'script', agent: 'test', data: edited });
+  await steps['production-planner'](ctx, { videoId: v.id });
+  const bp = ctx.repos.artifacts.latest<Blueprint>(v.id, 'blueprint')!.data;
+  assert.deepEqual(bp.scenes.map((s) => s.voiceover), edited.scenes.map((s) => s.voiceover));
+  ctx.close();
+});

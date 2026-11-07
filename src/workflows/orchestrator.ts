@@ -43,7 +43,7 @@ export async function produceVideo(
   if (start < 0) throw new StudioError('USAGE', `"${o.fromStep}" is not a production step`);
   const outcomes: StepOutcome[] = [];
   for (const step of chain.slice(start)) {
-    const r = await runJob(ctx, step, step === 'renderer' ? { videoId, size: o.renderSize } : { videoId });
+    const r = await runJob(ctx, step, step === 'renderer' ? { videoId, size: o.renderSize, shorts: o.format === 'long' ? false : undefined } : { videoId });
     outcomes.push(r);
     if (r.status !== 'succeeded') {
       ctx.audit.record({ actor: 'orchestrator', action: 'workflow.halted', target: videoId, details: { step, status: r.status, error: r.error } });

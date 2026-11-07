@@ -44,6 +44,10 @@ export function qualityChecklist(ctx: AgentContext, videoId: string): QcItem[] {
   const misleading = comp?.issues.some((i) => i.check.startsWith('packaging.')) ?? true;
   add('هل العنوان جذاب وغير مضلل؟', !misleading, true, seo?.primaryTitle ?? '');
   add('هل هناك مصادر موثوقة؟', fc?.overall === 'verified', true, fc?.summary ?? '');
+  // A story with no proven facts is filler, even if nothing in it is false.
+  const verified = fc?.claims.filter((c) => c.status === 'verified').length ?? 0;
+  const needFacts = script?.format === 'short' ? 2 : 4;
+  add('هل في الفيديو معلومات حقيقية مؤكدة كفاية؟', verified >= needFacts, true, `${verified} معلومة مؤكدة (المطلوب ${needFacts} على الأقل)`);
   add('هل الفيديو مناسب لسياسات يوتيوب؟', comp?.label === 'Low risk', true, comp?.label ?? '');
   add('هل النهاية تشجع على مشاهدة فيديو آخر؟', Boolean(script?.nextVideoSuggestion), false, script?.nextVideoSuggestion ?? '');
   add('هل تم تجهيز نسخة Shorts؟', script?.format === 'short' || (r?.shorts.length ?? 0) > 0, false, `${r?.shorts.length ?? 0} Shorts`);

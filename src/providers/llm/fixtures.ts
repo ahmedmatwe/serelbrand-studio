@@ -185,6 +185,14 @@ export const MOCK_FIXTURES: Record<string, MockFixture> = {
   // Offline: the fixer cannot invent text, so it returns the script unchanged.
   'script.fixclaims': (vars) => vars.previous,
   'script.revise': (vars) => vars.previous,
+  'research.queries': () => ({ queries: ['Nokia', 'Nokia mobile phones'] }),
+  'shorts.topics': () => ({ topics: [
+    { title: 'سر شعار أمازون المبتسم', subject: 'Amazon (company)', angle: 'السهم في الشعار يربط حرف A بحرف Z' },
+    { title: 'لماذا لون فيسبوك أزرق؟', subject: 'Facebook', angle: 'مؤسسه مصاب بعمى ألوان أحمر-أخضر' },
+    { title: 'معلومة لا تعرفها عن كوكاكولا', subject: 'Coca-Cola', angle: 'كانت تباع في البداية كدواء في الصيدليات' },
+    { title: 'سر اسم شركة نايكي', subject: 'Nike, Inc.', angle: 'الاسم مأخوذ من إلهة النصر' },
+    { title: 'كيف بدأت سامسونج؟', subject: 'Samsung', angle: 'بدأت كشركة لبيع الأسماك المجففة والخضروات' },
+  ] }),
   'script.smooth': (vars) => vars.previous,
   'seo.retitle': (vars) => vars.previous,
   'captions.translate': (vars) => ({ lines: ((vars.lines as string[]) ?? []).map((_, i) => `English caption ${i + 1}`) }),

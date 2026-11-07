@@ -48,6 +48,8 @@ export interface CalendarEntry {
   pillar: string;
   kind: 'evergreen' | 'trending' | 'experiment';
   linkedLongTitle?: string;
+  /** Shorts pack: the 3 different topics (one Short each). */
+  topics?: { title: string; subject: string; angle: string }[];
 }
 
 // ---------- Creative brief (strategy + titles) ----------

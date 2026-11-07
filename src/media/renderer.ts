@@ -243,7 +243,8 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     await this.planShots(o.videoId, o.timed, bp, o.size, o.notes, new Set());
     const shots = o.timed.flatMap((s) => s.shots ?? []);
     const shorts: RenderedShort[] = [];
-    for (const s of o.timed) {
+    const packTopics = this.ctx.repos.artifacts.latest<{ topics?: { title: string }[] }>(o.videoId, 'calendar_entry')?.data.topics;
+    for (const [i, s] of o.timed.entries()) {
       const d = Math.min(s.duration, SHORT_MAX_SEC + 1);
       if (s.duration > SHORT_MAX_SEC + 1) o.notes.push(`Scene ${s.n} is ${Math.round(s.duration)}s — trimmed to ${SHORT_MAX_SEC + 1}s`);
       const audio = resolve(o.dir, `short-${s.n}.m4a`);
@@ -251,7 +252,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       const path = resolve(o.dir, `short-${s.n}.mp4`);
       await this.renderTimeline([{ ...s, start: 0, duration: d, shots: trimShots(s.shots, d) }], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
       const sc = script.scenes.find((x) => x.n === s.n);
-      shorts.push({ path, durationSec: Number(d.toFixed(2)), scenes: [s.n], title: sc?.curiosityGap || sc?.onScreenText || script.mainTitle });
+      shorts.push({ path, durationSec: Number(d.toFixed(2)), scenes: [s.n], title: packTopics?.[i]?.title || sc?.curiosityGap || sc?.onScreenText || script.mainTitle });
     }
     const first = shorts[0]!;
     const audio = await volumeStats(resolve(o.dir, `short-${o.timed[0]!.n}.m4a`));

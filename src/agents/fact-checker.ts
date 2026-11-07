@@ -11,6 +11,8 @@ export function evaluateClaim(c: FactCheckLLMClaim, now = new Date(), opts: { mo
   // Sources proposed by a language model can be hallucinated, so they are never auto-verified.
   const modelSourced = opts.modelSourced ?? true;
   const reasons: string[] = [];
+  // A "opinion" that carries a number, a year or a percentage is a factual claim in disguise: check it.
+  if ((c.type === 'opinion' || c.type === 'prediction') && /[0-9٠-٩]|٪|%/.test(c.claim)) c = { ...c, type: 'fact' };
   if (c.type === 'opinion' || c.type === 'prediction') {
     return { ...c, status: 'not_applicable', humanReviewRequired: false, reasons: [`${c.type}: must be phrased as such in the script`] };
   }

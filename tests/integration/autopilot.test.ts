@@ -47,18 +47,24 @@ test('autopilot: plans, produces with Shorts, notifies, never approves; second r
     assert.ok(r1.produced, 'produced a video on a calendar day');
     ids.push(r1.produced!.videoId);
     const rd = ctx.repos.artifacts.latest<RenderOutput>(r1.produced!.videoId, 'render')!.data;
-    // Mock scenes are short, so the first Short already covers every curiosity-gap scene.
-    assert.ok(rd.shorts.length >= 1, `expected Shorts, got ${rd.shorts.length}`);
+    // The long video is standalone: no Shorts are cut from it (Shorts come as their own daily pack).
+    assert.equal(rd.shorts.length, 0);
     assert.equal(ctx.repos.approvals.pending().length, 0);
     assert.equal(r1.produced!.recommendation, 'blocked', 'mock sources keep it blocked until a human verifies');
-    assert.ok(r1.needsFactReview.length === 1);
+    assert.ok(r1.needsFactReview.length >= 1);
     assert.ok(notes.some((n) => n.includes('فيديو جديد')));
     assert.ok(existsSync(resolve(ROOT, 'reports/daily', `${new Date().toISOString().slice(0, 10)}.md`)));
     assert.equal(ctx.repos.videos.list().filter((v) => v.status === 'approved').length, 0, 'autopilot never approves');
 
+    // Same day, next cycle: the daily pack of 3 Shorts on 3 different topics.
     const r2 = await runCycle(ctx, { renderSize: 'preview', notify: () => {} });
-    assert.equal(r2.produced, null);
-    assert.match(r2.skippedProductionReason!, /already produced/);
+    assert.ok(r2.produced, 'shorts pack produced');
+    const pack = ctx.repos.artifacts.latest<RenderOutput>(r2.produced!.videoId, 'render')!.data;
+    assert.equal(pack.shorts.length, 3);
+    assert.deepEqual(pack.shorts.map((x) => x.title), ['سر شعار أمازون المبتسم', 'لماذا لون فيسبوك أزرق؟', 'معلومة لا تعرفها عن كوكاكولا']);
+    const r3 = await runCycle(ctx, { renderSize: 'preview', notify: () => {} });
+    assert.equal(r3.produced, null);
+    assert.match(r3.skippedProductionReason!, /already produced/);
 
     // Human side (dashboard): verify every claim → approval → approve → upload.
     const d = await startDashboard(ctx, 18000 + Math.floor(Math.random() * 1000));
