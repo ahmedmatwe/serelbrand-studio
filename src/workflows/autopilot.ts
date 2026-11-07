@@ -199,7 +199,10 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     try {
       const niche = ctx.config.channel.niche ?? 'business-stories';
       const st = ctx.repos.artifacts.latest<StrategyOutput>(null, 'content_strategy')?.data;
-      if (!st || !st.calendar.some((c) => c.date >= day(now))) {
+      // Also re-plan when the cadence changed (e.g. 3 → 2 long videos a week): count longs in the next 7 days.
+      const in7 = (c: { date: string }) => c.date >= day(now) && c.date < day(new Date(now.getTime() + 7 * 86_400_000));
+      const cadenceChanged = st ? st.calendar.filter((c) => c.format === 'long' && in7(c)).length > ctx.config.channel.publishing.longPerWeek : false;
+      if (!st || !st.calendar.some((c) => c.date >= day(now)) || cadenceChanged) {
         const avoid = [...ctx.repos.videos.list().map((v) => v.title), ...ctx.repos.artifacts.listKind<{ title: string }>('calendar_entry').map((a) => a.data.title)];
         await steps['trend-research'](ctx, { niche });
         await steps['content-strategy'](ctx, { niche, startDate: day(now), avoid });
