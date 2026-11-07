@@ -12,6 +12,8 @@ export interface LLMRequest<T> {
   /** Free-form variables (also handed to mocks so fixtures can adapt). */
   vars?: Record<string, unknown>;
   maxOutputTokens?: number;
+  /** Optional images for vision models (small JPEG/PNG previews, base64). */
+  images?: { mimeType: string; data: string; /** Text placed right before the image (e.g. "Shot 1 – candidate 2"). */ label?: string }[];
 }
 
 export interface LLMUsage { inputTokens: number; outputTokens: number; model: string }

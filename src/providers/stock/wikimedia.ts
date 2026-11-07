@@ -56,6 +56,7 @@ export class WikimediaStock implements StockProvider {
       return [{
         id: `wikimedia-${p.title}`, kind: 'image' as const, path: ii.thumburl ?? ii.url, license: 'licensed' as const, source: 'wikimedia',
         attribution: `${artist} — ${license}, via Wikimedia Commons`, pageUrl: ii.descriptionurl, width: ii.width, height: ii.height, aiGenerated: false,
+        previewUrl: (ii.thumburl ?? ii.url).replace(/\/(\d+)px-/, '/400px-'),
         tags: `${p.title.replace(/^File:/, '').replace(/\.\w+$/, '')} ${desc}`.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1),
       }];
     });

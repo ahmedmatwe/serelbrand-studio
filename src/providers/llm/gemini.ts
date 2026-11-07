@@ -54,7 +54,7 @@ export class GeminiLLM implements LLMProvider {
     };
   }
 
-  private async call(model: string, system: string, userText: string, maxOutputTokens: number): Promise<{ text: string; inTok: number; outTok: number }> {
+  private async call(model: string, system: string, userText: string, maxOutputTokens: number, images: { mimeType: string; data: string; label?: string }[] = []): Promise<{ text: string; inTok: number; outTok: number }> {
     let res: Response;
     try {
       res = await this.o.fetchImpl(`${this.o.baseUrl}/models/${encodeURIComponent(model)}:generateContent`, {
@@ -62,7 +62,7 @@ export class GeminiLLM implements LLMProvider {
         headers: { 'content-type': 'application/json', 'x-goog-api-key': this.o.apiKey },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: 'user', parts: [{ text: userText }] }],
+          contents: [{ role: 'user', parts: [{ text: userText }, ...images.flatMap((im) => [...(im.label ? [{ text: im.label }] : []), { inlineData: { mimeType: im.mimeType, data: im.data } }])] }],
           generationConfig: { responseMimeType: 'application/json', temperature: 0.7, maxOutputTokens },
         }),
         signal: AbortSignal.timeout(this.o.timeoutMs),
@@ -93,11 +93,11 @@ export class GeminiLLM implements LLMProvider {
    * Tries each model in a comma-separated list ("a,b,c") in order: a busy/over-quota model (503/429)
    * or a retired one (404) falls through to the next. Other errors stop immediately.
    */
-  private async callWithFallback(models: string[], system: string, userText: string, maxOutputTokens: number) {
+  private async callWithFallback(models: string[], system: string, userText: string, maxOutputTokens: number, images?: { mimeType: string; data: string; label?: string }[]) {
     let last: unknown;
     for (const model of models) {
       try {
-        return { ...(await this.call(model, system, userText, maxOutputTokens)), model };
+        return { ...(await this.call(model, system, userText, maxOutputTokens, images)), model };
       } catch (err) {
         last = err;
         const m = (err as Error).message;
@@ -119,7 +119,7 @@ export class GeminiLLM implements LLMProvider {
     for (let attempt = 0; attempt <= this.o.repairAttempts; attempt++) {
       // Each repair attempt starts from the next model, so one model's bad streak can't sink the task.
       const order = [...models.slice(attempt % models.length), ...models.slice(0, attempt % models.length)];
-      const r = await this.callWithFallback(order, req.system, prompt, req.maxOutputTokens ?? 16_384);
+      const r = await this.callWithFallback(order, req.system, prompt, req.maxOutputTokens ?? 16_384, req.images);
       model = r.model;
       inTok += r.inTok;
       outTok += r.outTok;

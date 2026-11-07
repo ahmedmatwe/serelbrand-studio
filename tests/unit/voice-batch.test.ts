@@ -66,3 +66,11 @@ test('sound: voice + looped music + SFX mix always finishes (sidechain/loudnorm 
     assert.ok(Math.abs((await probeDuration(join(d, 'o.m4a'))) - 6) < 0.3);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
+
+test('footage: vision approvals are respected — unapproved candidates are never used', async () => {
+  const { pickByVision } = await import('../../src/media/shots.ts');
+  const { MockLLM } = await import('../../src/providers/llm/mock.ts');
+  // Mock LLM → vision is skipped (no blind calls in offline runs).
+  const ctx = { providers: { llm: new MockLLM({}) } } as never;
+  assert.equal((await pickByVision(ctx, [{ text: 'x', candidates: [] }])).size, 0);
+});

@@ -133,7 +133,7 @@ export function longPlan(strategy: StrategyOutput | undefined, producedTitles: S
     ?? strategy.calendar.find((c) => c.format === 'long' && c.date < today && fresh(c));
 }
 
-const PackLLM = z.object({ topics: z.array(z.object({ title: z.string().min(5), subject: z.string().min(2), angle: z.string() })).min(3) });
+const PackLLM = z.object({ topics: z.array(z.object({ title: z.string().min(5), subject: z.string().min(2), angle: z.string(), kind: z.enum(['idea', 'story']).default('idea') })).min(3) });
 // (6 proposed, the first 3 distinct subjects are used.)
 /** Three DIFFERENT, clear, specific Shorts topics ("سر …", "لماذا …", "معلومة عن …"), never repeating past titles. */
 export async function planShortsPack(ctx: AgentContext, niche: string, avoid: string[]) {
@@ -141,16 +141,17 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
     task: 'shorts.topics',
     tier: 'light',
     system: 'You plan VIRAL, USEFUL YouTube Shorts for an Arabic business channel (audience 18–34 in Egypt and the Gulf who want to earn more, start a project or grow at work). ' +
-      'Propose 6 topics. Each Short teaches ONE practical business lesson the viewer can apply in their own work or small project, proven by ONE real, documented story of a company or founder (the story must be on its English Wikipedia article): a decision that made millions, a mistake that destroyed a giant, a simple idea that changed everything. ' +
-      'The value is the LESSON, the story is the proof. Each topic must use a DIFFERENT company/founder and a DIFFERENT lesson (pricing, customers, quality, timing, focus, marketing, negotiation, saying no, persistence, cash flow…). ' +
-      'Frame each lesson as a SECRET, an IDEA or a little-known piece of information people love to discover and share ("السر الذي…", "الفكرة التي…", "معلومة لا يعرفها أغلب أصحاب المشاريع…"). ' +
-      'Title in simple Modern Standard Arabic, 5–10 words, promising the secret/lesson and naming the subject, e.g. "السر الذي جعل ماكدونالدز تبيع العقارات لا البرجر", "الفكرة البسيطة التي صنعت ثروة ايكيا", "الغلطة التي أفلست كوداك… احذرها في مشروعك". subject = the exact English Wikipedia article title. angle = the real story fact + the lesson. Never reuse a topic from `avoid`. JSON only.',
+      'Propose 6 topics. Each Short reveals ONE secret, idea or little-known piece of business knowledge people love to discover and share, and that the viewer can USE in their own work or small project. Mix two kinds: ' +
+      '(a) kind "idea": a well-documented business principle, psychological trick or rule (e.g. charm pricing 9.99, the decoy effect, the 80/20 rule, scarcity marketing, anchoring, loss aversion, the Pygmalion effect); ' +
+      '(b) kind "story": a real documented company or founder story that proves a lesson (a decision that made millions, a mistake that destroyed a giant). At least 2 of the 3 should be "idea". ' +
+      'Everything must be stated on the English Wikipedia article named in subject (its exact title). Each topic must be about a DIFFERENT idea. Avoid vague strategy talk. ' +
+      'Title in simple Modern Standard Arabic, 5–10 words, framed as a secret or idea, e.g. "لماذا تنتهي الأسعار بـ 99؟ السر في عقلك", "خدعة الخيار الثالث التي تجعلك تشتري الأغلى", "قاعدة 80/20: سر إنجاز أكثر بجهد أقل", "الغلطة التي أفلست كوداك… احذرها في مشروعك". angle = the concrete fact + how the viewer can apply it. Never reuse a topic from `avoid`. JSON only.',
     prompt: JSON.stringify({ niche, avoid: avoid.slice(-150) }),
     schema: PackLLM,
     maxOutputTokens: 3000,
   }).catch(() => undefined);
   const seen = new Set<string>();
-  const picked: { title: string; subject: string; angle: string }[] = [];
+  const picked: { title: string; subject: string; angle: string; kind: 'idea' | 'story' }[] = [];
   for (const t of r?.data.topics ?? []) {
     const key = t.subject.toLowerCase();
     if (seen.has(key) || isDuplicateTopic(t.title, new Set(avoid))) continue;

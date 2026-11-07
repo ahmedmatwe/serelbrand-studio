@@ -229,7 +229,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const fallbacks = scenes.flatMap((s, i) => perScene[i]!.map(() => { const b = bp.scenes.find((x) => x.n === s.n); return b?.stockQuery || b?.footage || 'documentary'; }));
     const queries = await queriesForSentences(this.ctx, perScene.flat(), fallbacks, videoId, this.ctx.repos.videos.get(videoId)?.title ?? '');
     // The real subject of each scene (pack: its own topic; long video: the main researched subject).
-    const topics = this.ctx.repos.artifacts.latest<{ topics?: { subject: string }[] }>(videoId, 'calendar_entry')?.data.topics;
+    const topics = this.ctx.repos.artifacts.latest<{ topics?: { subject: string; kind?: string }[] }>(videoId, 'calendar_entry')?.data.topics;
     const mainSubject = this.ctx.repos.artifacts.latest<{ queries?: string[] }>(videoId, 'research')?.data.queries?.[0];
     const withSubject = (q: string, subject: string | undefined, j: number) => {
       if (!subject) return q;
@@ -242,11 +242,12 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     };
     let k = 0;
     for (const [i, s] of scenes.entries()) {
-      const subject = topics?.[i]?.subject ?? mainSubject;
+      // Real photos only for real companies/people; an idea is shown through everyday footage instead.
+      const subject = topics ? (topics[i]?.kind === 'story' ? topics[i]!.subject : undefined) : mainSubject;
       const sentences = perScene[i]!.map((text, j) => ({ text, query: withSubject(queries[k++]!, subject, j) }));
       s.shots = layoutShots(sentences.length ? sentences : [{ text: s.voiceover, query: fallbacks[0] ?? 'documentary' }], s.duration);
     }
-    await fetchShotVisuals(this.ctx, scenes.flatMap((s) => s.shots ?? []), { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used, notes });
+    await fetchShotVisuals(this.ctx, scenes.flatMap((s) => s.shots ?? []), { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used, notes, videoId });
     for (const s of scenes) s.visual = s.shots?.find((x) => x.visual)?.visual;
   }
 
@@ -446,7 +447,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       const sentences = splitSentences(text);
       const qs = await queriesForSentences(this.ctx, sentences, bp.scenes.find((x) => x.n === scene.n)?.stockQuery || 'documentary', videoId, title);
       const shortShots = layoutShots(sentences.map((t2, i) => ({ text: t2, query: qs[i]! })), d);
-      await fetchShotVisuals(this.ctx, shortShots, { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used: usedClips, notes });
+      await fetchShotVisuals(this.ctx, shortShots, { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used: usedClips, notes, videoId });
       extraShots.push(...shortShots);
       const one: TimedScene[] = [{ n: scene.n, start: 0, duration: d, audioPath: wav, voiceover: text, onScreenText: scene.onScreenText, visual: shortShots.find((x) => x.visual)?.visual ?? scene.visual, shots: shortShots }];
       const path = resolve(dir, `short-${k}.mp4`);

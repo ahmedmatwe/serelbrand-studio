@@ -4,7 +4,7 @@ import { RateLimiter } from '../../core/retry.ts';
 import type { MediaAsset, StockProvider, StockSearchOptions } from '../media.ts';
 
 interface PexelsVideo {
-  id: number; width: number; height: number; duration: number; url: string;
+  id: number; width: number; height: number; duration: number; url: string; image?: string;
   user: { name: string; url: string };
   video_files: { id: number; quality: string | null; file_type: string; width: number | null; height: number | null; link: string }[];
 }
@@ -65,14 +65,14 @@ export class PexelsStock implements StockProvider {
         const f = pickVideoFile(v.video_files, target);
         return f ? [{
           id: `pexels-video-${v.id}`, kind: 'video' as const, path: f.link, license: 'pexels' as const, source: 'pexels',
-          attribution: `${v.user.name} on Pexels`, pageUrl: v.url, authorUrl: v.user.url, width: f.width!, height: f.height!, durationSec: v.duration, aiGenerated: false, tags: slugTags(v.url),
+          attribution: `${v.user.name} on Pexels`, pageUrl: v.url, authorUrl: v.user.url, width: f.width!, height: f.height!, durationSec: v.duration, aiGenerated: false, tags: slugTags(v.url), previewUrl: v.image,
         }] : [];
       });
     }
     const data = await this.get<{ photos: PexelsPhoto[] }>(`https://api.pexels.com/v1/search?${q}`);
     return data.photos.map((p) => ({
       id: `pexels-photo-${p.id}`, kind: 'image' as const, path: target > 1200 ? p.src.large2x : p.src.large, license: 'pexels' as const, source: 'pexels',
-      attribution: `${p.photographer} on Pexels`, pageUrl: p.url, authorUrl: p.photographer_url, width: p.width, height: p.height, aiGenerated: false, tags: slugTags(p.url),
+      attribution: `${p.photographer} on Pexels`, pageUrl: p.url, authorUrl: p.photographer_url, width: p.width, height: p.height, aiGenerated: false, tags: slugTags(p.url), previewUrl: p.src.landscape,
     }));
   }
 

@@ -73,6 +73,8 @@ export interface MediaAsset {
   durationSec?: number;
   /** Words describing the content (Pixabay tags / Pexels URL slug) — used to reject irrelevant clips. */
   tags?: string[];
+  /** Small preview image (for choosing the clip by looking at it). */
+  previewUrl?: string;
 }
 
 export interface ImageProvider { readonly name: string; generate(prompt: string, outPath: string): Promise<MediaAsset> }
