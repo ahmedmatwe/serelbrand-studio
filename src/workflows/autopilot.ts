@@ -143,7 +143,8 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
     system: 'You plan VIRAL, USEFUL YouTube Shorts for an Arabic business channel (audience 18–34 in Egypt and the Gulf who want to earn more, start a project or grow at work). ' +
       'Propose 6 topics. Each Short teaches ONE practical business lesson the viewer can apply in their own work or small project, proven by ONE real, documented story of a company or founder (the story must be on its English Wikipedia article): a decision that made millions, a mistake that destroyed a giant, a simple idea that changed everything. ' +
       'The value is the LESSON, the story is the proof. Each topic must use a DIFFERENT company/founder and a DIFFERENT lesson (pricing, customers, quality, timing, focus, marketing, negotiation, saying no, persistence, cash flow…). ' +
-      'Title in simple Modern Standard Arabic, 5–10 words, promising the lesson and naming the subject, e.g. "الغلطة التي أفلست كوداك… احذرها في مشروعك", "درس من أمازون: لماذا تخسر لتربح؟", "كيف أنقذ قرار واحد شركة أبل". subject = the exact English Wikipedia article title. angle = the real story fact + the lesson. Never reuse a topic from `avoid`. JSON only.',
+      'Frame each lesson as a SECRET, an IDEA or a little-known piece of information people love to discover and share ("السر الذي…", "الفكرة التي…", "معلومة لا يعرفها أغلب أصحاب المشاريع…"). ' +
+      'Title in simple Modern Standard Arabic, 5–10 words, promising the secret/lesson and naming the subject, e.g. "السر الذي جعل ماكدونالدز تبيع العقارات لا البرجر", "الفكرة البسيطة التي صنعت ثروة ايكيا", "الغلطة التي أفلست كوداك… احذرها في مشروعك". subject = the exact English Wikipedia article title. angle = the real story fact + the lesson. Never reuse a topic from `avoid`. JSON only.',
     prompt: JSON.stringify({ niche, avoid: avoid.slice(-150) }),
     schema: PackLLM,
     maxOutputTokens: 3000,
