@@ -172,3 +172,15 @@ test('blueprint: narration is always the verified script text, one scene per scr
   assert.deepEqual(bp.scenes.map((s) => s.voiceover), edited.scenes.map((s) => s.voiceover));
   ctx.close();
 });
+
+test('publisher: never starts an upload batch that would exceed the daily YouTube quota', async () => {
+  const { uploadsToday } = await import('../../src/publishing/publisher.ts');
+  const ctx = testContext();
+  const v = ctx.repos.videos.create({ title: 't', format: 'short' });
+  const now = new Date();
+  ctx.repos.artifacts.save({ videoId: v.id, kind: 'publish_log', agent: 't', data: { videoId: v.id, youtubeVideoId: 'a', visibility: 'private', provider: 'youtube', dryRun: false, uploadedAt: now.toISOString(), attempts: 1, shorts: [{ youtubeVideoId: 'b', title: 'x' }, { youtubeVideoId: 'c', title: 'y' }] } });
+  const v2 = ctx.repos.videos.create({ title: 't2', format: 'long' });
+  ctx.repos.artifacts.save({ videoId: v2.id, kind: 'publish_log', agent: 't', data: { videoId: v2.id, youtubeVideoId: 'old', visibility: 'private', provider: 'youtube', dryRun: false, uploadedAt: new Date(now.getTime() - 3 * 86_400_000).toISOString(), attempts: 1, shorts: [] } });
+  assert.equal(uploadsToday(ctx, now), 3);
+  ctx.close();
+});

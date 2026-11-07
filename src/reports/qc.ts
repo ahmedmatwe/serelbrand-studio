@@ -46,8 +46,21 @@ export function qualityChecklist(ctx: AgentContext, videoId: string): QcItem[] {
   add('هل هناك مصادر موثوقة؟', fc?.overall === 'verified', true, fc?.summary ?? '');
   // A story with no proven facts is filler, even if nothing in it is false.
   const verified = fc?.claims.filter((c) => c.status === 'verified').length ?? 0;
-  const needFacts = script?.format === 'short' ? 2 : 4;
-  add('هل في الفيديو معلومات حقيقية مؤكدة كفاية؟', verified >= needFacts, true, `${verified} معلومة مؤكدة (المطلوب ${needFacts} على الأقل)`);
+  if (script?.format === 'short') {
+    // A Shorts pack: EVERY Short needs at least one verified fact of its own (no empty Short).
+    // Claims without a scene number are attributed by their numbers / words appearing in that Short.
+    const inScene = (claim: string, text: string) => {
+      const nums = claim.match(/[0-9٠-٩]+/g) ?? [];
+      if (nums.length) return nums.every((n) => text.includes(n));
+      const words = claim.split(/\s+/).filter((w) => w.length > 3);
+      return words.length > 0 && words.filter((w) => text.includes(w)).length / words.length >= 0.6;
+    };
+    const perShort = script.scenes.map((sc) => fc?.claims.filter((c) => c.status === 'verified' && (c.sceneN === sc.n || (c.sceneN == null && inScene(c.claim, sc.voiceover)))).length ?? 0);
+    const empty = perShort.filter((n) => n === 0).length;
+    add('هل في الفيديو معلومات حقيقية مؤكدة كفاية؟', perShort.length > 0 && empty === 0, true, `معلومات مؤكدة لكل شورت: ${perShort.join(' / ')}${empty ? ` — ${empty} شورت بدون معلومة مؤكدة` : ''}`);
+  } else {
+    add('هل في الفيديو معلومات حقيقية مؤكدة كفاية؟', verified >= 4, true, `${verified} معلومة مؤكدة (المطلوب 4 على الأقل)`);
+  }
   add('هل الفيديو مناسب لسياسات يوتيوب؟', comp?.label === 'Low risk', true, comp?.label ?? '');
   add('هل النهاية تشجع على مشاهدة فيديو آخر؟', Boolean(script?.nextVideoSuggestion), false, script?.nextVideoSuggestion ?? '');
   add('هل تم تجهيز نسخة Shorts؟', script?.format === 'short' || (r?.shorts.length ?? 0) > 0, false, `${r?.shorts.length ?? 0} Shorts`);

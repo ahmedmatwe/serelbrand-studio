@@ -1,4 +1,4 @@
-import { Agent } from '../agents/base.ts';
+import { Agent, type AgentContext } from '../agents/base.ts';
 import type { ComplianceReport } from '../agents/compliance.ts';
 import type { FactCheckReport, SeoPackage } from '../agents/schemas.ts';
 import { composeDescription } from '../agents/seo.ts';
@@ -42,6 +42,11 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     const yt = this.ctx.providers.youtube;
     // Shorts pack: the first Short is the "main" upload; the others follow 4 h apart.
     const pack = Boolean(render?.data.packOnly && render.data.shorts?.length);
+    // YouTube's free API quota (~10,000 units/day, 1,600 per upload) allows ~6 uploads per Pacific day.
+    // Never start a batch that would hit the limit half-way: the video stays approved and the next cycle uploads it.
+    const need = pack ? render!.data.shorts!.length : 1 + (render?.data.shorts?.length ?? 0);
+    const used = uploadsToday(this.ctx);
+    if (!env.DRY_RUN && used + need > env.YOUTUBE_DAILY_UPLOADS) throw new PublishBlockedError(`UPLOAD_QUOTA: ${used} uploads today + ${need} would exceed ${env.YOUTUBE_DAILY_UPLOADS} — will upload after the daily reset`);
     const shortTitle = (t: string) => `${t.replace(/#\S+/g, '').trim().slice(0, 88)} #Shorts`;
     const description = composeDescription(seo, this.ctx.repos.artifacts.latest<FactCheckReport>(videoId, 'fact_check')?.data, render?.data.assets);
     let attempts = 0;
@@ -100,4 +105,17 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     }
     return { ...res, videoId, provider: yt.name, dryRun: env.DRY_RUN, uploadedAt: new Date().toISOString(), attempts, shorts };
   }
+}
+
+/** Uploads (main + Shorts) made since the last YouTube quota reset (midnight Pacific time). */
+export function uploadsToday(ctx: AgentContext, now = new Date()): number {
+  const pt = (d: Date) => new Date(d.getTime() - 8 * 3600_000).toISOString().slice(0, 10); // PST (conservative)
+  const today = pt(now);
+  let n = 0;
+  for (const a of ctx.repos.artifacts.listKind<PublishLog>('publish_log')) {
+    const l = a.data;
+    if (l.dryRun || !l.uploadedAt || pt(new Date(l.uploadedAt)) !== today) continue;
+    n += (l.youtubeVideoId ? 1 : 0) + (l.shorts?.length ?? 0);
+  }
+  return n;
 }

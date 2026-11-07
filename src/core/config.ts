@@ -12,6 +12,8 @@ const EnvSchema = z.object({
   TTS_PROVIDER: z.enum(['mock', 'macos', 'gemini']).default('mock'),
   IMAGE_PROVIDER: providerMode.default('mock'),
   CLOUDFLARE_ACCOUNT_ID: z.string().optional(),
+  /** Max YouTube uploads per Pacific day (free API quota ≈ 6 uploads). */
+  YOUTUBE_DAILY_UPLOADS: z.coerce.number().int().positive().default(6),
   CLOUDFLARE_API_TOKEN: z.string().optional(),
   STOCK_PROVIDER: z.enum(['mock', 'pexels', 'pixabay']).default('mock'),
   YOUTUBE_PROVIDER: providerMode.default('mock'),

@@ -121,6 +121,9 @@ export function rankRelevant(list: MediaAsset[], query: string, used: Set<string
     .map((x) => x.a);
 }
 
+/** Max shots per video checked by vision (each request carries 2 shots × up to 6 small previews). */
+export const VISION_BUDGET = 60;
+
 const PickLLM = z.object({ picks: z.array(z.object({ shot: z.number().int(), ok: z.array(z.number().int()).default([]), why: z.string().default('') })) });
 
 async function previewImage(url: string): Promise<{ mimeType: string; data: string } | undefined> {
@@ -173,7 +176,8 @@ export async function pickByVision(ctx: AgentContext, items: { text: string; can
       videoId,
       maxOutputTokens: 1500,
     }).catch(() => undefined);
-    if (!r) continue; // vision unavailable for this batch → tag-ranked order is used
+    // Vision unavailable (e.g. free quota used up): stop asking for the rest of this video → tag-ranked order.
+    if (!r) break;
     for (const [k] of batch.entries()) {
       const p = r.data.picks.find((x) => x.shot === k + 1);
       // A missing answer means "no fitting image" — never a blind pick.
@@ -220,8 +224,12 @@ export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { ta
     }
     cands.push([...new Map(list.map((a) => [a.id, a])).values()].slice(0, 6));
   }
-  // 2) Look at them: the vision model picks what matches the narration (or rejects all).
-  const vision = await pickByVision(ctx, shots.map((s, i) => ({ text: s.text, candidates: cands[i]! })), o.videoId);
+  // 2) Look at them: the vision model picks what matches the narration (or rejects all). Budget: at most
+  //    VISION_BUDGET shots per video (free quota), the least certain ones first (weak/no tag match).
+  const certainty = (i: number) => { const c = cands[i]![0]; return c ? relevance(c, queryParts(shots[i]!.query).find((q) => !q.startsWith('wm:')) ?? '') ?? 0 : 9; };
+  const judgedIdx = shots.map((_, i) => i).filter((i) => cands[i]!.length > 0).sort((a, b) => certainty(a) - certainty(b) || a - b).slice(0, VISION_BUDGET).sort((a, b) => a - b);
+  const vis0 = await pickByVision(ctx, judgedIdx.map((i) => ({ text: shots[i]!.text, candidates: cands[i]! })), o.videoId);
+  const vision = new Map<number, number[]>([...vis0].map(([k, v]) => [judgedIdx[k]!, v]));
   const judged = vision.size > 0;
   // 2b) One more round for rejected shots: new, different searches, looked at again.
   const rejectedIdx = [...vision.entries()].filter(([, v]) => !v.length).map(([i]) => i);
