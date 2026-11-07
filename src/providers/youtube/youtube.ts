@@ -47,6 +47,22 @@ export class RealYouTube implements YouTubeProvider {
     return { id: c.id, title: c.snippet.title, subscribers: Number(c.statistics?.subscriberCount ?? NaN), videos: Number(c.statistics?.videoCount ?? NaN) };
   }
 
+  /** Makes videos private and cancels any scheduled publish time (used to pull a scheduled video). */
+  async makePrivate(ids: string[]): Promise<{ id: string; was: string }[]> {
+    const res = await this.o.fetchImpl(`${API}/youtube/v3/videos?part=status&id=${ids.map(encodeURIComponent).join(',')}`, { headers: await this.auth() });
+    if (!res.ok) await this.fail(res, 'videos.list');
+    const j = (await res.json()) as { items?: { id: string; status: Record<string, unknown> & { privacyStatus: string; publishAt?: string } }[] };
+    const out: { id: string; was: string }[] = [];
+    for (const it of j.items ?? []) {
+      const { publishAt, ...rest } = it.status;
+      const was = `${it.status.privacyStatus}${publishAt ? ` → ${publishAt}` : ''}`;
+      const up = await this.o.fetchImpl(`${API}/youtube/v3/videos?part=status`, { method: 'PUT', headers: await this.auth({ 'content-type': 'application/json' }), body: JSON.stringify({ id: it.id, status: { ...rest, privacyStatus: 'private' } }) });
+      if (!up.ok) await this.fail(up, 'videos.update');
+      out.push({ id: it.id, was });
+    }
+    return out;
+  }
+
   /** Resumable upload: create session → stream bytes → on interruption ask the server what it has and resume. */
   async upload(req: UploadRequest): Promise<UploadResult> {
     const size = statSync(req.videoPath).size;

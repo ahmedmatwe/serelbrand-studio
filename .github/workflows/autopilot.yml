@@ -11,6 +11,10 @@ on:
         description: 'Produce a video now (ignore the one-per-day limit)'
         type: boolean
         default: false
+      format:
+        description: 'With force: long or short (empty = what is due)'
+        type: string
+        default: ''
 
 concurrency:
   group: autopilot
@@ -78,6 +82,7 @@ jobs:
       - name: Autopilot cycle
         env:
           FORCE_PRODUCE: ${{ inputs.force || 'false' }}
+          FORCE_FORMAT: ${{ inputs.format || '' }}
         run: node --no-warnings src/cli/index.ts autopilot
 
       - name: Save state

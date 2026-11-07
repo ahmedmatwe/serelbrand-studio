@@ -9,7 +9,7 @@ import { batchScenes, splitBatch } from './voice-batch.ts';
 import { FallbackTTS } from '../providers/tts/gemini-tts.ts';
 import { buildAss, chunkSubtitles, type AssEvent, type AssStyle } from './ass.ts';
 import { ffmpeg, filterPath, probeDuration, volumeStats, type VolumeStats } from './ffmpeg.ts';
-import { fetchShotVisuals, layoutShots, queriesForSentences, splitSentences, type Shot } from './shots.ts';
+import { fetchShotVisuals, layoutShots, queriesForSentences, queryParts, splitSentences, type Shot } from './shots.ts';
 import { renderThumbnail } from './thumbnail.ts';
 import { cuesFor, mixSoundtrackSafe, pickMusic } from './sound.ts';
 import { z } from 'zod';
@@ -228,9 +228,22 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const perScene = scenes.map((s) => splitSentences(s.voiceover));
     const fallbacks = scenes.flatMap((s, i) => perScene[i]!.map(() => { const b = bp.scenes.find((x) => x.n === s.n); return b?.stockQuery || b?.footage || 'documentary'; }));
     const queries = await queriesForSentences(this.ctx, perScene.flat(), fallbacks, videoId, this.ctx.repos.videos.get(videoId)?.title ?? '');
+    // The real subject of each scene (pack: its own topic; long video: the main researched subject).
+    const topics = this.ctx.repos.artifacts.latest<{ topics?: { subject: string }[] }>(videoId, 'calendar_entry')?.data.topics;
+    const mainSubject = this.ctx.repos.artifacts.latest<{ queries?: string[] }>(videoId, 'research')?.data.queries?.[0];
+    const withSubject = (q: string, subject: string | undefined, j: number) => {
+      if (!subject) return q;
+      const parts = queryParts(q);
+      const entity = parts[0]?.startsWith('wm:') ? [parts.shift()!] : [];
+      const real = `wm:${subject.replace(/\s*\(.*?\)/g, "").trim()}`;
+      // Real photos of the company/product on every other sentence first, otherwise right after the clip query.
+      const ordered = j % 2 === 0 ? [...entity, real, ...parts] : [...entity, parts[0]!, real, ...parts.slice(1)];
+      return [...new Set(ordered.filter(Boolean))].join(' || ');
+    };
     let k = 0;
     for (const [i, s] of scenes.entries()) {
-      const sentences = perScene[i]!.map((text) => ({ text, query: queries[k++]! }));
+      const subject = topics?.[i]?.subject ?? mainSubject;
+      const sentences = perScene[i]!.map((text, j) => ({ text, query: withSubject(queries[k++]!, subject, j) }));
       s.shots = layoutShots(sentences.length ? sentences : [{ text: s.voiceover, query: fallbacks[0] ?? 'documentary' }], s.duration);
     }
     await fetchShotVisuals(this.ctx, scenes.flatMap((s) => s.shots ?? []), { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used, notes });

@@ -116,7 +116,7 @@ async function main() {
         const lock = resolve(ctx.config.rootDir, 'data/autopilot.lock');
         if (!acquireLock(lock)) { out('دورة تانية شغالة دلوقتي — اتخطيت'); break; }
         try {
-          const r = await runCycle(ctx, { renderSize: values.preview ? 'preview' : 'full', force: process.env.FORCE_PRODUCE === 'true' });
+          const r = await runCycle(ctx, { renderSize: values.preview ? 'preview' : 'full', force: process.env.FORCE_PRODUCE === 'true', forceFormat: process.env.FORCE_FORMAT === 'long' || process.env.FORCE_FORMAT === 'short' ? process.env.FORCE_FORMAT : undefined });
           out({ published: r.published, analytics: r.analyticsUpdated.length, produced: r.produced, skipped: r.skippedProductionReason, pendingApprovals: r.pendingApprovals, needsFactReview: r.needsFactReview.length, errors: r.errors });
         } finally { releaseLock(lock); }
         break;
@@ -198,6 +198,14 @@ async function main() {
         out(`Checkpoint ${o.checkpointHours}h · confidence ${Math.round(o.confidence * 100)}% · sample ${o.sampleSize}`);
         for (const d of o.diagnoses) out(`- ${d.finding}\n    ${d.recommendations.map((x) => `${x.variable}: ${x.action}`).join('\n    ')}`);
         for (const c of o.caveats) out(`  ⚠ ${c}`);
+        break;
+      }
+      case 'youtube:private': {
+        const ids = positionals.slice(1);
+        if (!ids.length) throw new StudioError('USAGE', 'Usage: youtube:private <youtubeVideoId...>');
+        const yt = ctx.providers.youtube as { makePrivate?: (ids: string[]) => Promise<{ id: string; was: string }[]> };
+        if (!yt.makePrivate) throw new StudioError('USAGE', 'Needs the real YouTube provider (DRY_RUN=false, YOUTUBE_PROVIDER=real)');
+        for (const r of await yt.makePrivate(ids)) out(`${r.id}: ${r.was} → private`);
         break;
       }
       case 'package': {

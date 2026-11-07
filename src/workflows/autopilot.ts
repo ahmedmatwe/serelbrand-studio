@@ -28,7 +28,7 @@ import { steps } from './steps.ts';
 export interface CycleOptions {
   now?: Date;
   /** Skip production (e.g. analytics-only runs). */
-  productionBudgetMs?: number; produce?: boolean; /** Produce even if today's video already exists (manual test run). */ force?: boolean;
+  productionBudgetMs?: number; /** With force: which format to make. */ forceFormat?: 'long' | 'short'; produce?: boolean; /** Produce even if today's video already exists (manual test run). */ force?: boolean;
   notify?: (title: string, body: string) => void;
   renderSize?: 'full' | 'preview';
 }
@@ -134,12 +134,15 @@ export function longPlan(strategy: StrategyOutput | undefined, producedTitles: S
 }
 
 const PackLLM = z.object({ topics: z.array(z.object({ title: z.string().min(5), subject: z.string().min(2), angle: z.string() })).min(3) });
+// (6 proposed, the first 3 distinct subjects are used.)
 /** Three DIFFERENT, clear, specific Shorts topics ("سر …", "لماذا …", "معلومة عن …"), never repeating past titles. */
 export async function planShortsPack(ctx: AgentContext, niche: string, avoid: string[]) {
   const r = await ctx.providers.llm.generateJson({
     task: 'shorts.topics',
     tier: 'light',
-    system: 'You plan YouTube Shorts for an Arabic business-stories channel. Propose 5 Shorts topics, each about a DIFFERENT real company, brand, product or founder, with one clear surprising fact or secret that can be told in 45 seconds. Title in Arabic (Modern Standard, simple), 4–9 words, naming the subject explicitly, e.g. "سر شعار أمازون المبتسم", "لماذا لون فيسبوك أزرق؟", "معلومة لا تعرفها عن كوكاكولا". subject = the English Wikipedia name of the company/product/person. angle = the specific fact or secret. Never reuse a topic from `avoid`. JSON only.',
+    system: 'You plan VIRAL YouTube Shorts for an Arabic business-stories channel (audience 18–34 in Egypt and the Gulf). Propose 6 topics, each about a DIFFERENT, very famous company, brand, product or founder that everyone in the Arab world knows (Apple, Coca-Cola, Toyota, Nike, McDonald\'s, Samsung, IKEA, Netflix, Rolex, Ferrari, Lego, Starbucks, …). ' +
+      'Each must be ONE real, documented, surprising fact a viewer will want to share — a hidden secret, an unbelievable origin, a near-bankruptcy, a famous blunder, a genius trick — that is stated on the subject\'s English Wikipedia article and can be told in 45 seconds. Avoid vague strategy talk. ' +
+      'Title in simple Modern Standard Arabic, 4–9 words, naming the subject, e.g. "سر شعار أمازون المبتسم", "لماذا لون فيسبوك أزرق؟", "الشركة التي رفضت شراء جوجل". subject = the exact English Wikipedia article title. angle = the specific fact. Never reuse a topic from `avoid`. JSON only.',
     prompt: JSON.stringify({ niche, avoid: avoid.slice(-150) }),
     schema: PackLLM,
     maxOutputTokens: 3000,
@@ -227,7 +230,7 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     if (!forceNow && !longDue && !packDue) { if (!attempts) rep.skippedProductionReason = ok('short') ? "today's videos are already produced" : '3 attempts today were blocked — trying again tomorrow'; break; }
     if (attempts && Date.now() - t0 > budgetMs) { rep.skippedProductionReason = 'no time left in this run for another attempt — the next cycle continues'; break; }
     forcedDone = true;
-    const want: 'long' | 'short' = longDue ? 'long' : 'short';
+    const want: 'long' | 'short' = forceNow && o.forceFormat ? o.forceFormat : longDue ? 'long' : 'short';
     if (attempts) ctx.logger.child('autopilot').warn('previous video blocked — trying another topic now', { attempt: attempts + 1 });
     attempts++;
     try {
