@@ -7,7 +7,7 @@ import { researchTopic } from './research.ts';
 export interface ScriptInput { videoId: string; title: string; angle?: string; format: 'long' | 'short'; audience?: string }
 
 /** Exact text sent to TTS for one scene. Shorts are independent; long videos include their spoken opening and ending. */
-export function narratedSceneText(s: Pick<Script, 'format' | 'opening' | 'scenes' | 'cta' | 'ending'>, index: number): string {
+export function narratedSceneText(s: Pick<Script, 'opening' | 'scenes' | 'cta' | 'ending'> & { format?: Script['format'] }, index: number): string {
   const scene = s.scenes[index];
   if (!scene) return '';
   if (s.format === 'short') return scene.voiceover.trim();
@@ -59,8 +59,8 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
     });
     // Never trust the model's own length estimate — measure it, and ask once for a deeper version if too short.
     let data = res.data;
-    if (countWords(spokenText(data)) < target.minWords * 0.9) {
-      const words = countWords(spokenText(data));
+    if (countWords(spokenText({ ...data, format: input.format })) < target.minWords * 0.9) {
+      const words = countWords(spokenText({ ...data, format: input.format }));
       const exp = await this.ctx.providers.llm.generateJson({
         task: 'script.expand',
         tier: 'writing',
@@ -74,12 +74,12 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
         videoId: input.videoId,
         vars: { previous: data },
       });
-      if (countWords(spokenText(exp.data)) > words) data = exp.data;
+      if (countWords(spokenText({ ...exp.data, format: input.format })) > words) data = exp.data;
     }
     // A Shorts pack is exactly 3 Shorts, even if the model wrote more scenes.
     if (input.format === 'short' && data.scenes.length > 3) data = { ...data, scenes: data.scenes.slice(0, 3) };
     // Stage gate: check the script now and fix the exact problems (up to 2 rewrites, keep the best).
-    let problems = scriptProblems(data, target, this.ctx.config.channel.dialect);
+    let problems = scriptProblems({ ...data, format: input.format }, target, this.ctx.config.channel.dialect);
     for (let i = 0; i < 2 && problems.length; i++) {
       const rev = await this.ctx.providers.llm.generateJson({
         task: 'script.revise',
@@ -92,14 +92,14 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
         vars: { previous: data },
       }).catch(() => undefined);
       if (!rev) break;
-      const next = scriptProblems(rev.data, target, this.ctx.config.channel.dialect);
+      const next = scriptProblems({ ...rev.data, format: input.format }, target, this.ctx.config.channel.dialect);
       // Accept only a real improvement that did not gut the script.
-      if (next.length >= problems.length || countWords(spokenText(rev.data)) < countWords(spokenText(data)) * 0.8) break;
+      if (next.length >= problems.length || countWords(spokenText({ ...rev.data, format: input.format })) < countWords(spokenText({ ...data, format: input.format })) * 0.8) break;
       data = rev.data;
       problems = next;
     }
     if (problems.length) this.ctx.logger.child('scriptwriter').warn('script problems left after fixing', { videoId: input.videoId, problems });
-    const wordCount = countWords(spokenText(data));
+    const wordCount = countWords(spokenText({ ...data, format: input.format }));
     const estimatedDurationSec = Math.round((wordCount / t.arabicWordsPerMinute) * 60);
     this.ctx.repos.videos.update(input.videoId, { status: 'scripted', title: data.mainTitle });
     return { ...data, wordCount, estimatedDurationSec, format: input.format };
