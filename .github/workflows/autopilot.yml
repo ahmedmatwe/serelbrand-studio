@@ -30,11 +30,12 @@ jobs:
     timeout-minutes: 150
     env:
       DRY_RUN: 'false'
+      FREE_ONLY: 'true'
       LLM_PROVIDER: gemini
       TTS_PROVIDER: gemini
       STOCK_PROVIDER: pixabay
-      # AI thumbnail backgrounds turn on automatically once the two Cloudflare secrets exist.
-      IMAGE_PROVIDER: real
+      # Free-only mode disables potentially billable AI image generation; thumbnails use owned/stock assets.
+      IMAGE_PROVIDER: mock
       YOUTUBE_PROVIDER: real
       AUTO_VERIFY: 'true'
       AUTO_APPROVE: 'true'
