@@ -5,6 +5,7 @@ import { loadPrompt } from '../prompts.ts';
 import { scriptProblems } from './stage-checks.ts';
 import { researchTopic, type ResearchSource } from './research.ts';
 import { StudioError } from '../core/errors.ts';
+import { loadPhoneLibrary } from './niche/phone-library.ts';
 
 export interface ScriptInput { videoId: string; title: string; angle?: string; format: 'long' | 'short'; audience?: string }
 
@@ -73,7 +74,7 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
     const pack = input.format === 'short' && phone
       ? { shortsPack: 'Write EXACTLY 3 scenes. Each scene is a complete, independent YouTube Short of 30–45 seconds (70–100 spoken words) in natural EGYPTIAN Arabic, like a friend showing you a secret on his phone — fast, warm, excited, never formal' + order + '. ' +
           'Structure of every scene: (1) HOOK in the first sentence (≤ 12 words): the surprising benefit, e.g. "فيه كود لو كتبته في موبايلك هيقولك…", "الآيفون بتاعك فيه زرار سري ورا الضهر!"; ' +
-          '(2) the exact steps the viewer follows RIGHT NOW: the code written in digits/symbols exactly (e.g. *#06#) or the settings path in the words the phone shows (الإعدادات ← تسهيلات الاستخدام ← اللمس ← النقر على الظهر), one short step per sentence; ' +
+          '(2) the exact steps the viewer follows RIGHT NOW. A code MUST be said out loud, spelled symbol by symbol in Egyptian words so the narrator reads it right (e.g. *#06# → «نجمة، شباك، صفر، ستة، شباك»; *#*#4636#*#* → «نجمة شباك نجمة شباك أربعة ستة تلاتة ستة شباك نجمة شباك نجمة»), or the settings path in the words the phone shows (الإعدادات ← تسهيلات الاستخدام ← اللمس ← النقر على الظهر), one short step per sentence; ' +
           '(3) what they will see and one concrete use for it; (4) which phones it works on (آيفون / أندرويد / سامسونج) and any difference; (5) one short punchy closing line that invites sharing ("ابعتها لصاحبك اللي مش عارفها"). ' +
           'Only steps and facts stated in the sources; never codes that reset, erase or unlock anything. curiosityGap = the hook question; onScreenText = the code itself or the feature name (1–4 words, e.g. "*#06#", "النقر على الظهر"). Keep opening, cta and ending to one short sentence each.', topics }
       : input.format === 'short'
@@ -145,6 +146,11 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
       if (next.length >= problems.length || countWords(spokenText({ ...rev.data, format: input.format })) < countWords(spokenText({ ...data, format: input.format })) * 0.8) break;
       data = rev.data;
       problems = next;
+    }
+    // Phone secrets (after every rewrite): the on-screen box always shows the exact code/feature from the approved library.
+    if (phone && topics?.length) {
+      const lib = loadPhoneLibrary(this.ctx.config.rootDir);
+      data = { ...data, scenes: data.scenes.map((sc, i) => { const e = lib?.secrets.find((x) => x.id === topics[i]?.subject); return e ? { ...sc, onScreenText: e.onScreen } : sc; }) };
     }
     if (problems.length) this.ctx.logger.child('scriptwriter').warn('script problems left after fixing', { videoId: input.videoId, problems });
     const wordCount = countWords(spokenText({ ...data, format: input.format }));

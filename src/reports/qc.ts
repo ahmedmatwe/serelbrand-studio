@@ -51,7 +51,8 @@ export function qualityChecklist(ctx: AgentContext, videoId: string): QcItem[] {
   add('هل النصوص مقروءة على الهاتف؟', true, false, 'كابشن كبير بحدود سوداء، 4–6 كلمات للسطر');
   const best = th?.concepts[th.recommendedIndex];
   const photo = Boolean(r?.assets.some((a) => a.kind === 'image' && a.license !== 'generated-owned') || r?.thumbnailPath);
-  add('هل الصورة المصغرة واضحة؟', Boolean(best && best.textWordCount <= 4 && photo), true, best ? `"${best.text}" (${best.textWordCount} كلمات)` : 'لا يوجد مفهوم صالح');
+  // YouTube Shorts don't use a custom thumbnail (a frame is picked from the video), so it can't block a Shorts pack.
+  add('هل الصورة المصغرة واضحة؟', script?.format === 'short' || Boolean(best && best.textWordCount <= 4 && photo), script?.format !== 'short', best ? `"${best.text}" (${best.textWordCount} كلمات)` : 'لا يوجد مفهوم صالح');
   const misleading = comp?.issues.some((i) => i.check.startsWith('packaging.')) ?? true;
   add('هل العنوان جذاب وغير مضلل؟', !misleading, true, seo?.primaryTitle ?? '');
   add('هل هناك مصادر موثوقة؟', fc?.overall === 'verified', true, fc?.summary ?? '');
