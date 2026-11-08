@@ -64,10 +64,10 @@ export function timelineAss(scenes: TimedScene[], o: { width: number; height: nu
   const subs: { start: number; end: number; text: string }[] = [];
   for (const s of scenes) {
     if (s.onScreenText) events.push({ start: s.start + 0.2, end: s.start + Math.min(s.duration - 0.1, 5), style: 'Title', text: s.onScreenText, fadeMs: 300 });
-    // Viral-style captions: short chunks, the word being spoken lights up (ASS karaoke).
+    // Narration captions use measured scene duration. Word highlighting stays off until audio-based alignment exists.
     const chunks = chunkSubtitles(s.voiceover, s.start, Math.max(0.1, s.duration), vertical ? 4 : 7);
     subs.push(...chunks);
-    events.push(...chunks.map((c) => ({ ...c, style: 'Sub', karaoke: true })));
+    events.push(...chunks.map((c) => ({ ...c, style: 'Sub' })));
   }
   if (o.endCard && scenes.length) {
     const last = scenes.at(-1)!;
