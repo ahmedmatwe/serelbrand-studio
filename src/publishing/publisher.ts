@@ -7,6 +7,7 @@ import { withRetry } from '../core/retry.ts';
 import type { UploadResult, Visibility } from '../providers/media.ts';
 import type { PrePublicationReport } from '../reports/prepublication.ts';
 import { currentSlots, nextSlots } from './schedule.ts';
+import { buildReport } from './approval.ts';
 
 export interface PublishInput { videoId: string }
 export interface PublishLog extends UploadResult { videoId: string; provider: string; dryRun: boolean; uploadedAt: string; attempts: number; shorts: { youtubeVideoId: string; title: string; publishAt?: string }[] }
@@ -28,6 +29,9 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     if (!approval || approval.status !== 'approved') throw new PublishBlockedError('No human approval for this video');
     const report = JSON.parse(approval.report) as PrePublicationReport;
     if (report.hardBlockers.length) throw new PublishBlockedError(`Report has blockers: ${report.hardBlockers.join('; ')}`);
+    const current = buildReport(this.ctx, videoId);
+    if (current.hardBlockers.length) throw new PublishBlockedError(`Current quality gate failed: ${current.hardBlockers.join('; ')}`);
+    if (current.qualityScore < this.ctx.config.thresholds.quality.minScoreToPublish) throw new PublishBlockedError('Current quality score is below publishing threshold');
 
     const scheduled = approval.requested_visibility.startsWith('scheduled:') ? approval.requested_visibility.slice('scheduled:'.length) : undefined;
     const visibility = (scheduled ? 'private' : approval.requested_visibility) as Visibility;
