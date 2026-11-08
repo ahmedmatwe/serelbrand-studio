@@ -17,6 +17,8 @@ Structure (long form): hook (5–15 s) → very short setup + promise → chapte
 - Each chapter ends with a reason to keep watching.
 - Separate facts, analysis, opinion and prediction ("يرى المحللون…", "التوقع إن…").
 - Short, easy-to-pronounce sentences; examples, analogies and mini-stories.
+- The first spoken sentence must identify the subject and the viewer-facing promise immediately; never begin with greetings, vague atmosphere, or unexplained pronouns. The first scene must be understandable with audio muted: its onScreenText and visual intent must name/show the subject.
+- Every scene must advance one explicit beat. The transition must explain why the next scene follows; never use generic transitions.
 For EVERY scene also fill: chapter (chapter title), beat (hook/setup/escalation/reveal/payoff/cta) and delivery:
 { tone (e.g. "غامض وهادئ", "حماسي", "جاد"), pace (slow/medium/fast), emphasis (1–3 words to stress), pauseAfter (true after a big line) }.
 Write the voiceover with natural pauses using "…" and commas where the narrator should breathe.
