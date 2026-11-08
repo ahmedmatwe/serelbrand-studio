@@ -45,6 +45,12 @@ export function buildPrePublicationReport(i: {
 }): PrePublicationReport {
   const t = i.thresholds;
   const hardBlockers = [...i.compliance.blockers];
+  if (i.quality.pendingRender) hardBlockers.push('render: no measured video/audio/caption quality');
+  for (const [name, minimum] of [['audioQuality', 80], ['visualQuality', 75], ['subtitleAccuracy', 95]] as const) {
+    const score = i.quality.criteria[name]?.score;
+    if (score === null || score === undefined || score < minimum) hardBlockers.push(`${name}: ${score ?? 'missing'} < ${minimum}`);
+  }
+  if (i.quality.score < i.thresholds.quality.minScoreToPublish) hardBlockers.push(`quality: ${i.quality.score} < ${i.thresholds.quality.minScoreToPublish}`);
   if (i.factCheck.overall === 'blocked' && !hardBlockers.some((b) => b.startsWith('facts.'))) hardBlockers.push('facts: unverified claims');
 
   const warnings: string[] = [];
