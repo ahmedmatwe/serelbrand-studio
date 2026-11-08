@@ -40,7 +40,7 @@ export function scoreQuality(i: QualityInput, t: Thresholds): QualityReport {
     (i.script.hooks.length >= t.packaging.minHooks ? 40 : 15) +
       (countWords(firstHook) <= 25 ? 25 : 10) +
       (/[؟?]|\d|[٠-٩]/.test(firstHook) ? 20 : 5) +
-      (i.script.scenes[0]?.curiosityGap ? 15 : 0),
+      (i.script.scenes[0]?.curiosityGap ? 15 : 0) + (i.script.scenes[0]?.onScreenText?.trim() ? 10 : 0),
   );
   const gaps = i.script.scenes.filter((s) => s.curiosityGap).length;
   const avgSceneSec = i.blueprint.totalDurationSec / Math.max(1, i.blueprint.scenes.length);
@@ -70,7 +70,12 @@ export function scoreQuality(i: QualityInput, t: Thresholds): QualityReport {
 
   const measured = Object.values(criteria).filter((c) => c.score !== null);
   const totalW = measured.reduce((a, c) => a + c.weight, 0);
-  const score = Math.round(measured.reduce((a, c) => a + (c.score as number) * c.weight, 0) / totalW);
+  const baseScore = measured.length ? Math.round(measured.reduce((a, c) => a + (c.score as number) * c.weight, 0) / totalW) : 0;
+  // Render gates are non-negotiable: a polished package must not pass while the delivered media is broken.
+  const renderPenalty = i.render
+    ? (i.render.audioScore < 80 ? 20 : 0) + (i.render.visualScore < 75 ? 20 : 0) + (i.render.subtitleAccuracy < 95 ? 20 : 0)
+    : 0;
+  const score = clamp(baseScore - renderPenalty);
 
   const FIX: Record<string, string> = {
     originality: 'Rewrite repeated passages and add original analysis or graphics',
@@ -92,7 +97,7 @@ export function scoreQuality(i: QualityInput, t: Thresholds): QualityReport {
     weaknesses: weak.map(([k, c]) => `${k}: ${c.score} — ${c.note}`),
     fixes: weak.map(([k]) => FIX[k] ?? `Improve ${k}`),
     pendingRender: !i.render,
-    method: 'Rule-based heuristics (pre-render). Audio/visual/subtitle criteria are excluded until a render exists.',
+    method: 'Rule-based gates plus measured render gates. Audio, visual continuity, and subtitle accuracy failures reduce the publish score; viral performance is learned from channel analytics, never promised.',
   };
 }
 
