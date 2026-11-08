@@ -162,7 +162,7 @@ export function visualScoreFor(shots: Shot[]): number {
 
 /** Expands scenes into background segments (one per shot). */
 export function segmentsOf(scenes: TimedScene[]): Segment[] {
-  return scenes.flatMap((s) => (s.shots?.length ? s.shots.map((sh) => ({ n: s.n, duration: sh.duration, visual: sh.visual ?? s.visual })) : [{ n: s.n, duration: s.duration, visual: s.visual }]));
+  return scenes.flatMap((s) => (s.shots?.length ? s.shots.map((sh) => ({ n: s.n, duration: sh.duration, visual: sh.visual })) : [{ n: s.n, duration: s.duration, visual: s.visual }]));
 }
 
 /**
