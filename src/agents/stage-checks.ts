@@ -18,7 +18,7 @@ import { spokenText } from './scriptwriter.ts';
 import { duplicateSentenceRatio, policyHits, titleSupport, CLICKBAIT } from './compliance.ts';
 
 /** Problems in a script that can be fixed by rewriting (not facts — those go to the verifier). */
-export function scriptProblems(s: Pick<Script, 'format' | 'hooks' | 'opening' | 'scenes' | 'cta' | 'ending'>, target?: { minWords: number; maxWords: number }, dialect?: string): string[] {
+export function scriptProblems(s: Pick<Script, 'hooks' | 'opening' | 'scenes' | 'cta' | 'ending'> & { format?: Script['format'] }, target?: { minWords: number; maxWords: number }, dialect?: string): string[] {
   const p: string[] = [];
   const hook = s.hooks[0] ?? '';
   if (countWords(hook) > 30) p.push(`Hook 1 has ${countWords(hook)} words: make it ≤ 25 words, start with the shock/question directly.`);
@@ -46,7 +46,7 @@ export function scriptProblems(s: Pick<Script, 'format' | 'hooks' | 'opening' | 
 }
 
 /** Problems in a title (misleading vs the script, clickbait words). */
-export function titleProblems(title: string, script: Pick<Script, 'format' | 'opening' | 'scenes' | 'cta' | 'ending'>, dialect?: string): string[] {
+export function titleProblems(title: string, script: Pick<Script, 'opening' | 'scenes' | 'cta' | 'ending'> & { format?: Script['format'] }, dialect?: string): string[] {
   const p: string[] = [];
   if (dialect) { const w = wrongRegisterWords(title, dialect); if (w.length) p.push(`Title register doesn't match the channel (${dialect}): ${w.join('، ')}`); }
   const support = titleSupport(title, spokenText(script));
