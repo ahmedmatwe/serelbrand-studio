@@ -95,7 +95,7 @@ export async function queriesForSentences(ctx: AgentContext, sentences: string[]
       system:
         'You are a documentary video editor choosing stock footage. For EACH Arabic sentence give: query = a concrete English stock-footage search (2–4 words) of what the viewer should literally SEE while it is spoken, and alt = a simpler 1–2 word fallback that surely exists in stock libraries. ' +
         'The query MUST contain the main concrete noun the sentence names or implies (price tag, shirt, cashier, factory, smartphone…). Rules: show real, filmable things (people, places, objects, actions) that match the sentence AND the video topic; turn abstract ideas into a literal scene (e.g. "humble beginnings" → "small garage workshop", "huge success" → "busy office team celebrating", "competition" → "chess game closeup"). ' +
-        'Never abstract textures, crystals, particles, fractals or generic backgrounds. No brand names, logos, celebrities or on-screen text in query/alt. Vary the visuals; never repeat a query twice in a row. ' +
+        'Never abstract textures, crystals, particles, fractals or generic backgrounds. No brand names, logos, celebrities or on-screen text in query/alt. The FIRST sentence is the hook: return a literal, instantly understandable visual for it; never return a generic documentary, landscape, person, or abstract background. If a sentence has no safe literal visual, use an object/action from its concrete example instead. Vary the visuals; never repeat a query twice in a row. ' +
         'entity = if the sentence explicitly names a real person, company, product, building or place, its common English Wikipedia name (e.g. "Jeff Bezos", "Toyota Prius", "Amazon Spheres"); otherwise "". Output JSON only.',
       prompt: JSON.stringify({ videoTopic: topic, sentences: batch.map((s, j) => ({ i: i + j, text: s })) }),
       schema: ShotQueriesLLM,
@@ -274,6 +274,8 @@ export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { ta
   }
   if (judged) o.notes.push(`Shots chosen by looking at the candidates (vision): ${shots.length - misses}/${shots.length} matched, ${rejected} had no fitting image.`);
   if (misses) o.notes.push(`${misses}/${shots.length} shots had no matching stock clip (previous shot or a text card was used).`);
-  // Never leave a gap: a shot without its own clip reuses the previous shot's visual.
-  for (let i = 1; i < shots.length; i++) if (!shots[i]!.visual) shots[i]!.visual = shots[i - 1]!.visual;
+  // Never hide a mismatch by reusing an unrelated previous shot. Missing visuals become an intentional
+  // narration-led text card in the renderer; the opening is never allowed to inherit another scene's footage.
+  const missing = shots.map((s, i) => (!s.visual ? i + 1 : 0)).filter(Boolean);
+  if (missing.length) o.notes.push(`Intentional text-card fallback for unmatched shots: ${missing.join(', ')}.`);
 }
