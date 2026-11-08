@@ -93,7 +93,8 @@ export function createContext(opts: CreateContextOptions = {}): AgentContext & {
           ? new FallbackTTS(new GeminiTTS({ apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_TTS_MODEL, voice: env.GEMINI_TTS_VOICE, style: env.GEMINI_TTS_STYLE, sleep: opts.sleep }), new MacSayTTS(env.MACOS_VOICE))
           : new GeminiTTS({ apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_TTS_MODEL, voice: env.GEMINI_TTS_VOICE, style: env.GEMINI_TTS_STYLE, sleep: opts.sleep }))
         : new MacSayTTS(env.MACOS_VOICE),
-    image: real(env.IMAGE_PROVIDER) && env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN ? new CloudflareImage({ accountId: env.CLOUDFLARE_ACCOUNT_ID, token: env.CLOUDFLARE_API_TOKEN, sleep: opts.sleep }) : new MockImage(),
+    // Cloudflare image generation can leave a free allocation and become billable. FREE_ONLY keeps it off.
+    image: !env.FREE_ONLY && real(env.IMAGE_PROVIDER) && env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN ? new CloudflareImage({ accountId: env.CLOUDFLARE_ACCOUNT_ID, token: env.CLOUDFLARE_API_TOKEN, sleep: opts.sleep }) : new MockImage(),
     stock: !real(env.STOCK_PROVIDER)
       ? new MockStock()
       : env.STOCK_PROVIDER === 'pixabay' ? new PixabayStock(env.PIXABAY_API_KEY!, { cacheDir: resolve(config.rootDir, 'data/stock-cache') }) : new PexelsStock(env.PEXELS_API_KEY!),
