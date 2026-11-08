@@ -6,9 +6,22 @@ import { researchTopic } from './research.ts';
 
 export interface ScriptInput { videoId: string; title: string; angle?: string; format: 'long' | 'short'; audience?: string }
 
-/** Spoken text only (what the narrator actually reads). */
-export function spokenText(s: Pick<Script, 'opening' | 'scenes' | 'cta' | 'ending'>): string {
-  return [s.opening, ...s.scenes.map((x) => x.voiceover), s.cta, s.ending].join('\n');
+/** Exact text sent to TTS for one scene. Shorts are independent; long videos include their spoken opening and ending. */
+export function narratedSceneText(s: Pick<Script, 'format' | 'opening' | 'scenes' | 'cta' | 'ending'>, index: number): string {
+  const scene = s.scenes[index];
+  if (!scene) return '';
+  if (s.format === 'short') return scene.voiceover.trim();
+  const parts = [scene.voiceover.trim()];
+  if (index === 0 && s.opening.trim() && !scene.voiceover.includes(s.opening.trim())) parts.unshift(s.opening.trim());
+  if (index === s.scenes.length - 1) {
+    for (const tail of [s.cta, s.ending]) if (tail.trim() && !scene.voiceover.includes(tail.trim())) parts.push(tail.trim());
+  }
+  return parts.join(' ');
+}
+
+/** Spoken text only: this must stay identical to what the renderer sends to TTS. */
+export function spokenText(s: Pick<Script, 'format' | 'opening' | 'scenes' | 'cta' | 'ending'>): string {
+  return s.scenes.map((_, i) => narratedSceneText(s, i)).join('\n');
 }
 
 export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
