@@ -6,6 +6,7 @@ import type { ThumbnailOutput } from '../agents/thumbnail.ts';
 import { StudioError } from '../core/errors.ts';
 import type { MediaAsset, TTSProvider, TTSResult } from '../providers/media.ts';
 import { batchScenes, splitBatch } from './voice-batch.ts';
+import { scriptWords, timedChunks, type WordTime } from './align.ts';
 import { FallbackTTS } from '../providers/tts/gemini-tts.ts';
 import { buildAss, chunkSubtitles, type AssEvent, type AssStyle } from './ass.ts';
 import { ffmpeg, filterPath, probeDuration, volumeStats, type VolumeStats } from './ffmpeg.ts';
@@ -18,7 +19,7 @@ export type RenderSize = 'full' | 'preview';
 export interface RenderInput { videoId: string; size?: RenderSize; shorts?: boolean; /** Shorts to cut per long video (default 3). */ shortsPerLong?: number }
 
 export interface SceneVisual { kind: 'video' | 'image'; path: string; asset: MediaAsset }
-interface TimedScene { n: number; start: number; duration: number; audioPath: string; voiceover: string; onScreenText: string; visual?: SceneVisual; shots?: Shot[] }
+interface TimedScene { n: number; start: number; duration: number; audioPath: string; voiceover: string; onScreenText: string; visual?: SceneVisual; shots?: Shot[]; /** Measured time of every script word (relative to the scene start), when aligned. */ words?: WordTime[]; /** Share of the script words heard in the audio. */ coverage?: number }
 /** One background segment of the timeline (a shot, or a whole scene when it has no shots). */
 interface Segment { n: number; duration: number; visual?: SceneVisual }
 
@@ -64,8 +65,10 @@ export function timelineAss(scenes: TimedScene[], o: { width: number; height: nu
   const subs: { start: number; end: number; text: string }[] = [];
   for (const s of scenes) {
     if (s.onScreenText) events.push({ start: s.start + 0.2, end: s.start + Math.min(s.duration - 0.1, 5), style: 'Title', text: s.onScreenText, fadeMs: 300 });
-    // Narration captions use measured scene duration. Word highlighting stays off until audio-based alignment exists.
-    const chunks = chunkSubtitles(s.voiceover, s.start, Math.max(0.1, s.duration), vertical ? 4 : 7);
+    // Captions follow the measured time of each spoken word (forced alignment); proportional timing only as a fallback.
+    const chunks = s.words?.length
+      ? timedChunks(s.words, s.start, s.start + s.duration, vertical ? 4 : 7)
+      : chunkSubtitles(s.voiceover, s.start, Math.max(0.1, s.duration), vertical ? 4 : 7);
     subs.push(...chunks);
     events.push(...chunks.map((c) => ({ ...c, style: 'Sub' })));
   }
@@ -244,7 +247,10 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     for (const [i, s] of scenes.entries()) {
       // Real photos only for real companies/people; an idea is shown through everyday footage instead.
       const subject = topics ? (topics[i]?.kind === 'story' ? topics[i]!.subject : undefined) : mainSubject;
-      const sentences = perScene[i]!.map((text, j) => ({ text, query: withSubject(queries[k++]!, subject, j) }));
+      // Measured start of each sentence (from the aligned words), so the cut lands exactly when it is said.
+      let wi = 0;
+      const starts = perScene[i]!.map((text) => { const at = s.words?.[Math.min(wi, (s.words?.length ?? 1) - 1)]?.start; wi += scriptWords(text).length; return at; });
+      const sentences = perScene[i]!.map((text, j) => ({ text, query: withSubject(queries[k++]!, subject, j), start: s.words?.length ? starts[j] : undefined }));
       s.shots = layoutShots(sentences.length ? sentences : [{ text: s.voiceover, query: fallbacks[0] ?? 'documentary' }], s.duration);
     }
     await fetchShotVisuals(this.ctx, scenes.flatMap((s) => s.shots ?? []), { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used, notes, videoId });
@@ -259,12 +265,21 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const shorts: RenderedShort[] = [];
     const packTopics = this.ctx.repos.artifacts.latest<{ topics?: { title: string }[] }>(o.videoId, 'calendar_entry')?.data.topics;
     for (const [i, s] of o.timed.entries()) {
-      const d = Math.min(s.duration, SHORT_MAX_SEC + 1);
-      if (s.duration > SHORT_MAX_SEC + 1) o.notes.push(`Scene ${s.n} is ${Math.round(s.duration)}s — trimmed to ${SHORT_MAX_SEC + 1}s`);
+      // A Short slightly over the limit is sped up a little (≤ 12%, still natural) instead of losing its ending.
+      const tempo = s.duration > SHORT_MAX_SEC + 1 ? Math.min(1.12, s.duration / SHORT_MAX_SEC) : 1;
+      const full = s.duration / tempo;
+      const d = Math.min(full, SHORT_MAX_SEC + 1);
+      if (tempo > 1) o.notes.push(`Scene ${s.n} is ${s.duration.toFixed(1)}s — narration sped up ×${tempo.toFixed(2)} to fit a Short.`);
+      if (full > SHORT_MAX_SEC + 1) o.notes.push(`Scene ${s.n} is ${Math.round(s.duration)}s — trimmed to ${SHORT_MAX_SEC + 1}s`);
       const audio = resolve(o.dir, `short-${s.n}.m4a`);
-      await ffmpeg(['-nostdin', '-i', s.audioPath, '-af', `atrim=duration=${d},loudnorm=I=-14:TP=-1.5:LRA=11`, '-ar', '48000', '-c:a', 'aac', '-b:a', '160k', audio]);
+      await ffmpeg(['-nostdin', '-i', s.audioPath, '-af', `${tempo > 1 ? `atempo=${tempo.toFixed(4)},` : ''}atrim=duration=${d.toFixed(3)},loudnorm=I=-14:TP=-1.5:LRA=11`, '-ar', '48000', '-c:a', 'aac', '-b:a', '160k', audio]);
       const path = resolve(o.dir, `short-${s.n}.mp4`);
-      await this.renderTimeline([{ ...s, start: 0, duration: d, shots: trimShots(s.shots, d) }], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
+      const scaled: TimedScene = {
+        ...s, start: 0, duration: d,
+        words: s.words?.map((w) => ({ ...w, start: w.start / tempo, end: w.end / tempo })),
+        shots: trimShots(s.shots?.map((x) => ({ ...x, start: x.start / tempo, duration: x.duration / tempo })), d),
+      };
+      await this.renderTimeline([scaled], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
       const sc = script.scenes.find((x) => x.n === s.n);
       shorts.push({ path, durationSec: Number(d.toFixed(2)), scenes: [s.n], title: packTopics?.[i]?.title || sc?.curiosityGap || sc?.onScreenText || script.mainTitle });
     }
@@ -277,7 +292,10 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     ];
     const withStock = shots.filter((x) => x.visual).length;
     const openingMissing = o.timed.some((s) => !s.shots?.[0]?.visual);
-    const anyTrimmed = o.timed.some((s) => s.duration > SHORT_MAX_SEC + 1);
+    const anyTrimmed = o.timed.some((s) => s.duration / 1.12 > SHORT_MAX_SEC + 1);
+    const lowCoverage = o.timed.filter((s) => s.coverage !== undefined && s.coverage < 0.7);
+    if (lowCoverage.length) o.notes.push(`Narration does not match the script in Short(s) ${lowCoverage.map((s) => s.n).join(', ')} — publish blocked.`);
+    if (o.timed.every((s) => s.words?.length)) o.notes.push(`Captions, cuts and shots timed from the measured words (${o.timed.map((s) => `${Math.round((s.coverage ?? 0) * 100)}%`).join(' / ')} of script words heard).`);
     if (openingMissing) o.notes.push('At least one Short opens without a matching visual.');
     if (anyTrimmed) o.notes.push('At least one Short was trimmed, so its captions may not cover the full narration.');
     return {
@@ -288,7 +306,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       voice: { provider: o.tts.name, voice: o.voiceName, synthetic: true },
       visualMode: withStock === 0 ? 'text-cards' : withStock === shots.length ? 'stock' : 'mixed',
       assets,
-      measurements: { audio, audioScore: silent ? 0 : 85, visualScore: openingMissing ? Math.min(visualScoreFor(shots), 70) : visualScoreFor(shots), subtitleAccuracy: anyTrimmed ? 0 : 100, avSyncDiffSec: 0, notes: o.notes },
+      measurements: { audio, audioScore: silent ? 0 : lowCoverage.length ? 40 : 85, visualScore: openingMissing ? Math.min(visualScoreFor(shots), 70) : visualScoreFor(shots), subtitleAccuracy: anyTrimmed ? 0 : 100, avSyncDiffSec: 0, notes: o.notes },
     };
   }
 
@@ -344,31 +362,46 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     let t = 0;
     let voiceName = '';
     const voicesUsed: string[] = [];
+    const root = this.ctx.config.rootDir;
     const voiceAll = async (provider: TTSProvider) => {
       const out: TimedScene[] = [];
       let start = 0;
-      // Gemini's free tier allows ~10 voice requests a day: voice scenes in a few batches, then split.
-      const pre = new Map<number, TTSResult>();
+      const real = !provider.name.startsWith('mock');
+      // Gemini's free tier allows ~10 voice requests a day: voice scenes in a few batches, then split at the
+      // exact word where each scene ends (measured by listening to the audio, see align.ts).
+      const pre = new Map<number, TTSResult & { words?: WordTime[]; coverage?: number }>();
       if (provider.name.startsWith('gemini')) {
         for (const [bi, group] of batchScenes(bp.scenes).entries()) {
           const dirs = group.map((g) => script.scenes.find((x) => x.n === g.n)?.delivery);
-          const direction = { tone: dirs[0]?.tone, pace: dirs[0]?.pace, emphasis: dirs.flatMap((d) => d?.emphasis ?? []).slice(0, 6) };
-          const r = await provider.synthesize(group.map((g) => g.voiceover).join('\n\n'), resolve(dir, `batch-${bi + 1}.aiff`), direction);
+          const r = await provider.synthesize(group.map((g) => g.voiceover).join('\n\n'), resolve(dir, `batch-${bi + 1}.aiff`), { tone: dirs[0]?.tone, pace: dirs[0]?.pace });
           voicesUsed.push(r.voice);
           const parts = group.map((g) => resolve(dir, `scene-${g.n}.batch.wav`));
-          await splitBatch(r.audioPath, group.map((g) => g.voiceover), parts);
-          group.forEach((g, i) => pre.set(g.n, { audioPath: parts[i]!, durationSec: 0, characters: g.voiceover.length, voice: r.voice }));
+          const split = await splitBatch(r.audioPath, group.map((g) => g.voiceover), parts, { rootDir: root });
+          if (split.trimmedLeadIn > 0.8) notes.push(`Batch ${bi + 1}: removed ${split.trimmedLeadIn.toFixed(1)}s of speech that was not in the script (voice read its notes aloud).`);
+          if (!split.aligned) notes.push(`Batch ${bi + 1}: speech alignment unavailable — scene cuts and captions use estimated timing.`);
+          group.forEach((g, i) => pre.set(g.n, { audioPath: parts[i]!, durationSec: 0, characters: g.voiceover.length, voice: r.voice, words: split.words?.[i], coverage: split.coverage?.[i] }));
         }
       }
       for (const s of bp.scenes) {
         const sc = script.scenes.find((x) => x.n === s.n);
-        let r = pre.get(s.n) ?? await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}.aiff`), sc?.delivery);
-        // Stage gate: a scene whose audio is silent, cut off or stretched is re-recorded right away (up to 2x).
-        for (let attempt = 0; attempt < 2 && existsSync(r.audioPath) && !provider.name.startsWith('mock'); attempt++) {
-          const problem = await sceneAudioProblem(r.audioPath, s.voiceover, this.ctx.config.thresholds.script.arabicWordsPerMinute);
+        let r: TTSResult & { words?: WordTime[]; coverage?: number } = pre.get(s.n) ?? await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}.aiff`), sc?.delivery);
+        /** Aligns a single-scene recording (trims speech before the first script word). */
+        const alignOne = async (x: TTSResult, tag: string) => {
+          if (!real || !existsSync(x.audioPath)) return x;
+          const p = resolve(dir, `scene-${s.n}.${tag}.aligned.wav`);
+          const sp = await splitBatch(x.audioPath, [s.voiceover], [p], { rootDir: root });
+          return sp.aligned ? { ...x, audioPath: p, words: sp.words?.[0], coverage: sp.coverage?.[0] } : x;
+        };
+        if (!pre.has(s.n)) r = await alignOne(r, 'take1');
+        // Stage gate: a scene whose audio is silent, cut off, stretched — or does not say the script — is
+        // re-recorded on its own right away (up to 2x).
+        for (let attempt = 0; attempt < 2 && existsSync(r.audioPath) && real; attempt++) {
+          const problem = (await sceneAudioProblem(r.audioPath, s.voiceover, this.ctx.config.thresholds.script.arabicWordsPerMinute))
+            ?? (r.coverage !== undefined && r.coverage < 0.7 ? `narration does not match the script (${Math.round(r.coverage * 100)}% of words heard)` : undefined);
           if (!problem) break;
           this.ctx.logger.child('renderer').warn('re-recording scene audio', { videoId, scene: s.n, problem });
-          r = await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}-retry${attempt + 1}.aiff`), sc?.delivery);
+          notes.push(`Scene ${s.n} re-recorded: ${problem}.`);
+          r = await alignOne(await provider.synthesize(s.voiceover, resolve(dir, `scene-${s.n}-retry${attempt + 1}.aiff`), sc?.delivery), `retry${attempt + 1}`);
         }
         voiceName = r.voice;
         voicesUsed.push(r.voice);
@@ -381,7 +414,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
           await ffmpeg(['-f', 'lavfi', '-i', `anullsrc=r=48000:cl=mono`, '-t', String(Math.max(1, r.durationSec) + 0.45), wav]);
         }
         const duration = await probeDuration(wav);
-        out.push({ n: s.n, start, duration, audioPath: wav, voiceover: s.voiceover, onScreenText: s.onScreenText });
+        out.push({ n: s.n, start, duration, audioPath: wav, voiceover: s.voiceover, onScreenText: s.onScreenText, words: r.words, coverage: r.coverage });
         start += duration;
         this.ctx.cost.record({ provider: provider.name, operation: 'tts', videoId, units: r.characters, unit: 'characters', usd: 0 });
       }
@@ -504,7 +537,10 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const durationSec = await probeDuration(videoPath);
     const audio = await volumeStats(voice);
     const silent = !Number.isFinite(audio.meanDb) || audio.meanDb < -50;
-    const audioScore = silent ? 0 : audio.maxDb > -0.5 ? 70 : audio.meanDb >= -30 && audio.meanDb <= -10 ? 85 : 70;
+    const offScript = timed.filter((s) => s.coverage !== undefined && s.coverage < 0.7);
+    if (offScript.length) notes.push(`Narration does not match the script in scene(s) ${offScript.map((s) => s.n).join(', ')} — publish blocked.`);
+    if (timed.every((s) => s.words?.length)) notes.push(`Captions, cuts and shots timed from the measured words (avg ${Math.round((timed.reduce((a, s) => a + (s.coverage ?? 0), 0) / timed.length) * 100)}% of script words heard).`);
+    const audioScore = silent ? 0 : offScript.length ? 40 : audio.maxDb > -0.5 ? 70 : audio.meanDb >= -30 && audio.meanDb <= -10 ? 85 : 70;
     if (!silent && tts.name === 'macos-say') notes.push(`Synthetic voice "${voiceName}" (macOS): clear but robotic.`);
     if (!silent && tts.name === 'gemini-tts') notes.push(`Natural AI voice "${voiceName}" (Gemini) — YouTube synthetic-content disclosure will be enabled to be safe.`);
     const subWords = subs.map((s) => s.text).join(' ').split(/\s+/).filter(Boolean);
@@ -525,7 +561,6 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const withStock = allShots().filter((x) => x.visual).length;
     notes.push(`${allShots().length} shots (one per sentence, ~${(t / Math.max(1, allShots().length)).toFixed(1)}s each); ${withStock} with stock footage.`);
     if (withStock) notes.push('Stock footage used — check none shows identifiable people/brands in a misleading way.');
-    notes.push('Arabic captions are generated from the exact narrated text and the measured per-scene audio durations; no independently generated caption text can drift from the voiceover.');
 
     const assets: MediaAsset[] = [
       { id: 'bg-gradients', kind: 'video', path: videoPath, license: 'generated-owned', source: 'ffmpeg-gradients', aiGenerated: false },

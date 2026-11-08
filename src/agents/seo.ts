@@ -62,7 +62,7 @@ export class SeoAgent extends Agent<SeoInput, SeoPackage> {
       task: 'seo.package',
       tier: 'light',
       system: loadPrompt('seo'),
-      prompt: JSON.stringify({ title: input.script.mainTitle, altTitles: input.script.altTitles, hooks: input.script.hooks, scenes: input.script.scenes.map((s) => s.purpose) }),
+      prompt: JSON.stringify({ title: input.script.mainTitle, altTitles: input.script.altTitles, hooks: input.script.hooks, scenes: input.script.scenes.map((s) => ({ purpose: s.purpose, says: s.voiceover.slice(0, 280) })), rule: 'Describe ONLY what the narration (scenes[].says) actually says: never add a company, person, number or event that is not in it.' }),
       schema: SeoLLM,
       videoId: input.videoId,
     });

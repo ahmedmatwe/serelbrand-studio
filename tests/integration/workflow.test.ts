@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { testContext } from '../helpers.ts';
+import { measuredRender, testContext } from '../helpers.ts';
 import { daily, postPublish, produceVideo, publish, review } from '../../src/workflows/orchestrator.ts';
 import { approve, reject, verifyClaim } from '../../src/publishing/approval.ts';
 import { proposePublishTime } from '../../src/publishing/schedule.ts';
@@ -14,9 +14,12 @@ type Ctx = ReturnType<typeof testContext>;
 
 /** produce → (blocked) → human verifies every factual claim → review → pending approval */
 async function readyForApproval(ctx: Ctx) {
+  // The mock "long" script is a 2-minute stand-in, so its duration score keeps it just under the real bar.
+  ctx.config.thresholds.quality.minScoreToPublish = 80;
   const first = await produceVideo(ctx, { title: 'قصة نوكيا', format: 'long' });
   const fc = ctx.repos.artifacts.latest<FactCheckReport>(first.videoId, 'fact_check')!.data;
   fc.claims.forEach((c, i) => { if (c.status !== 'not_applicable') verifyClaim(ctx, first.videoId, i, { url: `https://example.org/src-${i}`, date: '2025-06-01', by: 'tester' }); });
+  measuredRender(ctx, first.videoId);
   const second = await review(ctx, first.videoId);
   return { first, second, videoId: first.videoId };
 }
@@ -199,7 +202,7 @@ test('html report: RTL, all sections present, content escaped', async () => {
 test('publisher: scheduled long video → its Shorts go out at the next Shorts slots', async () => {
   const ctx = testContext({ env: { ALLOW_PUBLIC_PUBLISHING: 'true' } });
   const { second, videoId } = await readyForApproval(ctx);
-  ctx.repos.artifacts.save({ videoId, kind: 'render', agent: 'test', data: { videoPath: '/tmp/v.mp4', shorts: [{ path: '/tmp/s1.mp4', title: 'a' }, { path: '/tmp/s2.mp4', title: 'b' }], assets: [] } });
+  measuredRender(ctx, videoId, { shorts: [{ path: '/tmp/s1.mp4', title: 'a' }, { path: '/tmp/s2.mp4', title: 'b' }] });
   const at = '2026-11-08T17:00:00.000Z';
   approve(ctx, second.approval!.id, { by: 't', publishAt: at, acceptRisks: true, note: 'ok' });
   assert.equal((await publish(ctx, videoId)).status, 'succeeded');

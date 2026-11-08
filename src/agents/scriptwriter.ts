@@ -1,8 +1,10 @@
+import { z } from 'zod';
 import { Agent, countWords } from './base.ts';
 import { ScriptLLM, type Script } from './schemas.ts';
 import { loadPrompt } from '../prompts.ts';
 import { scriptProblems } from './stage-checks.ts';
-import { researchTopic } from './research.ts';
+import { researchTopic, type ResearchSource } from './research.ts';
+import { StudioError } from '../core/errors.ts';
 
 export interface ScriptInput { videoId: string; title: string; angle?: string; format: 'long' | 'short'; audience?: string }
 
@@ -20,13 +22,41 @@ export function narratedSceneText(s: Pick<Script, 'opening' | 'scenes' | 'cta' |
 }
 
 /** Spoken text only: this must stay identical to what the renderer sends to TTS. */
-export function spokenText(s: Pick<Script, 'format' | 'opening' | 'scenes' | 'cta' | 'ending'>): string {
+export function spokenText(s: Pick<Script, 'opening' | 'scenes' | 'cta' | 'ending'> & { format?: Script['format'] }): string {
   return s.scenes.map((_, i) => narratedSceneText(s, i)).join('\n');
 }
+
+const EditorLLM = z.object({ problems: z.array(z.object({ scene: z.number().int().default(0), problem: z.string().min(5) })).default([]) });
 
 export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
   readonly name = 'scriptwriter';
   readonly artifactKind = 'script';
+
+  /**
+   * A strict editor reads the narration as the viewer will hear it: is each video/Short on its topic, does it
+   * start at the beginning (never mid-story, never "he"/"this" before saying who/what), and does every sentence
+   * follow from the one before? Returns fix instructions (empty = OK, or the check is unavailable).
+   */
+  private async editorProblems(input: ScriptInput, d: Pick<Script, 'opening' | 'scenes' | 'cta' | 'ending' | 'mainTitle'>, topics?: { title: string; subject: string }[]): Promise<string[]> {
+    if (this.ctx.providers.llm.name.startsWith('mock')) return [];
+    const units = input.format === 'short'
+      ? d.scenes.map((sc, i) => ({ scene: sc.n, topic: topics?.[i] ? `${topics[i]!.title} (${topics[i]!.subject})` : sc.onScreenText, narration: sc.voiceover }))
+      : [{ scene: 0, topic: d.mainTitle, narration: spokenText({ ...d, format: input.format }) }];
+    const r = await this.ctx.providers.llm.generateJson({
+      task: 'script.editor',
+      tier: 'light',
+      system: 'You are a strict YouTube script editor. Each unit is narration a viewer hears from second 0 with no other context (each Short is watched alone). Report ONLY real problems: ' +
+        '(1) OFF-TOPIC: the narration is not clearly about its topic (e.g. a story Short that never names or tells the company/person of its topic, or drifts into generic advice); ' +
+        '(2) NO START: the first sentence does not say plainly what this is about, or it starts mid-story / with a pronoun or reference the viewer cannot know ("he", "this decision", "then"); ' +
+        '(3) JUMPS: a sentence does not follow from the previous one, a claim appears from nowhere, or the ending does not pay off the opening. ' +
+        'Write each problem as a short English rewrite instruction naming the scene and the exact sentence. Return {"problems":[]} if the narration is clear and coherent. JSON only.',
+      prompt: JSON.stringify({ format: input.format, units }),
+      schema: EditorLLM,
+      videoId: input.videoId,
+      maxOutputTokens: 2000,
+    }).catch(() => undefined);
+    return (r?.data.problems ?? []).slice(0, 6).map((p) => (p.scene ? `Scene ${p.scene}: ${p.problem}` : p.problem));
+  }
 
   protected async execute(input: ScriptInput): Promise<Script> {
     const t = this.ctx.config.thresholds.script;
@@ -38,12 +68,16 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
     const topics = this.ctx.repos.artifacts.latest<{ topics?: { title: string; subject: string; angle: string }[] }>(input.videoId, 'calendar_entry')?.data.topics;
     // "short" = a Shorts pack: 3 independent mini-stories, each rendered as its own vertical Short.
     const pack = input.format === 'short'
-      ? { shortsPack: 'Write EXACTLY 3 scenes. Each scene is a complete, independent YouTube Short of 40–55 seconds (90–115 spoken words)' + (topics?.length === 3 ? ` — scene 1 is about "${topics[0]!.title}", scene 2 about "${topics[1]!.title}", scene 3 about "${topics[2]!.title}" (three DIFFERENT subjects; each scene tells only its own topic)` : '') + '. The FIRST sentence states the secret/idea (and names the company if it is a story), so the viewer knows within 2 seconds what it is about and why it matters to them; then the proof in a few concrete beats (the documented fact, experiment, example or story, with numbers from the sources) using everyday, filmable examples (a price tag, a shop shelf, a menu, an office meeting…); then the takeaway in one clear sentence and how the viewer can apply it in their own work or project (one practical step). curiosityGap = its hook question, onScreenText = the subject name (1–3 words). Keep opening, cta and ending to one short sentence each.', topics }
+      ? { shortsPack: 'Write EXACTLY 3 scenes. Each scene is a complete, independent YouTube Short of 40–55 seconds (90–115 spoken words)' + (topics?.length === 3 ? ` — scene 1 is about "${topics[0]!.title}", scene 2 about "${topics[1]!.title}", scene 3 about "${topics[2]!.title}" (three DIFFERENT subjects; scene N tells ONLY topic N — never mix them, never borrow facts from another scene's topic, and for a story the company/person is named in the first sentence)` : '') + '. The FIRST sentence states the secret/idea (and names the company if it is a story), so the viewer knows within 2 seconds what it is about and why it matters to them; then the proof in a few concrete beats (the documented fact, experiment, example or story, with numbers from the sources) using everyday, filmable examples (a price tag, a shop shelf, a menu, an office meeting…); then the takeaway in one clear sentence and how the viewer can apply it in their own work or project (one practical step). curiosityGap = its hook question, onScreenText = the subject name (1–3 words). Keep opening, cta and ending to one short sentence each.', topics }
       : {};
     // Real sources first: facts in the script must come from them, so verification can confirm them.
-    const sources = topics?.length
-      ? (await Promise.all(topics.map((t) => researchTopic(this.ctx, input.videoId, `${t.subject} ${t.angle}`, t.title).catch(() => [])))).flat()
-      : await researchTopic(this.ctx, input.videoId, input.title, input.angle).catch(() => []);
+    // Sequential (not parallel): Wikipedia throttles bursts from cloud IPs.
+    const perTopic: ResearchSource[][] = [];
+    for (const t of topics ?? []) perTopic.push(await researchTopic(this.ctx, input.videoId, `${t.subject} ${t.angle}`, t.title, t.subject).catch(() => []));
+    // Never write a Short blind: a topic without any source produced a vague, off-topic Short before.
+    const blind = (topics ?? []).filter((_, i) => !perTopic[i]!.length);
+    if (blind.length && this.ctx.providers.web.name !== 'mock-web') throw new StudioError('NO_SOURCES', `No sources found for: ${blind.map((t) => t.subject).join(', ')} — another topic will be tried`, false);
+    const sources = topics?.length ? perTopic.flat() : await researchTopic(this.ctx, input.videoId, input.title, input.angle).catch(() => []);
     if (topics?.length) this.ctx.repos.artifacts.save({ videoId: input.videoId, kind: 'research', agent: 'research', data: { queries: topics.map((t) => t.subject), sources } });
     const sourcing = sources.length
       ? { sources, sourceRule: 'Use these sources as your ONLY basis for facts: every number, date, name, quote and event in the script must appear in one of them. Build the story from their most surprising concrete facts (at least 6 distinct facts for a long video, at least 2 per Short). Never invent or round figures differently.' }
@@ -79,7 +113,12 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
     // A Shorts pack is exactly 3 Shorts, even if the model wrote more scenes.
     if (input.format === 'short' && data.scenes.length > 3) data = { ...data, scenes: data.scenes.slice(0, 3) };
     // Stage gate: check the script now and fix the exact problems (up to 2 rewrites, keep the best).
-    let problems = scriptProblems({ ...data, format: input.format }, target, this.ctx.config.channel.dialect);
+    // Rule checks + an editor's read: on topic, starts at the beginning, every sentence follows the last.
+    const check = async (d: typeof data) => [
+      ...scriptProblems({ ...d, format: input.format }, target, this.ctx.config.channel.dialect),
+      ...(await this.editorProblems(input, d, topics)),
+    ];
+    let problems = await check(data);
     for (let i = 0; i < 2 && problems.length; i++) {
       const rev = await this.ctx.providers.llm.generateJson({
         task: 'script.revise',
@@ -92,7 +131,7 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
         vars: { previous: data },
       }).catch(() => undefined);
       if (!rev) break;
-      const next = scriptProblems({ ...rev.data, format: input.format }, target, this.ctx.config.channel.dialect);
+      const next = await check(rev.data);
       // Accept only a real improvement that did not gut the script.
       if (next.length >= problems.length || countWords(spokenText({ ...rev.data, format: input.format })) < countWords(spokenText({ ...data, format: input.format })) * 0.8) break;
       data = rev.data;

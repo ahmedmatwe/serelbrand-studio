@@ -4,6 +4,7 @@
  * pauses closest to each scene boundary.
  */
 import { ffmpeg, probeDuration } from './ffmpeg.ts';
+import { alignWords, alignedCutPoints, scriptWords, transcribeWords, type WordTime } from './align.ts';
 
 const words = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
 
@@ -53,16 +54,53 @@ export function cutPoints(texts: string[], duration: number, pauses: number[]): 
   return cuts;
 }
 
-/** Splits one narrated batch into per-scene files. */
-export async function splitBatch(path: string, texts: string[], outPaths: string[]): Promise<void> {
+export interface SplitResult {
+  /** Per output file: the script words with their measured times (relative to that file), when aligned. */
+  words?: WordTime[][];
+  /** Per output file: share of its script words actually heard (0–1). */
+  coverage?: number[];
+  /** Seconds of non-script speech removed from the start (e.g. instructions read aloud). */
+  trimmedLeadIn: number;
+  aligned: boolean;
+}
+
+/**
+ * Splits one narrated batch into per-scene files. With the speech recogniser available the cuts are placed
+ * between the exact last word of one scene and the first word of the next, and any speech before the first
+ * script word is removed. Without it, falls back to word-proportional cuts snapped to pauses.
+ */
+export async function splitBatch(path: string, texts: string[], outPaths: string[], o: { rootDir?: string } = {}): Promise<SplitResult> {
+  const duration = await probeDuration(path);
+  const pauses = await silences(path);
+  const rec = o.rootDir ? await transcribeWords(path, o.rootDir) : undefined;
+  if (rec) {
+    const al = alignWords(scriptWords(texts.join(' ')), rec, duration);
+    const first = al.words[0]?.start ?? 0;
+    const head = al.leadIn > 0.8 ? Math.max(0, first - 0.15) : 0;
+    const cuts = alignedCutPoints(texts, al.words, pauses);
+    const lastEnd = al.words.at(-1)?.end ?? duration;
+    const bounds = [head, ...cuts, Math.min(duration, lastEnd + 0.6)];
+    const words: WordTime[][] = [];
+    const coverage: number[] = [];
+    let k = 0;
+    for (let i = 0; i < texts.length; i++) {
+      const n = scriptWords(texts[i]!).length;
+      const w = al.words.slice(k, k + n).map((x) => ({ ...x, start: Math.max(0, x.start - bounds[i]!), end: Math.max(0, x.end - bounds[i]!) }));
+      k += n;
+      words.push(w);
+      coverage.push(n ? w.filter((x) => x.matched).length / n : 1);
+      await ffmpeg(['-i', path, '-af', `atrim=start=${bounds[i]!.toFixed(3)}:end=${bounds[i + 1]!.toFixed(3)},asetpts=PTS-STARTPTS`, outPaths[i]!]);
+    }
+    return { words, coverage, trimmedLeadIn: head, aligned: true };
+  }
   if (texts.length === 1) {
     await ffmpeg(['-i', path, '-c', 'copy', outPaths[0]!]);
-    return;
+    return { trimmedLeadIn: 0, aligned: false };
   }
-  const duration = await probeDuration(path);
-  const cuts = cutPoints(texts, duration, await silences(path));
+  const cuts = cutPoints(texts, duration, pauses);
   const bounds = [0, ...cuts, duration];
   for (let i = 0; i < texts.length; i++) {
     await ffmpeg(['-i', path, '-af', `atrim=start=${bounds[i]!.toFixed(3)}:end=${bounds[i + 1]!.toFixed(3)},asetpts=PTS-STARTPTS`, outPaths[i]!]);
   }
+  return { trimmedLeadIn: 0, aligned: false };
 }

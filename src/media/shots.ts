@@ -21,11 +21,14 @@ export function splitSentences(text: string): string[] {
  * Lays sentences over `duration` seconds proportionally to their word counts, merging very short
  * sentences into the next and splitting long ones into several shots (variant = which alternative clip).
  */
-export function layoutShots(sentences: { text: string; query: string }[], duration: number): Shot[] {
+export function layoutShots(sentences: { text: string; query: string; /** Measured start (s) of the sentence in the audio. */ start?: number }[], duration: number): Shot[] {
   if (!sentences.length || duration <= 0) return [];
   const total = sentences.reduce((a, s) => a + Math.max(1, countWords(s.text)), 0);
-  // 1) proportional durations
-  let items = sentences.map((s) => ({ ...s, d: (duration * Math.max(1, countWords(s.text))) / total }));
+  // 1) durations: from the measured sentence starts when known (cuts land where the sentence is spoken),
+  //    else proportional to word count.
+  const timed = sentences.every((s) => s.start !== undefined && Number.isFinite(s.start));
+  const edge = (i: number) => (i === 0 ? 0 : i >= sentences.length ? duration : Math.min(duration, Math.max(0, sentences[i]!.start! - 0.1)));
+  let items = sentences.map((s, i) => ({ ...s, d: timed ? Math.max(0.05, edge(i + 1) - edge(i)) : (duration * Math.max(1, countWords(s.text))) / total }));
   // 2) merge too-short items into their neighbour (keep the first query: it opens the idea)
   const merged: typeof items = [];
   for (const it of items) {

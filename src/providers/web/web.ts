@@ -11,7 +11,10 @@ export interface WebProvider {
   wikipedia(query: string, lang?: 'en' | 'ar', limit?: number): Promise<WebPage[]>;
 }
 
-const UA = 'SerElBrandStudio/1.0 (automated fact-check; contact via channel)';
+// Wikimedia's User-Agent policy wants a name/version AND a contact (URL or e-mail); a vague UA gets
+// throttled (HTTP 429/403) from cloud IPs like GitHub Actions — which left whole Shorts without sources.
+const UA = 'SerElBrandStudio/1.1 (https://ahmedmatwe.github.io/; research bot)';
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const MAX_BYTES = 3 * 1024 * 1024;
 const MAX_TEXT = 40_000;
 
@@ -46,14 +49,27 @@ export class RealWeb implements WebProvider {
     return { url: res.url || url, text, title };
   }
 
+  /** GET with retries on throttling (429) and server errors, honouring Retry-After. */
+  private async get(url: string, attempts = 4): Promise<Response> {
+    for (let i = 0; ; i++) {
+      const res = await this.fetchImpl(url, { headers: { 'user-agent': UA, 'api-user-agent': UA }, signal: AbortSignal.timeout(20_000) });
+      if ((res.status === 429 || res.status >= 500) && i < attempts - 1) {
+        const wait = Number(res.headers.get('retry-after')) || 2 ** i * 2;
+        await sleep(Math.min(30, wait) * 1000);
+        continue;
+      }
+      return res;
+    }
+  }
+
   async wikipedia(query: string, lang: 'en' | 'ar' = 'en', limit = 2): Promise<WebPage[]> {
     const api = `https://${lang}.wikipedia.org/w/api.php`;
-    const s = await this.fetchImpl(`${api}?${new URLSearchParams({ action: 'query', list: 'search', srsearch: query, srlimit: String(limit), format: 'json', origin: '*' })}`, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(20_000) });
+    const s = await this.get(`${api}?${new URLSearchParams({ action: 'query', list: 'search', srsearch: query, srlimit: String(limit), format: 'json', origin: '*' })}`);
     if (!s.ok) throw new ProviderError('web', `Wikipedia search HTTP ${s.status}`, s.status >= 500);
     const titles = (((await s.json()) as { query?: { search?: { title: string }[] } }).query?.search ?? []).map((x) => x.title);
     const pages: WebPage[] = [];
     for (const title of titles) {
-      const r = await this.fetchImpl(`${api}?${new URLSearchParams({ action: 'query', prop: 'extracts', explaintext: '1', redirects: '1', titles: title, format: 'json', origin: '*' })}`, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(20_000) });
+      const r = await this.get(`${api}?${new URLSearchParams({ action: 'query', prop: 'extracts', explaintext: '1', redirects: '1', titles: title, format: 'json', origin: '*' })}`);
       if (!r.ok) continue;
       const pg = Object.values(((await r.json()) as { query?: { pages?: Record<string, { extract?: string; title: string }> } }).query?.pages ?? {})[0];
       if (pg?.extract) pages.push({ url: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(pg.title.replace(/ /g, '_'))}`, title: pg.title, text: pg.extract.slice(0, MAX_TEXT) });

@@ -11,7 +11,7 @@ export interface ResearchSource { url: string; title?: string; excerpt: string }
 
 const QueriesLLM = z.object({ queries: z.array(z.string().min(2)).min(1).max(5) });
 
-export async function researchTopic(ctx: AgentContext, videoId: string, topic: string, angle = ''): Promise<ResearchSource[]> {
+export async function researchTopic(ctx: AgentContext, videoId: string, topic: string, angle = '', subject?: string): Promise<ResearchSource[]> {
   if (ctx.providers.web.name === 'mock-web') return []; // offline runs: no sources to fetch
   const q = await ctx.providers.llm.generateJson({
     task: 'research.queries',
@@ -22,7 +22,9 @@ export async function researchTopic(ctx: AgentContext, videoId: string, topic: s
     videoId,
     maxOutputTokens: 1000,
   }).catch(() => undefined);
-  const queries = q?.data.queries ?? [];
+  // The planned subject is an exact Wikipedia title: always search it first, so a failed query step never
+  // leaves a topic without sources.
+  const queries = [...new Set([subject?.trim(), ...(q?.data.queries ?? [])].filter((x): x is string => Boolean(x)))];
   const seen = new Set<string>();
   const out: ResearchSource[] = [];
   for (const query of queries.slice(0, 4)) {

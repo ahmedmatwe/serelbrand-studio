@@ -1,6 +1,6 @@
 import { Agent, type AgentContext } from '../agents/base.ts';
 import type { ComplianceReport } from '../agents/compliance.ts';
-import type { FactCheckReport, SeoPackage } from '../agents/schemas.ts';
+import type { FactCheckReport, Script, SeoPackage } from '../agents/schemas.ts';
 import { composeDescription } from '../agents/seo.ts';
 import { PublishBlockedError } from '../core/errors.ts';
 import { withRetry } from '../core/retry.ts';
@@ -8,7 +8,7 @@ import type { UploadResult, Visibility } from '../providers/media.ts';
 import type { PrePublicationReport } from '../reports/prepublication.ts';
 import { currentSlots, nextSlots } from './schedule.ts';
 import { buildReport } from './approval.ts';
-import { qcBlockers, qualityChecklist } from '../reports/qc.ts';
+import { EXPERIMENTAL, qcBlockers, qualityChecklist } from '../reports/qc.ts';
 
 export interface PublishInput { videoId: string }
 export interface PublishLog extends UploadResult { videoId: string; provider: string; dryRun: boolean; uploadedAt: string; attempts: number; shorts: { youtubeVideoId: string; title: string; publishAt?: string }[] }
@@ -41,10 +41,10 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     const { env } = this.ctx.config;
     if ((visibility === 'public' || scheduled) && !env.ALLOW_PUBLIC_PUBLISHING) throw new PublishBlockedError('Public publishing is disabled (ALLOW_PUBLIC_PUBLISHING=false)');
 
-    const render = this.ctx.repos.artifacts.latest<{ videoPath: string; thumbnailPath?: string; captionsPath?: string; captionsEnPath?: string; shorts?: { path: string; title: string }[]; packOnly?: boolean; voice: { provider: string; voice: string; synthetic: boolean }; assets?: { source: string; attribution?: string; pageUrl?: string }[] }>(videoId, 'render');
+    const render = this.ctx.repos.artifacts.latest<{ videoPath: string; thumbnailPath?: string; captionsPath?: string; captionsEnPath?: string; shorts?: { path: string; title: string; scenes?: number[] }[]; packOnly?: boolean; voice: { provider: string; voice: string; synthetic: boolean }; assets?: { source: string; attribution?: string; pageUrl?: string }[] }>(videoId, 'render');
     if (!render && !env.DRY_RUN) throw new PublishBlockedError('No rendered video file yet (rendering arrives in phase 4)');
     if (!env.DRY_RUN && render?.data.voice.provider.toLowerCase().includes('mock')) throw new PublishBlockedError('Experimental/mock voice can never be uploaded');
-    if (!env.DRY_RUN && /(?:^|[\\s_-])(test|demo|sample|mock|lorem|ipsum|اختبار|تجريب(?:ي|ية)?|عينة)(?:$|[\\s_-])/iu.test([video.title, render?.data.voice.provider, render?.data.voice.voice].filter(Boolean).join(' '))) {
+    if (!env.DRY_RUN && EXPERIMENTAL.test([video.title, render?.data.voice.provider, render?.data.voice.voice].filter(Boolean).join(' '))) {
       throw new PublishBlockedError('Experimental/test output can never be uploaded');
     }
 
@@ -59,7 +59,18 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     const used = uploadsToday(this.ctx);
     if (!env.DRY_RUN && used + need > env.YOUTUBE_DAILY_UPLOADS) throw new PublishBlockedError(`UPLOAD_QUOTA: ${used} uploads today + ${need} would exceed ${env.YOUTUBE_DAILY_UPLOADS} — will upload after the daily reset`);
     const shortTitle = (t: string) => `${t.replace(/#\S+/g, '').trim().slice(0, 88)} #Shorts`;
-    const description = composeDescription(seo, this.ctx.repos.artifacts.latest<FactCheckReport>(videoId, 'fact_check')?.data, render?.data.assets);
+    const factCheck = this.ctx.repos.artifacts.latest<FactCheckReport>(videoId, 'fact_check')?.data;
+    const description = composeDescription(seo, factCheck, render?.data.assets);
+    // A Shorts pack = 3 different topics: each Short gets a description of ITS OWN topic (its opening lines +
+    // its own verified sources), never one mixed summary of all three.
+    const script = this.ctx.repos.artifacts.latest<Script>(videoId, 'script')?.data;
+    const packDescription = (scenes: number[] | undefined) => {
+      const sc = script?.scenes.find((x) => scenes?.includes(x.n));
+      if (!pack || !sc) return `${description}\n#Shorts`;
+      const lead = (sc.voiceover.match(/[^.!؟?…]+[.!؟?…]+/g) ?? [sc.voiceover]).slice(0, 2).join(' ').trim();
+      const own = factCheck ? { ...factCheck, claims: factCheck.claims.filter((c) => c.sceneN === sc.n) } : undefined;
+      return `${composeDescription({ description: lead, hashtags: seo.hashtags, chapters: [] }, own, render?.data.assets)}\n#Shorts`;
+    };
     let attempts = 0;
     const res = await withRetry(
       () => {
@@ -70,7 +81,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
           captionsPath: pack ? undefined : render?.data.captionsPath || undefined,
           extraCaptions: !pack && render?.data.captionsEnPath ? [{ path: render.data.captionsEnPath, language: 'en', name: 'English' }] : undefined,
           title: pack ? shortTitle(render!.data.shorts![0]!.title) : seo.primaryTitle,
-          description: pack ? `${description}\n#Shorts` : description,
+          description: pack ? packDescription(render!.data.shorts![0]!.scenes) : description,
           tags: seo.tags,
           visibility,
           publishAt: scheduled,
@@ -95,7 +106,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
         const r = await yt.upload({
           videoPath: sh.path,
           title,
-          description: pack ? `${description}\n#Shorts` : `القصة كاملة: https://youtu.be/${res.youtubeVideoId}\n\n${seo.hashtags.join(' ')} #Shorts`,
+          description: pack ? packDescription(sh.scenes) : `القصة كاملة: https://youtu.be/${res.youtubeVideoId}\n\n${seo.hashtags.join(' ')} #Shorts`,
           tags: seo.tags,
           visibility,
           publishAt: shortPublishAt,

@@ -155,6 +155,11 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
   for (const t of r?.data.topics ?? []) {
     const key = t.subject.toLowerCase();
     if (seen.has(key) || isDuplicateTopic(t.title, new Set(avoid))) continue;
+    // Only topics we can actually research: a Short written without sources drifts into vague, off-topic talk.
+    if (ctx.providers.web.name !== 'mock-web') {
+      const found = await ctx.providers.web.wikipedia(t.subject, 'en', 1).catch(() => []);
+      if (!found.length || found[0]!.text.length < 1500) continue;
+    }
     seen.add(key);
     picked.push(t);
     if (picked.length === 3) break;

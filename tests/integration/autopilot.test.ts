@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { testContext, ROOT } from '../helpers.ts';
+import { measuredRender, testContext, ROOT } from '../helpers.ts';
 import { acquireLock, releaseLock, runCycle, todaysPlan } from '../../src/workflows/autopilot.ts';
 import { startDashboard } from '../../src/dashboard/server.ts';
 import { buildPlist } from '../../src/workflows/schedule-macos.ts';
@@ -67,6 +67,8 @@ test('autopilot: plans, produces with Shorts, notifies, never approves; second r
     assert.match(r3.skippedProductionReason!, /already produced/);
 
     // Human side (dashboard): verify every claim → approval → approve → upload.
+    // (A real voice would pass the media gates; the mock voice is silence, so stand in its measurements.)
+    measuredRender(ctx, ids[0]!, { videoPath: rd.videoPath, shorts: rd.shorts });
     const d = await startDashboard(ctx, 18000 + Math.floor(Math.random() * 1000));
     try {
       const home = await (await fetch(d.url)).text();

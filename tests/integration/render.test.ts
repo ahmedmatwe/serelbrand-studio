@@ -45,8 +45,8 @@ class FakeStock implements StockProvider {
   async search(query: string, kind: 'image' | 'video'): Promise<MediaAsset[]> {
     if (query.includes('finland')) return []; // force one text-card fallback
     if (query.includes('chart') && kind === 'video') return []; // force one photo (Ken Burns) scene
-    const id = `pexels-${kind}-${query.replace(/\W+/g, '-')}`;
-    return [{ id, kind, path: `https://videos.pexels.com/${id}`, license: 'pexels', source: 'pexels', attribution: 'Test on Pexels', pageUrl: `https://www.pexels.com/${id}/`, width: 1280, height: 720, aiGenerated: false }];
+    // Several clips per query, like a real library (clips are never reused within one video).
+    return [0, 1, 2, 3].map((v) => ({ id: `pexels-${kind}-${query.replace(/\W+/g, '-')}-${v}`, kind })).map(({ id, kind }) => ({ id, kind, path: `https://videos.pexels.com/${id}`, license: 'pexels', source: 'pexels', attribution: 'Test on Pexels', pageUrl: `https://www.pexels.com/${id}/`, width: 1280, height: 720, aiGenerated: false }));
   }
   async download(asset: MediaAsset, dir: string): Promise<string> {
     const { mkdirSync } = await import('node:fs');
@@ -70,7 +70,7 @@ test('render: uses stock footage per scene (looping short clips), falls back to 
     assert.ok(shotNote, 'one shot per sentence');
     const nShots = Number(shotNote!.match(/^(\d+) shots/)![1]);
     assert.ok(nShots > out.scenes.length * 2, `cuts every few seconds (${nShots} shots for ${out.scenes.length} scenes)`);
-    assert.ok(out.measurements.visualScore >= 85);
+    assert.ok(out.measurements.visualScore >= 85, JSON.stringify(out.measurements.notes) + out.measurements.visualScore);
     assert.ok(out.assets.filter((a) => a.license === 'pexels').length >= 3, 'several distinct clips');
     const d = await probeDuration(out.videoPath);
     assert.ok(Math.abs(d - out.scenes.reduce((a, s) => a + s.duration, 0)) < 1, '3s clips loop to fill longer scenes');

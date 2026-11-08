@@ -4,13 +4,30 @@ import { ProviderError } from '../../core/errors.ts';
 import { RateLimiter, withRetry } from '../../core/retry.ts';
 import type { TTSProvider, TTSResult, VoiceDirection } from '../media.ts';
 
-const PACE_AR = { slow: 'ببطء ووقفات واضحة', medium: 'بسرعة متوسطة طبيعية', fast: 'بسرعة وحماس' } as const;
+const PACE_EN = { slow: 'slow, with clear pauses', medium: 'medium, natural', fast: 'brisk and energetic' } as const;
 
-/** Turns a scene's direction into a natural-language performance note for the voice model. */
+/**
+ * Performance notes for the voice model. Kept in ENGLISH and in a labelled notes block: notes written in
+ * Arabic right before the Arabic text were read aloud by the model ("اقرأ النص التالي… النبرة… شدّد على…"),
+ * which put ~10 s of instructions at the start of a video and shifted every cut and caption after it.
+ * Emphasis word lists are never sent (they were read out too).
+ */
 export function directionNote(d?: VoiceDirection): string {
   if (!d) return '';
-  const parts = [d.tone ? `النبرة: ${d.tone}` : '', d.pace ? `اقرأ ${PACE_AR[d.pace]}` : '', d.emphasis?.length ? `شدّد على: ${d.emphasis.join('، ')}` : '', d.pauseAfter ? 'اسكت لحظة بعد آخر جملة' : ''].filter(Boolean);
-  return parts.length ? ` (${parts.join('. ')})` : '';
+  return [d.tone ? `Tone: ${d.tone}.` : '', d.pace ? `Pace: ${PACE_EN[d.pace]}.` : ''].filter(Boolean).join(' ');
+}
+
+/** The full TTS prompt: director's notes, then the transcript, which is the ONLY thing to be spoken. */
+export function ttsPrompt(style: string, text: string, d?: VoiceDirection): string {
+  const notes = [style.trim(), directionNote(d)].filter(Boolean).join(' ');
+  if (!notes) return text;
+  return [
+    'Read the TRANSCRIPT aloud exactly, word for word, in Arabic. Speak nothing else: never read these notes, headings or the word "transcript".',
+    '### DIRECTOR\'S NOTES',
+    notes,
+    '### TRANSCRIPT',
+    text,
+  ].join('\n');
 }
 
 const SAMPLE_RATE = 24_000; // Gemini TTS returns 16-bit mono PCM at 24 kHz
@@ -59,7 +76,7 @@ export class GeminiTTS implements TTSProvider {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': this.o.apiKey },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: `${this.o.style}${directionNote(direction)}\n\n${text}` }] }],
+        contents: [{ parts: [{ text: ttsPrompt(this.o.style, text, direction) }] }],
         generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: this.o.voice } } } },
       }),
       signal: AbortSignal.timeout(600_000),

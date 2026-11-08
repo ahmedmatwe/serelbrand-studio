@@ -42,6 +42,8 @@ jobs:
       ALLOW_PUBLIC_PUBLISHING: 'true'
       ARABIC_FONT: Noto Naskh Arabic
       LOG_LEVEL: info
+      WHISPER_MODEL: small
+      WHISPER_PYTHON: python
       GEMINI_MODEL_WRITING: gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3-flash-preview,gemini-flash-latest,gemini-3.5-flash-lite
       GEMINI_MODEL_LIGHT: gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest,gemini-3.5-flash,gemini-3.6-flash,gemini-3-flash-preview
       GEMINI_TTS_VOICE: Charon
@@ -66,6 +68,24 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-core > /dev/null && fc-list | grep -i "naskh arabic" | head -1
 
       - run: npm ci --no-audit --no-fund
+
+      # Speech alignment (free, local): listens to the narration so captions, scene cuts and shots follow the
+      # exact spoken words, and catches a voice that does not say the script.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: whisper-${{ env.WHISPER_MODEL }}-v1
+
+      - name: Speech alignment model
+        run: |
+          pip install -q -r scripts/requirements.txt
+          python -c "from faster_whisper import WhisperModel; WhisperModel('$WHISPER_MODEL', device='cpu', compute_type='int8'); print('whisper ready')"
 
       - name: Restore state
         run: |

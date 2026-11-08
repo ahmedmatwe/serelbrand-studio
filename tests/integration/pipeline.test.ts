@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { testContext } from '../helpers.ts';
+import { narratedSceneText } from '../../src/agents/scriptwriter.ts';
 import { steps } from '../../src/workflows/steps.ts';
 import { MockLLM } from '../../src/providers/llm/mock.ts';
 import { MOCK_FIXTURES } from '../../src/providers/llm/fixtures.ts';
@@ -169,7 +170,9 @@ test('blueprint: narration is always the verified script text, one scene per scr
   ctx.repos.artifacts.save({ videoId: v.id, kind: 'script', agent: 'test', data: edited });
   await steps['production-planner'](ctx, { videoId: v.id });
   const bp = ctx.repos.artifacts.latest<Blueprint>(v.id, 'blueprint')!.data;
-  assert.deepEqual(bp.scenes.map((s) => s.voiceover), edited.scenes.map((s) => s.voiceover));
+  // Long videos: scene 1 also carries the spoken opening, the last scene the CTA + ending (exactly what is voiced).
+  assert.deepEqual(bp.scenes.map((s) => s.voiceover), edited.scenes.map((_, i) => narratedSceneText(edited, i)));
+  assert.ok(bp.scenes[0]!.voiceover.endsWith(edited.scenes[0]!.voiceover));
   ctx.close();
 });
 

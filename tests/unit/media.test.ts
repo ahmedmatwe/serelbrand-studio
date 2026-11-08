@@ -43,7 +43,7 @@ test('srt and timeline: valid structure', () => {
   assert.match(srt, /^1\n00:00:00,000 --> 00:00:01,500\nأ\n\n2\n00:00:01,500 --> 00:00:03,000\nب\n$/);
   const t = timelineAss([{ n: 1, start: 0, duration: 6, audioPath: '', voiceover: 'كلام كثير هنا للاختبار فقط', onScreenText: 'عنوان' }], { width: 1080, height: 1920, accent: '#FFD400', endCard: 'القصة كاملة' });
   assert.equal(t.subs.length, 2, 'vertical captions: max 4 words per chunk');
-  assert.match(t.ass, /\\k\d+/, 'karaoke word timing present');
+  assert.doesNotMatch(t.ass, /\\k\d+/, 'no guessed karaoke timing (captions follow measured words instead)');
   assert.match(t.ass, /PlayResY: 1920/);
   assert.ok((t.ass.match(/^Dialogue:/gm) ?? []).length >= 3); // title + subtitle + end card
 });

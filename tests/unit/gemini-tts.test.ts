@@ -30,7 +30,7 @@ test('gemini tts: Charon voice, key in header, retries 429, writes WAV with corr
     assert.equal((calls[0]!.headers as Record<string, string>)['x-goog-api-key'], 'AQ.TESTKEY');
     const body = JSON.parse(String(calls[1]!.body));
     assert.equal(body.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName, 'Charon');
-    assert.match(body.contents[0].parts[0].text, /^اقرأ بهدوء:\n\nمرحبا$/);
+    assert.match(body.contents[0].parts[0].text, /### DIRECTOR'S NOTES\nاقرأ بهدوء:\n### TRANSCRIPT\nمرحبا$/);
     assert.ok(r.audioPath.endsWith('scene-1.gemini.wav'), 'never collides with the renderer\'s scene-1.wav');
     assert.equal(r.durationSec, 2);
     assert.equal(readFileSync(r.audioPath).toString('ascii', 0, 4), 'RIFF');
