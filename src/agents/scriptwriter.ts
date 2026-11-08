@@ -27,6 +27,13 @@ export function spokenText(s: Pick<Script, 'opening' | 'scenes' | 'cta' | 'endin
   return s.scenes.map((_, i) => narratedSceneText(s, i)).join('\n');
 }
 
+/** How every phone-secrets Short is written (used for the pack and for repairing a single Short). */
+export const PHONE_SHORT_RULES = 'Each scene is a complete, independent YouTube Short of 30–45 seconds (70–100 spoken words) in natural EGYPTIAN Arabic, like a friend showing you a secret on his phone — fast, warm, excited, never formal. ' +
+          'Structure of every scene: (1) HOOK in the first sentence (≤ 12 words): the surprising benefit, e.g. "فيه كود لو كتبته في موبايلك هيقولك…", "الآيفون بتاعك فيه زرار سري ورا الضهر!"; ' +
+          '(2) the exact steps the viewer follows RIGHT NOW. A code MUST be said out loud, spelled symbol by symbol in Egyptian words so the narrator reads it right (e.g. *#06# → «نجمة، شباك، صفر، ستة، شباك»; *#*#4636#*#* → «نجمة شباك نجمة شباك أربعة ستة تلاتة ستة شباك نجمة شباك نجمة»), or the settings path in the words the phone shows (الإعدادات ← تسهيلات الاستخدام ← اللمس ← النقر على الظهر), one short step per sentence; ' +
+          '(3) what they will see and one concrete use for it; (4) which phones it works on (آيفون / أندرويد / سامسونج) and any difference; (5) one short punchy closing line that invites sharing ("ابعتها لصاحبك اللي مش عارفها"). ' +
+          'Only steps and facts stated in the sources; never codes that reset, erase or unlock anything. curiosityGap = the hook question; onScreenText = the code itself or the feature name (1–4 words, e.g. "*#06#", "النقر على الظهر"). Keep opening, cta and ending to one short sentence each.';
+
 const EditorLLM = z.object({ problems: z.array(z.object({ scene: z.number().int().default(0), problem: z.string().min(5) })).default([]) });
 
 /**
@@ -72,11 +79,7 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
     // "short" = a Shorts pack: 3 independent mini-stories, each rendered as its own vertical Short.
     const order = topics?.length === 3 ? ` — scene 1 is about "${topics[0]!.title}", scene 2 about "${topics[1]!.title}", scene 3 about "${topics[2]!.title}" (three DIFFERENT subjects; scene N tells ONLY topic N)` : '';
     const pack = input.format === 'short' && phone
-      ? { shortsPack: 'Write EXACTLY 3 scenes. Each scene is a complete, independent YouTube Short of 30–45 seconds (70–100 spoken words) in natural EGYPTIAN Arabic, like a friend showing you a secret on his phone — fast, warm, excited, never formal' + order + '. ' +
-          'Structure of every scene: (1) HOOK in the first sentence (≤ 12 words): the surprising benefit, e.g. "فيه كود لو كتبته في موبايلك هيقولك…", "الآيفون بتاعك فيه زرار سري ورا الضهر!"; ' +
-          '(2) the exact steps the viewer follows RIGHT NOW. A code MUST be said out loud, spelled symbol by symbol in Egyptian words so the narrator reads it right (e.g. *#06# → «نجمة، شباك، صفر، ستة، شباك»; *#*#4636#*#* → «نجمة شباك نجمة شباك أربعة ستة تلاتة ستة شباك نجمة شباك نجمة»), or the settings path in the words the phone shows (الإعدادات ← تسهيلات الاستخدام ← اللمس ← النقر على الظهر), one short step per sentence; ' +
-          '(3) what they will see and one concrete use for it; (4) which phones it works on (آيفون / أندرويد / سامسونج) and any difference; (5) one short punchy closing line that invites sharing ("ابعتها لصاحبك اللي مش عارفها"). ' +
-          'Only steps and facts stated in the sources; never codes that reset, erase or unlock anything. curiosityGap = the hook question; onScreenText = the code itself or the feature name (1–4 words, e.g. "*#06#", "النقر على الظهر"). Keep opening, cta and ending to one short sentence each.', topics }
+      ? { shortsPack: 'Write EXACTLY 3 scenes.' + order + ' ' + PHONE_SHORT_RULES, topics }
       : input.format === 'short'
       ? { shortsPack: 'Write EXACTLY 3 scenes. Each scene is a complete, independent YouTube Short of 40–55 seconds (90–115 spoken words)' + (topics?.length === 3 ? ` — scene 1 is about "${topics[0]!.title}", scene 2 about "${topics[1]!.title}", scene 3 about "${topics[2]!.title}" (three DIFFERENT subjects; scene N tells ONLY topic N — never mix them, never borrow facts from another scene's topic, and for a story the company/person is named in the first sentence)` : '') + '. The FIRST sentence states the secret/idea (and names the company if it is a story), so the viewer knows within 2 seconds what it is about and why it matters to them; then the proof in a few concrete beats (the documented fact, experiment, example or story, with numbers from the sources) using everyday, filmable examples (a price tag, a shop shelf, a menu, an office meeting…); then the takeaway in one clear sentence and how the viewer can apply it in their own work or project (one practical step). curiosityGap = its hook question, onScreenText = the subject name (1–3 words). Keep opening, cta and ending to one short sentence each.', topics }
       : {};

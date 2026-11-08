@@ -8,7 +8,7 @@ import type { UploadResult, Visibility } from '../providers/media.ts';
 import type { PrePublicationReport } from '../reports/prepublication.ts';
 import { currentSlots, nextSlots } from './schedule.ts';
 import { buildReport } from './approval.ts';
-import { EXPERIMENTAL, qcBlockers, qualityChecklist } from '../reports/qc.ts';
+import { EXPERIMENTAL, packExclusions, qcBlockers, qualityChecklist } from '../reports/qc.ts';
 
 export interface PublishInput { videoId: string }
 export interface PublishLog extends UploadResult { videoId: string; provider: string; dryRun: boolean; uploadedAt: string; attempts: number; shorts: { youtubeVideoId: string; title: string; publishAt?: string }[] }
@@ -52,6 +52,9 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     const compliance = this.ctx.repos.artifacts.latest<ComplianceReport>(videoId, 'compliance_report')!.data;
     const yt = this.ctx.providers.youtube;
     // Shorts pack: the first Short is the "main" upload; the others follow 4 h apart.
+    // A pack with one broken Short: upload the good ones, hold the broken one back.
+    const held = packExclusions(this.ctx, videoId);
+    if (render?.data.shorts && held.length) render.data.shorts = render.data.shorts.filter((sh) => !(sh.scenes ?? []).some((n) => held.includes(n)));
     const pack = Boolean(render?.data.packOnly && render.data.shorts?.length);
     // YouTube's free API quota (~10,000 units/day, 1,600 per upload) allows ~6 uploads per Pacific day.
     // Never start a batch that would hit the limit half-way: the video stays approved and the next cycle uploads it.

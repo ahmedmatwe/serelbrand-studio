@@ -16,6 +16,21 @@ export interface QcItem { q: string; pass: boolean; critical: boolean; note: str
 /** Words that mark placeholder/test output (proper word boundaries). */
 export const EXPERIMENTAL = /(?:^|[\s_\-(])(test|demo|sample|mock|lorem|ipsum|placeholder|تجريبي|تجريبية)(?:$|[\s_\-)])/iu;
 
+/**
+ * Shorts of a pack that must NOT be uploaded (no verified fact of their own, or flagged by the editor), when
+ * at least one other Short of the pack is fine: the good ones go out, the bad one is held back.
+ */
+export function packExclusions(ctx: AgentContext, videoId: string): number[] {
+  const script = ctx.repos.artifacts.latest<Script>(videoId, 'script')?.data;
+  if (!script || script.format !== 'short') return [];
+  const fc = ctx.repos.artifacts.latest<FactCheckReport>(videoId, 'fact_check')?.data;
+  const editor = ctx.repos.artifacts.latest<{ problems: string[] }>(videoId, 'editor_review')?.data;
+  const bad = script.scenes.filter((sc) =>
+    !(fc?.claims ?? []).some((c) => c.status === 'verified' && c.sceneN === sc.n) ||
+    (editor?.problems ?? []).some((p) => new RegExp(`^Scene ${sc.n}\\b`).test(p))).map((sc) => sc.n);
+  return bad.length < script.scenes.length ? bad : [];
+}
+
 export function qualityChecklist(ctx: AgentContext, videoId: string): QcItem[] {
   const get = <T>(k: string) => ctx.repos.artifacts.latest<T>(videoId, k)?.data;
   const script = get<Script>('script');
@@ -36,7 +51,10 @@ export function qualityChecklist(ctx: AgentContext, videoId: string): QcItem[] {
   const sceneWords = script?.scenes.map((s) => countWords(s.voiceover)) ?? [];
   add('هل كل فيديو له موضوع ونص كامل؟', sceneWords.length > 0 && sceneWords.every((n) => n >= (script?.format === 'short' ? 35 : 20)), true, sceneWords.length ? `كلمات المشاهد: ${sceneWords.join(' / ')}` : 'لا توجد مشاهد منطوقة');
   const editor = get<{ problems: string[] }>('editor_review');
-  add('هل كل فيديو بيبدأ بموضوعه وكلامه مترابط؟', !editor?.problems.length, true, editor?.problems.length ? editor.problems.slice(0, 2).join(' / ') : 'المحرر راجع النص النهائي');
+  const held = packExclusions(ctx, videoId);
+  const editorLeft = (editor?.problems ?? []).filter((p) => !held.some((n) => new RegExp(`^Scene ${n}\\b`).test(p)));
+  if (held.length) add('هل كل الشورتس جاهزة للنشر؟', true, false, `الشورت رقم ${held.join(' و ')} اتأجل لأنه فيه مشكلة، والباقي هيتنشر`);
+  add('هل كل فيديو بيبدأ بموضوعه وكلامه مترابط؟', !editorLeft.length, true, editorLeft.length ? editorLeft.slice(0, 2).join(' / ') : 'المحرر راجع النص النهائي');
   add('هل أول 10 ثوانٍ قوية؟', Boolean(script) && countWords(hook) <= 30 && Boolean(first?.curiosityGap || first?.beat === 'hook' || /[؟?]/.test(hook)), true, `Hook: ${countWords(hook)} كلمة`);
   add('هل الوعد واضح؟', Boolean(brief?.promise && script?.opening), true, brief?.promise ?? 'لا يوجد brief');
   const dup = script ? duplicateSentenceRatio(spokenText(script)) : 1;
@@ -68,7 +86,8 @@ export function qualityChecklist(ctx: AgentContext, videoId: string): QcItem[] {
       return words.length > 0 && words.filter((w) => text.includes(w)).length / words.length >= 0.6;
     };
     const perShort = script.scenes.map((sc) => fc?.claims.filter((c) => c.status === 'verified' && (c.sceneN === sc.n || (c.sceneN == null && inScene(c.claim, sc.voiceover)))).length ?? 0);
-    const empty = perShort.filter((n) => n === 0).length;
+    const excluded = packExclusions(ctx, videoId);
+    const empty = script.scenes.filter((sc, i) => perShort[i] === 0 && !excluded.includes(sc.n)).length;
     add('هل في الفيديو معلومات حقيقية مؤكدة كفاية؟', perShort.length > 0 && empty === 0, true, `معلومات مؤكدة لكل شورت: ${perShort.join(' / ')}${empty ? ` — ${empty} شورت بدون معلومة مؤكدة` : ''}`);
   } else {
     add('هل في الفيديو معلومات حقيقية مؤكدة كفاية؟', verified >= 4, true, `${verified} معلومة مؤكدة (المطلوب 4 على الأقل)`);

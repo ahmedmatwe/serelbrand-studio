@@ -13,6 +13,7 @@ import { JudgeLLM, ScriptLLM, type CheckedClaim, type FactCheckReport, type Scri
 import { loadPrompt } from '../prompts.ts';
 import { editorProblems, spokenText } from './scriptwriter.ts';
 import { loadPhoneLibrary, secretSource, type PhoneSecret } from './niche/phone-library.ts';
+import { repairPack } from './pack-repair.ts';
 import { countWords } from './base.ts';
 import type { WebPage } from '../providers/web/web.ts';
 
@@ -229,7 +230,19 @@ export class AutoVerifierAgent extends Agent<AutoVerifyInput, AutoVerifyOutput> 
     // Sentences were removed or rewritten: read it again as the viewer will hear it. A Short that now starts
     // mid-story ("the project…") or lost its subject gets its openings repaired with NO new facts; whatever the
     // editor still flags is saved and blocks automatic publishing.
-    if (removed.length) await this.reEdit(input.videoId);
+    // Self-healing pack: any Short left broken (gutted, no verified fact) is rewritten or swapped, alone.
+    let repaired = false;
+    const finalScript = this.ctx.repos.artifacts.latest<Script>(input.videoId, 'script')!.data;
+    if (finalScript.format === 'short' && loadPhoneLibrary(this.ctx.config.rootDir)) {
+      const r = await repairPack(this.ctx, input.videoId, async () => {
+        const rep = await new FactCheckerAgent(this.ctx).run({ videoId: input.videoId, script: this.ctx.repos.artifacts.latest<Script>(input.videoId, 'script')!.data });
+        return this.verifyAll(rep, input.videoId);
+      }, claims);
+      claims = r.claims;
+      repaired = r.log.length > 0;
+      if (repaired) this.ctx.repos.artifacts.save({ videoId: input.videoId, kind: 'pack_repair', agent: this.name, data: { log: r.log } });
+    }
+    if (removed.length || repaired) await this.reEdit(input.videoId);
     return { claims, ...summarize(claims), rounds: round, removedClaims: removed };
   }
 }

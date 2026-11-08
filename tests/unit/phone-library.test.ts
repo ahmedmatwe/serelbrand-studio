@@ -66,3 +66,11 @@ test('verification: claims taken from a reviewed library entry are verified agai
   assert.ok(!libraryCovers('Apple sold 230 million iPhones in 2015.', e), 'unrelated numbers never pass');
   assert.ok(!libraryCovers('اكتب الكود *#9900# عشان تسرّع الموبايل', lib.secrets.find((x) => x.id === 'code-imei')!), 'a code not in the entry never passes');
 });
+
+test('self-healing pack: broken Shorts are detected one by one', async () => {
+  const { brokenShorts } = await import('../../src/agents/pack-repair.ts');
+  const sc = (n: number, words: number) => ({ n, voiceover: Array(words).fill('كلمة').join(' ') }) as any;
+  const script = { scenes: [sc(1, 80), sc(2, 20), sc(3, 80)] };
+  const claims = [{ sceneN: 1, status: 'verified' }, { sceneN: 2, status: 'verified' }] as any;
+  assert.deepEqual(brokenShorts(script, claims), [{ index: 1, why: 'only 20 spoken words' }, { index: 2, why: 'no verified fact' }]);
+});
