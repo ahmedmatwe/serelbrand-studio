@@ -197,7 +197,7 @@ export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { ta
   const search = async (q: string) => {
     if (!results.has(q)) {
       const vids = await stock.search(q, 'video', { orientation: o.orientation, targetWidth: o.targetWidth, perPage: 12 }).catch(() => []);
-      const imgs = vids.length >= 3 ? [] : await stock.search(q, 'image', { orientation: o.orientation, targetWidth: o.targetWidth, perPage: 8 }).catch(() => []);
+      const imgs = vids.length >= 1 ? [] : await stock.search(q, 'image', { orientation: o.orientation, targetWidth: o.targetWidth, perPage: 8 }).catch(() => []);
       results.set(q, [...vids, ...imgs]);
     }
     return results.get(q)!;
@@ -290,6 +290,16 @@ export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { ta
         s.visual = { kind: a.kind === 'video' ? 'video' : 'image', path, asset: { ...a, path } };
         filled++;
       } catch { /* try the next clip */ }
+    }
+  }
+  // Last guarantee: a Short must never show an empty coloured card. If nothing at all was found for this set
+  // of shots, re-use the best on-topic clip (even one already used elsewhere) for the first shot; the renderer
+  // then stretches neighbouring footage over any remaining gaps.
+  if (!shots.some((s) => s.visual)) {
+    for (const q of o.fallbackQueries ?? []) {
+      const a = (await search(q)).find((x) => (relevance(x, q) ?? 1) > 0);
+      if (!a) continue;
+      try { const path = await stock.download!(a, o.cacheDir); shots[0]!.visual = { kind: a.kind === 'video' ? 'video' : 'image', path, asset: { ...a, path } }; filled++; break; } catch { /* next */ }
     }
   }
   if (filled) o.notes.push(`${filled} shot(s) without a specific match got a general on-topic clip.`);

@@ -7,6 +7,8 @@ import { StudioError } from '../core/errors.ts';
 import type { MediaAsset, TTSProvider, TTSResult } from '../providers/media.ts';
 import { batchScenes, splitBatch } from './voice-batch.ts';
 import { lastAlignError, scriptWords, timedChunks, type WordTime } from './align.ts';
+import { phoneUiEvents } from './phone-ui.ts';
+import { loadPhoneLibrary, type PhoneUi } from '../agents/niche/phone-library.ts';
 import { FallbackTTS } from '../providers/tts/gemini-tts.ts';
 import { buildAss, chunkSubtitles, type AssEvent, type AssStyle } from './ass.ts';
 import { ffmpeg, filterPath, probeDuration, volumeStats, type VolumeStats } from './ffmpeg.ts';
@@ -19,7 +21,7 @@ export type RenderSize = 'full' | 'preview';
 export interface RenderInput { videoId: string; size?: RenderSize; shorts?: boolean; /** Shorts to cut per long video (default 3). */ shortsPerLong?: number }
 
 export interface SceneVisual { kind: 'video' | 'image'; path: string; asset: MediaAsset }
-interface TimedScene { n: number; start: number; duration: number; audioPath: string; voiceover: string; onScreenText: string; visual?: SceneVisual; shots?: Shot[]; /** Measured time of every script word (relative to the scene start), when aligned. */ words?: WordTime[]; /** Share of the script words heard in the audio. */ coverage?: number }
+interface TimedScene { /** Phone screen to draw while the steps are said (phone-secrets channel). */ ui?: PhoneUi; n: number; start: number; duration: number; audioPath: string; voiceover: string; onScreenText: string; visual?: SceneVisual; shots?: Shot[]; /** Measured time of every script word (relative to the scene start), when aligned. */ words?: WordTime[]; /** Share of the script words heard in the audio. */ coverage?: number }
 /** One background segment of the timeline (a shot, or a whole scene when it has no shots). */
 interface Segment { n: number; duration: number; visual?: SceneVisual }
 
@@ -60,20 +62,27 @@ export function timelineAss(scenes: TimedScene[], o: { width: number; height: nu
     // Vertical: the code/feature sits in a solid box near the top for the whole Short (readable on any footage).
     { name: 'Title', font: FONT, size: Math.round(base * (vertical ? 0.075 : 0.09)), color: vertical ? '#FFD400' : '#FFFFFF', outline: vertical ? '#111111' : '#000000', outlineWidth: vertical ? Math.round(base * 0.022) : Math.max(2, Math.round(base * 0.005)), alignment: vertical ? 8 : 5, marginV: Math.round(o.height * (vertical ? 0.14 : 0.08)), bold: true, boxed: vertical },
     { name: 'Accent', font: FONT, size: Math.round(base * 0.05), color: o.accent, outline: '#000000', outlineWidth: 2, alignment: 8, marginV: Math.round(o.height * 0.06), bold: true },
-    { name: 'Sub', font: FONT, size: Math.round(base * (vertical ? 0.085 : 0.062)), color: '#FFD400', secondary: '#FFFFFF', outline: '#000000', outlineWidth: Math.max(3, Math.round(base * 0.007)), shadow: 3, alignment: vertical ? 5 : 2, marginV: Math.round(o.height * (vertical ? 0.12 : 0.08)), bold: true },
+    // Vertical captions sit in the lower part so a drawn phone screen (middle) never covers them.
+    { name: 'Sub', font: FONT, size: Math.round(base * (vertical ? 0.075 : 0.062)), color: '#FFD400', secondary: '#FFFFFF', outline: '#000000', outlineWidth: Math.max(3, Math.round(base * 0.007)), shadow: 3, alignment: 2, marginV: Math.round(o.height * (vertical ? 0.07 : 0.08)), bold: true },
+    { name: 'UI', font: FONT, size: Math.round(base * 0.04), color: '#FFFFFF', outline: '#000000', outlineWidth: 0, alignment: 7, marginV: 0 },
   ];
   const events: AssEvent[] = [];
   const subs: { start: number; end: number; text: string }[] = [];
   for (const s of scenes) {
     // Vertical Shorts keep the label (e.g. the code *#06#) on screen the whole time; long videos show it 5 s.
-    if (s.onScreenText) events.push({ start: s.start + 0.2, end: s.start + (vertical ? s.duration - 0.1 : Math.min(s.duration - 0.1, 5)), style: 'Title', text: s.onScreenText, fadeMs: 300 });
+    if (s.onScreenText) events.push({ start: s.start + 0.2, end: s.start + (vertical ? s.duration - 0.1 : Math.min(s.duration - 0.1, 5)), style: 'Title', layer: 21, text: s.onScreenText, fadeMs: 300 });
     // Captions follow the measured time of each spoken word (forced alignment); proportional timing only as a fallback.
     const chunks = s.words?.length
       ? timedChunks(s.words, s.start, s.start + s.duration, vertical ? 4 : 7)
       : chunkSubtitles(s.voiceover, s.start, Math.max(0.1, s.duration), vertical ? 4 : 7);
     subs.push(...chunks);
     // Measured chunks: words light up as spoken (yellow fill) and each line pops in.
-    events.push(...chunks.map((c) => ({ ...c, style: 'Sub', pop: 'karaokeCs' in c })));
+    events.push(...chunks.map((c) => ({ ...c, style: 'Sub', layer: 20, pop: 'karaokeCs' in c })));
+    // Show what is being said: a phone screen typing the code / walking the settings path, in sync with the voice.
+    if (vertical && s.ui && s.words?.length) {
+      const ui = phoneUiEvents(s.ui, s.words, s.start, s.duration, o.width);
+      if (ui) events.push(...ui);
+    }
   }
   if (o.endCard && scenes.length) {
     const last = scenes.at(-1)!;
@@ -259,16 +268,24 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       return [...new Set(ordered.filter(Boolean))].join(' || ');
     };
     let k = 0;
+    const lib = loadPhoneLibrary(this.ctx.config.rootDir);
+    const perSceneFallback: string[][] = [];
     for (const [i, s] of scenes.entries()) {
       // Real photos only for real companies/people; an idea is shown through everyday footage instead.
       const subject = topics ? (topics[i]?.kind === 'story' ? topics[i]!.subject : undefined) : mainSubject;
       // Measured start of each sentence (from the aligned words), so the cut lands exactly when it is said.
       let wi = 0;
       const starts = perScene[i]!.map((text) => { const at = s.words?.[Math.min(wi, (s.words?.length ?? 1) - 1)]?.start; wi += scriptWords(text).length; return at; });
-      const sentences = perScene[i]!.map((text, j) => ({ text, query: withSubject(queries[k++]!, subject, j), start: s.words?.length ? starts[j] : undefined }));
+      // Phone secrets: this secret's own visuals are candidates for EVERY sentence, so what is shown is about
+      // what is said (vision picks the closest); generic phone clips are only the very last resort.
+      const own = lib?.secrets.find((x) => x.id === topics?.[i]?.subject)?.footage ?? [];
+      const sentences = perScene[i]!.map((text, j) => ({ text, query: [withSubject(queries[k++]!, subject, j), own[j % Math.max(1, own.length)]].filter(Boolean).join(' || '), start: s.words?.length ? starts[j] : undefined }));
       s.shots = layoutShots(sentences.length ? sentences : [{ text: s.voiceover, query: fallbacks[0] ?? 'documentary' }], s.duration);
+      perSceneFallback.push([...own, ...this.ctx.config.channel.fallbackFootage]);
     }
-    await fetchShotVisuals(this.ctx, scenes.flatMap((s) => s.shots ?? []), { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used, notes, videoId, fallbackQueries: this.ctx.config.channel.fallbackFootage });
+    for (const [i, s] of scenes.entries()) {
+      await fetchShotVisuals(this.ctx, s.shots ?? [], { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used, notes, videoId, fallbackQueries: perSceneFallback[i] });
+    }
     for (const s of scenes) s.visual = s.shots?.find((x) => x.visual)?.visual;
   }
 
@@ -278,7 +295,9 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     await this.planShots(o.videoId, o.timed, bp, o.size, o.notes, new Set());
     const shots = o.timed.flatMap((s) => s.shots ?? []);
     const shorts: RenderedShort[] = [];
-    const packTopics = this.ctx.repos.artifacts.latest<{ topics?: { title: string }[] }>(o.videoId, 'calendar_entry')?.data.topics;
+    const packTopics = this.ctx.repos.artifacts.latest<{ topics?: { title: string; subject?: string }[] }>(o.videoId, 'calendar_entry')?.data.topics;
+    const lib = loadPhoneLibrary(this.ctx.config.rootDir);
+    o.timed.forEach((s, i) => { s.ui = lib?.secrets.find((x) => x.id === packTopics?.[i]?.subject)?.ui; });
     for (const [i, s] of o.timed.entries()) {
       // A Short slightly over the limit is sped up a little (≤ 12%, still natural) instead of losing its ending.
       const tempo = s.duration > SHORT_MAX_SEC + 1 ? Math.min(1.12, s.duration / SHORT_MAX_SEC) : 1;

@@ -9,7 +9,12 @@ import { resolve } from 'node:path';
 export interface PhoneSecret {
   id: string; kind: 'code' | 'feature' | 'trick'; platforms: string; title: string; onScreen: string;
   steps: string[]; result: string; use: string; facts: string; source: string;
+  /** What the phone screen shows while the steps are explained (drawn by src/media/phone-ui.ts). */
+  ui?: PhoneUi;
+  /** Stock searches that literally show this secret's topic (tried for every sentence, best match picked by vision). */
+  footage?: string[];
 }
+export type PhoneUi = { type: 'dialer'; code: string; call?: boolean } | { type: 'settings'; os: 'ios' | 'android'; path: string[] };
 interface Library { sources: Record<string, string>; secrets: PhoneSecret[] }
 
 export function loadPhoneLibrary(rootDir: string): Library | undefined {
@@ -40,7 +45,8 @@ const family = (s: PhoneSecret) => (s.kind === 'code' ? 'code' : s.id.startsWith
  * secret when available (one of each family first, then whatever is left).
  */
 export function pickPhoneSecrets(lib: Library, usedIds: Set<string>, n = 3): PhoneSecret[] {
-  const fresh = lib.secrets.filter((s) => !usedIds.has(s.id));
+  // Secrets we can SHOW on a drawn phone screen first (the viewer sees exactly what is being said).
+  const fresh = lib.secrets.filter((s) => !usedIds.has(s.id)).sort((a, b) => Number(Boolean(b.ui)) - Number(Boolean(a.ui)));
   const out: PhoneSecret[] = [];
   for (const f of ['code', 'ios', 'android']) {
     const s = fresh.find((x) => family(x) === f && !out.includes(x));

@@ -39,3 +39,19 @@ test('captions: measured word-by-word highlight with a pop-in', () => {
   assert.match(ass, /\\fscx86\\fscy86\\t\(0,110,\\fscx100\\fscy100\)/);
   assert.equal((ass.match(/\{\\k\d+\}/g) ?? []).length, 5);
 });
+
+test('phone screen: dialer types the code when it is spoken; settings walk the path in order', async () => {
+  const { phoneUiEvents, codeTimes, pathTimes } = await import('../../src/media/phone-ui.ts');
+  const say = (t: string) => scriptWords(t).map((w, i) => ({ w, start: i * 0.5, end: i * 0.5 + 0.4, matched: true }));
+  const d = say('افتح الاتصال واكتب نجمة، شباك، صفر، ستة، شباك. هيظهرلك الرقم.');
+  assert.deepEqual(codeTimes(d, '*#06#'), [1.5, 2, 2.5, 3, 3.5]);
+  const ev = phoneUiEvents({ type: 'dialer', code: '*#06#' }, d, 10, 8, 1080)!;
+  assert.ok(ev.some((e) => e.text.endsWith('*#06#') && e.start === 13.5), 'full code shown when the last symbol is said');
+  const s = say('ادخل على الإعدادات وبعدين تسهيلات الاستخدام واختار اللمس وبعدين النقر على الظهر.');
+  const t = pathTimes(s, ['الإعدادات', 'تسهيلات الاستخدام', 'اللمس', 'النقر على الظهر']);
+  assert.ok(t.every((x, i) => Number.isFinite(x) && (i === 0 || x > t[i - 1]!)), JSON.stringify(t));
+  assert.ok(phoneUiEvents({ type: 'settings', os: 'ios', path: ['الإعدادات', 'تسهيلات الاستخدام', 'اللمس', 'النقر على الظهر'] }, s, 0, 10, 1080)!.length > 20);
+  assert.equal(phoneUiEvents({ type: 'dialer', code: '*#06#' }, say('كلام مالوش علاقة بالكود خالص'), 0, 5, 1080), undefined, 'never shown when not said');
+  for (const x of lib.secrets) if (x.ui?.type === 'dialer') assert.equal(x.ui.code, x.onScreen, x.id);
+  assert.ok(lib.secrets.every((x) => (x.footage?.length ?? 0) >= 3), 'every secret has its own visuals');
+});
