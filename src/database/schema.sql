@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS videos (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   format TEXT NOT NULL,              -- long | short
-  status TEXT NOT NULL,              -- idea | scripted | fact_checked | planned | packaged | reviewed | awaiting_approval | approved | rejected | uploaded | published
+  status TEXT NOT NULL,              -- idea | scripted | fact_checked | planned | packaged | reviewed | awaiting_approval | approved | rejected | uploaded | published | deleted
   niche TEXT,
   parent_video_id TEXT,              -- Shorts derived from a long video
   youtube_video_id TEXT,

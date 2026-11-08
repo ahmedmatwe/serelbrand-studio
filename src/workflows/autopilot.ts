@@ -204,7 +204,8 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   }
 
   // 2) Analytics for uploaded videos, by hours since upload.
-  for (const v of ctx.repos.videos.list().filter((x) => x.youtube_video_id)) {
+  // Videos removed from the channel (status 'deleted') are never queried again.
+  for (const v of ctx.repos.videos.list().filter((x) => x.youtube_video_id && x.status !== 'deleted')) {
     const pub = ctx.repos.artifacts.latest<PublishLog>(v.id, 'publish_log')?.data;
     if (!pub) continue;
     const hours = (now.getTime() - new Date(pub.uploadedAt).getTime()) / 3600_000;
@@ -349,14 +350,14 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     const n = fc?.claims.filter((c) => c.humanReviewRequired).length ?? 0;
     if (n) rep.needsFactReview.push({ videoId: v.id, title: v.title, claims: n });
   }
-  if (rep.produced?.autoApproved) notify('سر البراند: فيديو اتنشر تلقائياً', `${rep.produced.title.slice(0, 60)}${rep.produced.publishAt ? ` — هيظهر ${rep.produced.publishAt.slice(0, 16).replace('T', ' ')} UTC` : ' (private)'}`);
-  else if (rep.produced?.autoApproveBlockedBy) notify('سر البراند: فيديو اتوقف', `مش هيتنشر: ${rep.produced.autoApproveBlockedBy[0]?.slice(0, 90)} — الدورة الجاية هتعمل موضوع تاني`);
-  else if (rep.produced) notify('سر البراند: فيديو جديد جاهز', `${rep.produced.title.slice(0, 60)} — محتاج مراجعتك في لوحة التحكم`);
-  else if (rep.pendingApprovals || rep.needsFactReview.length) notify('سر البراند', `فيه ${rep.pendingApprovals + rep.needsFactReview.length} فيديو مستني مراجعتك`);
+  if (rep.produced?.autoApproved) notify('سر الموبايل: فيديو اتنشر تلقائياً', `${rep.produced.title.slice(0, 60)}${rep.produced.publishAt ? ` — هيظهر ${rep.produced.publishAt.slice(0, 16).replace('T', ' ')} UTC` : ' (private)'}`);
+  else if (rep.produced?.autoApproveBlockedBy) notify('سر الموبايل: فيديو اتوقف', `مش هيتنشر: ${rep.produced.autoApproveBlockedBy[0]?.slice(0, 90)} — الدورة الجاية هتعمل موضوع تاني`);
+  else if (rep.produced) notify('سر الموبايل: فيديو جديد جاهز', `${rep.produced.title.slice(0, 60)} — محتاج مراجعتك في لوحة التحكم`);
+  else if (rep.pendingApprovals || rep.needsFactReview.length) notify('سر الموبايل', `فيه ${rep.pendingApprovals + rep.needsFactReview.length} فيديو مستني مراجعتك`);
   const locked = rep.published.filter((id) => (ctx.repos.artifacts.latest<PublishLog>(id, 'publish_log')?.data.warnings ?? []).some((w) => w.startsWith('YOUTUBE_LOCKED_PRIVATE')));
-  if (locked.length) notify('سر البراند: YouTube قفل الفيديو private', 'لازم مراجعة YouTube API (مجانية) عشان النشر العلني التلقائي يشتغل');
-  else if (rep.published.length) notify('سر البراند', `اترفع ${rep.published.length} فيديو على القناة`);
-  if (rep.errors.length) notify('سر البراند: مشكلة', rep.errors[0]!.slice(0, 120));
+  if (locked.length) notify('سر الموبايل: YouTube قفل الفيديو private', 'لازم مراجعة YouTube API (مجانية) عشان النشر العلني التلقائي يشتغل');
+  else if (rep.published.length) notify('سر الموبايل', `اترفع ${rep.published.length} فيديو على القناة`);
+  if (rep.errors.length) notify('سر الموبايل: مشكلة', rep.errors[0]!.slice(0, 120));
 
   writeDailyReport(ctx, rep, now);
   ctx.audit.record({ actor: 'autopilot', action: 'cycle.completed', details: { published: rep.published.length, produced: rep.produced?.videoId, errors: rep.errors.length } });

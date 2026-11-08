@@ -33,7 +33,7 @@ input[type=url],textarea{font:inherit;width:100%;padding:6px 10px;border-radius:
 .claim{border-top:1px solid var(--line);padding:10px 0}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .media{display:grid;grid-template-columns:2fr 1fr;gap:12px}.shorts{display:flex;gap:8px;overflow-x:auto}.shorts video{height:320px;border-radius:10px}video,img{max-width:100%;border-radius:10px;background:#000}
 @media(max-width:800px){.media{grid-template-columns:1fr}}
-</style></head><body><header><b>سر البراند</b><span>لوحة التحكم</span></header><main>${body}</main>
+</style></head><body><header><b>سر الموبايل</b><span>لوحة التحكم</span></header><main>${body}</main>
 <script>document.querySelectorAll('form').forEach(f=>{const i=document.createElement('input');i.type='hidden';i.name='csrf';i.value=${JSON.stringify(csrf)};f.appendChild(i)})</script></body></html>`;
 }
 

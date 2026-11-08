@@ -4,7 +4,7 @@ import { newId, nowIso } from './db.ts';
 // ---------- Videos ----------
 export type VideoStatus =
   | 'idea' | 'scripted' | 'fact_checked' | 'planned' | 'packaged' | 'reviewed'
-  | 'awaiting_approval' | 'approved' | 'rejected' | 'uploaded' | 'published';
+  | 'awaiting_approval' | 'approved' | 'rejected' | 'uploaded' | 'published' | 'deleted';
 
 export interface Video {
   id: string;

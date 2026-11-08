@@ -81,7 +81,7 @@ export async function renderThumbnail(ctx: AgentContext, o: {
       } catch { /* fall back to gradient */ }
     }
   }
-  writeFileSync(assPath, thumbnailAss({ text: o.concept.text, font: o.font, accent: o.palette[2] && o.palette[2] !== '#FFFFFF' ? o.palette[2] : '#FFD400', brand: 'سر البراند', hasPhoto: Boolean(photo) }));
+  writeFileSync(assPath, thumbnailAss({ text: o.concept.text, font: o.font, accent: o.palette[2] && o.palette[2] !== '#FFFFFF' ? o.palette[2] : '#FFD400', brand: 'سر الموبايل', hasPhoto: Boolean(photo) }));
   const grade = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},eq=contrast=1.15:saturation=1.35:brightness=0.02,vignette=PI/5,drawbox=x=600:y=0:w=680:h=${H}:color=black@0.45:t=fill,drawbox=x=540:y=0:w=60:h=${H}:color=black@0.22:t=fill`;
   if (photo) {
     const src = photo.asset.kind === 'video' ? ['-ss', '1', '-i', photo.path] : ['-i', photo.path];
