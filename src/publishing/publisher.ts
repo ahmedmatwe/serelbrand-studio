@@ -41,7 +41,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     const { env } = this.ctx.config;
     if ((visibility === 'public' || scheduled) && !env.ALLOW_PUBLIC_PUBLISHING) throw new PublishBlockedError('Public publishing is disabled (ALLOW_PUBLIC_PUBLISHING=false)');
 
-    const render = this.ctx.repos.artifacts.latest<{ videoPath: string; thumbnailPath?: string; captionsPath?: string; captionsEnPath?: string; shorts?: { path: string; title: string }[]; packOnly?: boolean; assets?: { source: string; attribution?: string; pageUrl?: string }[] }>(videoId, 'render');
+    const render = this.ctx.repos.artifacts.latest<{ videoPath: string; thumbnailPath?: string; captionsPath?: string; captionsEnPath?: string; shorts?: { path: string; title: string }[]; packOnly?: boolean; voice: { provider: string; voice: string; synthetic: boolean }; assets?: { source: string; attribution?: string; pageUrl?: string }[] }>(videoId, 'render');
     if (!render && !env.DRY_RUN) throw new PublishBlockedError('No rendered video file yet (rendering arrives in phase 4)');
     if (!env.DRY_RUN && render?.data.voice.provider.toLowerCase().includes('mock')) throw new PublishBlockedError('Experimental/mock voice can never be uploaded');
     if (!env.DRY_RUN && /(?:^|[\\s_-])(test|demo|sample|mock|lorem|ipsum|اختبار|تجريب(?:ي|ية)?|عينة)(?:$|[\\s_-])/iu.test([video.title, render?.data.voice.provider, render?.data.voice.voice].filter(Boolean).join(' '))) {
