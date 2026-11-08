@@ -65,7 +65,7 @@ export function timelineAss(scenes: TimedScene[], o: { width: number; height: nu
   for (const s of scenes) {
     if (s.onScreenText) events.push({ start: s.start + 0.2, end: s.start + Math.min(s.duration - 0.1, 5), style: 'Title', text: s.onScreenText, fadeMs: 300 });
     // Viral-style captions: short chunks, the word being spoken lights up (ASS karaoke).
-    const chunks = chunkSubtitles(s.voiceover, s.start, s.duration - 0.35, vertical ? 4 : 6);
+    const chunks = chunkSubtitles(s.voiceover, s.start, Math.max(0.1, s.duration), vertical ? 4 : 7);
     subs.push(...chunks);
     events.push(...chunks.map((c) => ({ ...c, style: 'Sub', karaoke: true })));
   }
@@ -513,7 +513,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const withStock = allShots().filter((x) => x.visual).length;
     notes.push(`${allShots().length} shots (one per sentence, ~${(t / Math.max(1, allShots().length)).toFixed(1)}s each); ${withStock} with stock footage.`);
     if (withStock) notes.push('Stock footage used — check none shows identifiable people/brands in a misleading way.');
-    notes.push('Subtitles are timed from the script, not speech recognition; they match because TTS reads the script verbatim.');
+    notes.push('Arabic captions are generated from the exact narrated text and the measured per-scene audio durations; no independently generated caption text can drift from the voiceover.');
 
     const assets: MediaAsset[] = [
       { id: 'bg-gradients', kind: 'video', path: videoPath, license: 'generated-owned', source: 'ffmpeg-gradients', aiGenerated: false },
