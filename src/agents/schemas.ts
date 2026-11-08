@@ -49,7 +49,7 @@ export interface CalendarEntry {
   kind: 'evergreen' | 'trending' | 'experiment';
   linkedLongTitle?: string;
   /** Shorts pack: the 3 different topics (one Short each). */
-  topics?: { title: string; subject: string; angle: string; kind?: 'idea' | 'story' }[];
+  topics?: { title: string; subject: string; angle: string; kind?: 'idea' | 'story' | 'code' | 'feature' | 'trick'; sourceUrl?: string }[];
 }
 
 // ---------- Creative brief (strategy + titles) ----------

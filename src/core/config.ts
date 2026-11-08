@@ -64,6 +64,8 @@ const ChannelSchema = z.object({
   style: z.string(),
   faceless: z.boolean(),
   competitors: z.array(z.string()),
+  /** Broad on-topic stock searches for shots nothing specific fits (never an empty coloured card). */
+  fallbackFootage: z.array(z.string()).default([]),
 });
 
 const ThresholdsSchema = z.object({

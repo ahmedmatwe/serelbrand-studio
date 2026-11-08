@@ -11,12 +11,12 @@ export interface ResearchSource { url: string; title?: string; excerpt: string }
 
 const QueriesLLM = z.object({ queries: z.array(z.string().min(2)).min(1).max(5) });
 
-export async function researchTopic(ctx: AgentContext, videoId: string, topic: string, angle = '', subject?: string): Promise<ResearchSource[]> {
+export async function researchTopic(ctx: AgentContext, videoId: string, topic: string, angle = '', subject?: string, urls: string[] = []): Promise<ResearchSource[]> {
   if (ctx.providers.web.name === 'mock-web') return []; // offline runs: no sources to fetch
   const q = await ctx.providers.llm.generateJson({
     task: 'research.queries',
     tier: 'light',
-    system: 'You find sources for a documentary about a company or business story. Give 2–4 short ENGLISH Wikipedia search queries (article titles work best): the company, the product, the person or event at the heart of the topic. JSON only.',
+    system: 'You find sources for a short factual video. Give 2–4 short ENGLISH Wikipedia search queries (article titles work best): the company, product, feature, technology, person or event at the heart of the topic. JSON only.',
     prompt: JSON.stringify({ topic, angle }),
     schema: QueriesLLM,
     videoId,
@@ -27,6 +27,11 @@ export async function researchTopic(ctx: AgentContext, videoId: string, topic: s
   const queries = [...new Set([subject?.trim(), ...(q?.data.queries ?? [])].filter((x): x is string => Boolean(x)))];
   const seen = new Set<string>();
   const out: ResearchSource[] = [];
+  // Official pages first (e.g. support.apple.com for a hidden iPhone feature): the most exact source there is.
+  for (const u of urls.filter((x) => x.startsWith('https://'))) {
+    const p = await ctx.providers.web.fetchText(u).catch(() => undefined);
+    if (p?.text && p.text.length > 300 && !seen.has(p.url)) { seen.add(p.url); out.push({ url: p.url, title: p.title, excerpt: p.text.slice(0, 6000) }); }
+  }
   for (const query of queries.slice(0, 4)) {
     const pages = await ctx.providers.web.wikipedia(query, 'en', 1).catch(() => []);
     for (const p of pages) {

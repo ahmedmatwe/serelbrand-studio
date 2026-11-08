@@ -100,19 +100,27 @@ export function alignWords(script: string[], rec: RecWord[], totalSec: number): 
   return { words, coverage: matched / n, leadIn: firstMatched !== undefined && firstMatched >= 3 ? leadIn : 0 };
 }
 
+/** Why the last recognition attempt failed (shown in the render notes, so a cloud failure is never silent). */
+export let lastAlignError = '';
+
 /** Runs the recogniser on a file. Undefined when it is not installed/disabled — callers fall back gracefully. */
 export function transcribeWords(audioPath: string, rootDir: string, lang = 'ar'): Promise<RecWord[] | undefined> {
-  if (process.env.ALIGN === 'off') return Promise.resolve(undefined);
+  if (process.env.ALIGN === 'off') { lastAlignError = 'ALIGN=off'; return Promise.resolve(undefined); }
   const script = resolve(rootDir, 'scripts/align.py');
-  if (!existsSync(script) || !existsSync(audioPath)) return Promise.resolve(undefined);
+  if (!existsSync(script)) { lastAlignError = `missing ${script}`; return Promise.resolve(undefined); }
+  if (!existsSync(audioPath)) { lastAlignError = `missing audio ${audioPath}`; return Promise.resolve(undefined); }
   const py = process.env.WHISPER_PYTHON || 'python3';
   return new Promise((done) => {
-    execFile(py, [script, audioPath, lang], { maxBuffer: 64 * 1024 * 1024, timeout: 20 * 60_000 }, (err, stdout) => {
-      if (err && !stdout) return done(undefined);
+    execFile(py, [script, audioPath, lang], { maxBuffer: 64 * 1024 * 1024, timeout: 20 * 60_000 }, (err, stdout, stderr) => {
+      const tail = (x: string) => x.trim().split('\n').filter(Boolean).slice(-3).join(' | ').slice(0, 300);
       try {
-        const out = JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}') as { words?: RecWord[] };
-        done(out.words?.length ? out.words : undefined);
-      } catch { done(undefined); }
+        const out = JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}') as { words?: RecWord[]; error?: string };
+        if (out.words?.length) { lastAlignError = ''; return done(out.words); }
+        lastAlignError = out.error ?? `no words recognised${stderr ? ` (${tail(stderr)})` : ''}`;
+      } catch {
+        lastAlignError = `${py} failed: ${err?.message.slice(0, 120) ?? ''} ${tail(stderr ?? '')}`.trim();
+      }
+      done(undefined);
     });
   });
 }

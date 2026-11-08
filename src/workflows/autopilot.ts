@@ -133,32 +133,55 @@ export function longPlan(strategy: StrategyOutput | undefined, producedTitles: S
     ?? strategy.calendar.find((c) => c.format === 'long' && c.date < today && fresh(c));
 }
 
-const PackLLM = z.object({ topics: z.array(z.object({ title: z.string().min(5), subject: z.string().min(2), angle: z.string(), kind: z.enum(['idea', 'story']).default('idea') })).min(3) });
-// (6 proposed, the first 3 distinct subjects are used.)
-/** Three DIFFERENT, clear, specific Shorts topics ("سر …", "لماذا …", "معلومة عن …"), never repeating past titles. */
+const PackLLM = z.object({ topics: z.array(z.object({
+  title: z.string().min(5), subject: z.string().min(2), angle: z.string(),
+  kind: z.enum(['idea', 'story', 'code', 'feature', 'trick']).default('idea'),
+  /** Official page that documents it (support.apple.com, support.google.com, samsung.com…), when there is one. */
+  sourceUrl: z.string().default(''),
+})).min(3) });
+export type PackTopic = z.infer<typeof PackLLM>['topics'][number];
+
+const BUSINESS_PACK_PROMPT = 'You plan VIRAL, USEFUL YouTube Shorts for an Arabic business channel (audience 18–34 in Egypt and the Gulf who want to earn more, start a project or grow at work). ' +
+  'Propose 6 topics. Each Short reveals ONE secret, idea or little-known piece of business knowledge people love to discover and share, and that the viewer can USE in their own work or small project. Mix two kinds: ' +
+  '(a) kind "idea": a well-documented business principle, psychological trick or rule (e.g. charm pricing 9.99, the decoy effect, the 80/20 rule, scarcity marketing, anchoring, loss aversion, the Pygmalion effect); ' +
+  '(b) kind "story": a real documented company or founder story that proves a lesson (a decision that made millions, a mistake that destroyed a giant). At least 2 of the 3 should be "idea". ' +
+  'Everything must be stated on the English Wikipedia article named in subject (its exact title). Each topic must be about a DIFFERENT idea. Avoid vague strategy talk. ' +
+  'Title in simple Arabic (the channel dialect), 5–10 words, framed as a secret or idea. angle = the concrete fact + how the viewer can apply it. Never reuse a topic from `avoid`. JSON only.';
+
+/** Phone secrets: hidden codes, hidden features and tricks people instantly try and share. */
+const PHONE_PACK_PROMPT = 'You plan VIRAL YouTube Shorts for an Egyptian Arabic channel about SECRETS OF YOUR PHONE (audience 16–35 in Egypt and the Arab world, everyday iPhone and Android users). ' +
+  'Propose 6 topics. Each Short reveals ONE hidden code, hidden feature or trick that most people do not know, that the viewer can try on their own phone in under a minute, and that makes them say "مكنتش أعرف!" and send it to a friend. Mix kinds: ' +
+  'kind "code": a real dial code (e.g. *#06# shows the IMEI, *#*#4636#*#* opens Android testing info, *#0*# Samsung test menu, *3001#12345#* iPhone field test); ' +
+  'kind "feature": a hidden setting (e.g. iPhone Back Tap, Android Developer options, Live Text, Guided Access, Find My offline, Wi-Fi password QR sharing, one-handed mode); ' +
+  'kind "trick": a quick everyday trick (e.g. shake to undo, trackpad keyboard by holding space, scan documents in Notes). ' +
+  'HARD SAFETY RULES: never codes or steps that erase, reset, unlock, root, change carrier settings, spy on others or bypass security; never anything that could damage the phone or lose data; it must work on current phones — say exactly which (iPhone / Android / Samsung) and where it may differ. ' +
+  'subject = the English Wikipedia article title that documents it if one exists (e.g. "International Mobile Equipment Identity", "Unstructured Supplementary Service Data"), else the feature name; sourceUrl = the official support page (https://support.apple.com/…, https://support.google.com/…, https://www.samsung.com/…) that documents it, or "" if none. ' +
+  'Title in Egyptian Arabic, 4–9 words, curiosity first, e.g. "كود لو كتبته في موبايلك هيكشفلك سر", "ميزة مخفية في الآيفون محدش يعرفها", "زرار سري ورا موبايلك". Each topic DIFFERENT; never reuse one from `avoid`. angle = exactly what the viewer does (the code or the settings path) and what they will see. JSON only.';
+
+/** Three DIFFERENT, clear, specific Shorts topics, never repeating past titles, each with a real source. */
 export async function planShortsPack(ctx: AgentContext, niche: string, avoid: string[]) {
+  const phone = /phone|mobile|موبايل/i.test(niche);
   const r = await ctx.providers.llm.generateJson({
     task: 'shorts.topics',
     tier: 'light',
-    system: 'You plan VIRAL, USEFUL YouTube Shorts for an Arabic business channel (audience 18–34 in Egypt and the Gulf who want to earn more, start a project or grow at work). ' +
-      'Propose 6 topics. Each Short reveals ONE secret, idea or little-known piece of business knowledge people love to discover and share, and that the viewer can USE in their own work or small project. Mix two kinds: ' +
-      '(a) kind "idea": a well-documented business principle, psychological trick or rule (e.g. charm pricing 9.99, the decoy effect, the 80/20 rule, scarcity marketing, anchoring, loss aversion, the Pygmalion effect); ' +
-      '(b) kind "story": a real documented company or founder story that proves a lesson (a decision that made millions, a mistake that destroyed a giant). At least 2 of the 3 should be "idea". ' +
-      'Everything must be stated on the English Wikipedia article named in subject (its exact title). Each topic must be about a DIFFERENT idea. Avoid vague strategy talk. ' +
-      'Title in simple Modern Standard Arabic, 5–10 words, framed as a secret or idea, e.g. "لماذا تنتهي الأسعار بـ 99؟ السر في عقلك", "خدعة الخيار الثالث التي تجعلك تشتري الأغلى", "قاعدة 80/20: سر إنجاز أكثر بجهد أقل", "الغلطة التي أفلست كوداك… احذرها في مشروعك". angle = the concrete fact + how the viewer can apply it. Never reuse a topic from `avoid`. JSON only.',
-    prompt: JSON.stringify({ niche, avoid: avoid.slice(-150) }),
+    system: phone ? PHONE_PACK_PROMPT : BUSINESS_PACK_PROMPT,
+    prompt: JSON.stringify({ niche, dialect: ctx.config.channel.dialect, avoid: avoid.slice(-150) }),
     schema: PackLLM,
     maxOutputTokens: 3000,
   }).catch(() => undefined);
   const seen = new Set<string>();
-  const picked: { title: string; subject: string; angle: string; kind: 'idea' | 'story' }[] = [];
+  const picked: PackTopic[] = [];
   for (const t of r?.data.topics ?? []) {
     const key = t.subject.toLowerCase();
     if (seen.has(key) || isDuplicateTopic(t.title, new Set(avoid))) continue;
     // Only topics we can actually research: a Short written without sources drifts into vague, off-topic talk.
     if (ctx.providers.web.name !== 'mock-web') {
-      const found = await ctx.providers.web.wikipedia(t.subject, 'en', 1).catch(() => []);
-      if (!found.length || found[0]!.text.length < 1500) continue;
+      const official = t.sourceUrl.startsWith('https://') ? await ctx.providers.web.fetchText(t.sourceUrl).catch(() => undefined) : undefined;
+      if (!official || official.text.length < 600) {
+        t.sourceUrl = '';
+        const found = await ctx.providers.web.wikipedia(t.subject, 'en', 1).catch(() => []);
+        if (!found.length || found[0]!.text.length < 1500) continue;
+      }
     }
     seen.add(key);
     picked.push(t);
@@ -228,7 +251,7 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     const failed = (f: string) => todays.filter((v) => v.format === f && ctx.repos.artifacts.latest(v.id, 'auto_blocked')).length;
     const strat = ctx.repos.artifacts.latest<StrategyOutput>(null, 'content_strategy')?.data;
     const producedNow = new Set([...ctx.repos.videos.list().map((v) => v.title), ...ctx.repos.artifacts.listKind<{ title: string }>('calendar_entry').map((a) => a.data.title)]);
-    const longDue = !ok('long') && failed('long') < 3 && Boolean(longPlan(strat, producedNow, now));
+    const longDue = ctx.config.channel.publishing.longPerWeek > 0 && !ok('long') && failed('long') < 3 && Boolean(longPlan(strat, producedNow, now));
     const packDue = !ok('short') && failed('short') < 3;
     if (o.produce === false) { rep.skippedProductionReason = 'production disabled for this run'; break; }
     const quota = ctx.repos.artifacts.latest<{ until: string }>(null, 'tts_quota_exhausted')?.data;

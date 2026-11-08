@@ -5,13 +5,16 @@ import { silentLogger } from '../src/core/logger.ts';
 export const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 export function testContext(opts: CreateContextOptions & { env?: Record<string, string> } = {}) {
-  return createContext({
+  const ctx = createContext({
     rootDir: ROOT,
     logger: opts.logger ?? silentLogger,
     sleep: async () => {},
     llm: opts.llm,
     envOverrides: { DATABASE_URL: 'sqlite::memory:', DRY_RUN: 'true', ...(opts.env ?? {}) },
   });
+  // The live channel may be Shorts-only; tests also cover the long-video path (2 a week).
+  ctx.config.channel.publishing.longPerWeek = 2;
+  return ctx;
 }
 
 /**

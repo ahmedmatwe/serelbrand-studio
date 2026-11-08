@@ -6,7 +6,7 @@ import type { ThumbnailOutput } from '../agents/thumbnail.ts';
 import { StudioError } from '../core/errors.ts';
 import type { MediaAsset, TTSProvider, TTSResult } from '../providers/media.ts';
 import { batchScenes, splitBatch } from './voice-batch.ts';
-import { scriptWords, timedChunks, type WordTime } from './align.ts';
+import { lastAlignError, scriptWords, timedChunks, type WordTime } from './align.ts';
 import { FallbackTTS } from '../providers/tts/gemini-tts.ts';
 import { buildAss, chunkSubtitles, type AssEvent, type AssStyle } from './ass.ts';
 import { ffmpeg, filterPath, probeDuration, volumeStats, type VolumeStats } from './ffmpeg.ts';
@@ -64,7 +64,8 @@ export function timelineAss(scenes: TimedScene[], o: { width: number; height: nu
   const events: AssEvent[] = [];
   const subs: { start: number; end: number; text: string }[] = [];
   for (const s of scenes) {
-    if (s.onScreenText) events.push({ start: s.start + 0.2, end: s.start + Math.min(s.duration - 0.1, 5), style: 'Title', text: s.onScreenText, fadeMs: 300 });
+    // Vertical Shorts keep the label (e.g. the code *#06#) on screen the whole time; long videos show it 5 s.
+    if (s.onScreenText) events.push({ start: s.start + 0.2, end: s.start + (vertical ? s.duration - 0.1 : Math.min(s.duration - 0.1, 5)), style: 'Title', text: s.onScreenText, fadeMs: 300 });
     // Captions follow the measured time of each spoken word (forced alignment); proportional timing only as a fallback.
     const chunks = s.words?.length
       ? timedChunks(s.words, s.start, s.start + s.duration, vertical ? 4 : 7)
@@ -163,9 +164,21 @@ export function visualScoreFor(shots: Shot[]): number {
   return Math.round(55 + 30 * share + (avg <= 6 ? 10 : 0));
 }
 
-/** Expands scenes into background segments (one per shot). */
+/**
+ * Expands scenes into background segments (one per shot). A shot without footage never becomes an empty
+ * coloured card in the middle of a video: it extends the previous shot (or the next one, at the start).
+ */
 export function segmentsOf(scenes: TimedScene[]): Segment[] {
-  return scenes.flatMap((s) => (s.shots?.length ? s.shots.map((sh) => ({ n: s.n, duration: sh.duration, visual: sh.visual })) : [{ n: s.n, duration: s.duration, visual: s.visual }]));
+  const raw = scenes.flatMap((s) => (s.shots?.length ? s.shots.map((sh) => ({ n: s.n, duration: sh.duration, visual: sh.visual })) : [{ n: s.n, duration: s.duration, visual: s.visual }]));
+  if (!raw.some((x) => x.visual)) return raw;
+  const out: Segment[] = [];
+  let carry = 0;
+  for (const seg of raw) {
+    if (seg.visual) { out.push({ ...seg, duration: seg.duration + carry }); carry = 0; }
+    else if (out.length) out.at(-1)!.duration += seg.duration;
+    else carry += seg.duration;
+  }
+  return out;
 }
 
 /**
@@ -253,7 +266,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       const sentences = perScene[i]!.map((text, j) => ({ text, query: withSubject(queries[k++]!, subject, j), start: s.words?.length ? starts[j] : undefined }));
       s.shots = layoutShots(sentences.length ? sentences : [{ text: s.voiceover, query: fallbacks[0] ?? 'documentary' }], s.duration);
     }
-    await fetchShotVisuals(this.ctx, scenes.flatMap((s) => s.shots ?? []), { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used, notes, videoId });
+    await fetchShotVisuals(this.ctx, scenes.flatMap((s) => s.shots ?? []), { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used, notes, videoId, fallbackQueries: this.ctx.config.channel.fallbackFootage });
     for (const s of scenes) s.visual = s.shots?.find((x) => x.visual)?.visual;
   }
 
@@ -378,7 +391,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
           const parts = group.map((g) => resolve(dir, `scene-${g.n}.batch.wav`));
           const split = await splitBatch(r.audioPath, group.map((g) => g.voiceover), parts, { rootDir: root });
           if (split.trimmedLeadIn > 0.8) notes.push(`Batch ${bi + 1}: removed ${split.trimmedLeadIn.toFixed(1)}s of speech that was not in the script (voice read its notes aloud).`);
-          if (!split.aligned) notes.push(`Batch ${bi + 1}: speech alignment unavailable — scene cuts and captions use estimated timing.`);
+          if (!split.aligned) notes.push(`Batch ${bi + 1}: speech alignment unavailable (${lastAlignError || 'unknown'}) — scene cuts and captions use estimated timing.`);
           group.forEach((g, i) => pre.set(g.n, { audioPath: parts[i]!, durationSec: 0, characters: g.voiceover.length, voice: r.voice, words: split.words?.[i], coverage: split.coverage?.[i] }));
         }
       }
@@ -484,7 +497,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       const sentences = splitSentences(text);
       const qs = await queriesForSentences(this.ctx, sentences, bp.scenes.find((x) => x.n === scene.n)?.stockQuery || 'documentary', videoId, title);
       const shortShots = layoutShots(sentences.map((t2, i) => ({ text: t2, query: qs[i]! })), d);
-      await fetchShotVisuals(this.ctx, shortShots, { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used: usedClips, notes, videoId });
+      await fetchShotVisuals(this.ctx, shortShots, { targetWidth: size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used: usedClips, notes, videoId, fallbackQueries: this.ctx.config.channel.fallbackFootage });
       extraShots.push(...shortShots);
       const one: TimedScene[] = [{ n: scene.n, start: 0, duration: d, audioPath: wav, voiceover: text, onScreenText: scene.onScreenText, visual: shortShots.find((x) => x.visual)?.visual ?? scene.visual, shots: shortShots }];
       const path = resolve(dir, `short-${k}.mp4`);

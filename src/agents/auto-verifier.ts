@@ -11,7 +11,7 @@ import { Agent, type AgentContext } from './base.ts';
 import { FactCheckerAgent, summarize } from './fact-checker.ts';
 import { JudgeLLM, ScriptLLM, type CheckedClaim, type FactCheckReport, type Script } from './schemas.ts';
 import { loadPrompt } from '../prompts.ts';
-import { spokenText } from './scriptwriter.ts';
+import { editorProblems, spokenText } from './scriptwriter.ts';
 import { countWords } from './base.ts';
 import type { WebPage } from '../providers/web/web.ts';
 
@@ -142,6 +142,35 @@ export class AutoVerifierAgent extends Agent<AutoVerifyInput, AutoVerifyOutput> 
     return { ...script, ...r.data, format: script.format, wordCount: script.wordCount, estimatedDurationSec: script.estimatedDurationSec };
   }
 
+  private async reEdit(videoId: string) {
+    const script = this.ctx.repos.artifacts.latest<Script>(videoId, 'script')!.data;
+    const topics = this.ctx.repos.artifacts.latest<{ topics?: { title: string; subject: string }[] }>(videoId, 'calendar_entry')?.data.topics;
+    let problems = await editorProblems(this.ctx, { videoId, format: script.format }, script, topics);
+    if (problems.length) {
+      const r = await this.ctx.providers.llm.generateJson({
+        task: 'script.reedit',
+        tier: 'writing',
+        system: loadPrompt('script-fixer'),
+        prompt: JSON.stringify({ instruction: 'Fix ONLY these clarity problems (reword the first sentence of the affected scenes so it plainly names its subject; fix broken transitions). Do NOT add any fact, number, date, name or claim that is not already in the script. Return the complete script.', problems, script }),
+        schema: ScriptLLM,
+        videoId,
+        maxOutputTokens: 16000,
+        vars: { previous: script },
+      }).catch(() => undefined);
+      if (r) {
+        const before = spokenText(script), after = spokenText({ ...r.data, format: script.format });
+        const nums = new Set(claimNumbers(before));
+        const ratio = countWords(after) / Math.max(1, countWords(before));
+        if (!claimNumbers(after).some((n) => !nums.has(n)) && ratio > 0.85 && ratio < 1.2) {
+          const fixed = { ...script, ...r.data, format: script.format, wordCount: countWords(after) };
+          const left = await editorProblems(this.ctx, { videoId, format: script.format }, fixed, topics);
+          if (left.length < problems.length) { this.ctx.repos.artifacts.save({ videoId, kind: 'script', agent: this.name, data: fixed }); problems = left; }
+        }
+      }
+    }
+    this.ctx.repos.artifacts.save({ videoId, kind: 'editor_review', agent: this.name, data: { problems } });
+  }
+
   protected async execute(input: AutoVerifyInput): Promise<AutoVerifyOutput> {
     const maxRounds = input.maxRounds ?? 3;
     const removed: string[] = [];
@@ -186,6 +215,10 @@ export class AutoVerifierAgent extends Agent<AutoVerifyInput, AutoVerifyOutput> 
         claims = claims.filter((c) => !bad.includes(c));
       }
     }
+    // Sentences were removed or rewritten: read it again as the viewer will hear it. A Short that now starts
+    // mid-story ("the project…") or lost its subject gets its openings repaired with NO new facts; whatever the
+    // editor still flags is saved and blocks automatic publishing.
+    if (removed.length) await this.reEdit(input.videoId);
     return { claims, ...summarize(claims), rounds: round, removedClaims: removed };
   }
 }

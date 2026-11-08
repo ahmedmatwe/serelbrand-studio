@@ -35,6 +35,8 @@ export function qualityChecklist(ctx: AgentContext, videoId: string): QcItem[] {
   add('هل الناتج حقيقي وليس تجريبياً؟', Boolean(script && r) && !experimental.test([script?.mainTitle, seo?.primaryTitle, r?.voice.provider, r?.voice.voice].filter(Boolean).join(' ')) && !r?.voice.provider.toLowerCase().includes('mock'), true, `الصوت: ${r?.voice.provider ?? 'غير موجود'} — ${r?.voice.voice ?? ''}`);
   const sceneWords = script?.scenes.map((s) => countWords(s.voiceover)) ?? [];
   add('هل كل فيديو له موضوع ونص كامل؟', sceneWords.length > 0 && sceneWords.every((n) => n >= (script?.format === 'short' ? 35 : 20)), true, sceneWords.length ? `كلمات المشاهد: ${sceneWords.join(' / ')}` : 'لا توجد مشاهد منطوقة');
+  const editor = get<{ problems: string[] }>('editor_review');
+  add('هل كل فيديو بيبدأ بموضوعه وكلامه مترابط؟', !editor?.problems.length, true, editor?.problems.length ? editor.problems.slice(0, 2).join(' / ') : 'المحرر راجع النص النهائي');
   add('هل أول 10 ثوانٍ قوية؟', Boolean(script) && countWords(hook) <= 30 && Boolean(first?.curiosityGap || first?.beat === 'hook' || /[؟?]/.test(hook)), true, `Hook: ${countWords(hook)} كلمة`);
   add('هل الوعد واضح؟', Boolean(brief?.promise && script?.opening), true, brief?.promise ?? 'لا يوجد brief');
   const dup = script ? duplicateSentenceRatio(spokenText(script)) : 1;

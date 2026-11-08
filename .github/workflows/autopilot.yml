@@ -86,6 +86,9 @@ jobs:
         run: |
           pip install -q -r scripts/requirements.txt
           python -c "from faster_whisper import WhisperModel; WhisperModel('$WHISPER_MODEL', device='cpu', compute_type='int8'); print('whisper ready')"
+          # Smoke test of the exact command the renderer runs (prints the error if transcription fails).
+          node_modules/ffmpeg-static/ffmpeg -loglevel error -f lavfi -i "sine=f=440:d=2" -ar 24000 -ac 1 /tmp/align-smoke.wav
+          $WHISPER_PYTHON scripts/align.py /tmp/align-smoke.wav ar | tail -c 300; echo
 
       - name: Restore state
         run: |

@@ -1,8 +1,8 @@
 {
-  "_note": "قناة جديدة: الهوية في branding/CHANNEL.md",
+  "_note": "المحتوى: أسرار الموبايل (أكواد وميزات مخفية وحيل) باللهجة المصرية — Shorts يومياً",
   "channelName": "سر البراند",
   "language": "ar",
-  "dialect": "arabic-fusha-simplified",
+  "dialect": "egyptian",
   "targetCountries": [
     "EG",
     "SA",
@@ -11,25 +11,31 @@
     "MA"
   ],
   "audience": {
-    "ageRange": "18-34",
+    "ageRange": "16-35",
     "gender": "all",
     "interests": [
-      "knowledge",
-      "stories",
+      "smartphones",
       "technology",
-      "history"
+      "tips and tricks"
     ]
   },
-  "niche": "business-stories",
+  "niche": "phone-secrets",
   "formats": [
     "long",
     "short"
   ],
   "publishing": {
-    "longPerWeek": 2,
+    "longPerWeek": 0,
     "shortsPerWeek": 21
   },
-  "style": "documentary-storytelling",
+  "style": "fast, friendly phone tips",
   "faceless": true,
-  "competitors": []
+  "competitors": [],
+  "fallbackFootage": [
+    "using smartphone",
+    "hand holding smartphone",
+    "smartphone screen",
+    "phone closeup",
+    "typing on phone"
+  ]
 }

@@ -190,7 +190,7 @@ export async function pickByVision(ctx: AgentContext, items: { text: string; can
   return out;
 }
 
-export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { targetWidth: number; orientation: 'landscape' | 'portrait'; cacheDir: string; used: Set<string>; notes: string[]; videoId?: string }) {
+export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { targetWidth: number; orientation: 'landscape' | 'portrait'; cacheDir: string; used: Set<string>; notes: string[]; videoId?: string; /** Broad, always-relevant searches (e.g. "smartphone screen") used for shots nothing specific fits. */ fallbackQueries?: string[] }) {
   const stock = ctx.providers.stock;
   if (!stock.download) return;
   const results = new Map<string, MediaAsset[]>();
@@ -275,6 +275,24 @@ export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { ta
       misses++;
     }
   }
+  // 4) Never leave a hole: shots nothing specific fits get an unused clip from the channel's broad topic
+  //    searches (always on-topic, e.g. a phone in hand), instead of an empty coloured card.
+  let filled = 0;
+  for (const q of o.fallbackQueries ?? []) {
+    const open = shots.filter((s) => !s.visual);
+    if (!open.length) break;
+    for (const a of rankRelevant(await search(q), q, o.used)) {
+      const s = shots.find((x) => !x.visual);
+      if (!s) break;
+      try {
+        const path = await stock.download!(a, o.cacheDir);
+        o.used.add(a.id);
+        s.visual = { kind: a.kind === 'video' ? 'video' : 'image', path, asset: { ...a, path } };
+        filled++;
+      } catch { /* try the next clip */ }
+    }
+  }
+  if (filled) o.notes.push(`${filled} shot(s) without a specific match got a general on-topic clip.`);
   if (judged) o.notes.push(`Shots chosen by looking at the candidates (vision): ${shots.length - misses}/${shots.length} matched, ${rejected} had no fitting image.`);
   if (misses) o.notes.push(`${misses}/${shots.length} shots had no matching stock clip (previous shot or a text card was used).`);
   // Never hide a mismatch by reusing an unrelated previous shot. Missing visuals become an intentional
