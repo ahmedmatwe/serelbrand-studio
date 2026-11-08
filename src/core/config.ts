@@ -7,6 +7,8 @@ const providerMode = z.enum(['mock', 'real']);
 
 const EnvSchema = z.object({
   DRY_RUN: z.string().default('true').transform((v) => v.toLowerCase() !== 'false'),
+  /** Hard guarantee: providers that can create a paid charge stay disabled. */
+  FREE_ONLY: z.string().default('true').transform((v) => v.toLowerCase() !== 'false'),
   ALLOW_PUBLIC_PUBLISHING: z.string().default('false').transform((v) => v.toLowerCase() === 'true'),
   LLM_PROVIDER: z.enum(['mock', 'gemini']).default('mock'),
   TTS_PROVIDER: z.enum(['mock', 'macos', 'gemini']).default('mock'),
@@ -131,6 +133,9 @@ export function loadConfig(opts: { rootDir?: string; envOverrides?: Record<strin
   }
   if (env.TTS_PROVIDER === 'gemini' && !env.GEMINI_API_KEY) {
     throw new ConfigError('TTS_PROVIDER=gemini requires GEMINI_API_KEY');
+  }
+  if (env.FREE_ONLY && !env.GEMINI_FREE_TIER) {
+    throw new ConfigError('FREE_ONLY=true requires GEMINI_FREE_TIER=true');
   }
   if (env.STOCK_PROVIDER === 'pexels' && !env.PEXELS_API_KEY) {
     throw new ConfigError('STOCK_PROVIDER=pexels requires PEXELS_API_KEY (free key: https://www.pexels.com/api/)');
