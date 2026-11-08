@@ -276,6 +276,10 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       ...uniqueAssets(shots),
     ];
     const withStock = shots.filter((x) => x.visual).length;
+    const openingMissing = o.timed.some((s) => !s.shots?.[0]?.visual);
+    const anyTrimmed = o.timed.some((s) => s.duration > SHORT_MAX_SEC + 1);
+    if (openingMissing) o.notes.push('At least one Short opens without a matching visual.');
+    if (anyTrimmed) o.notes.push('At least one Short was trimmed, so its captions may not cover the full narration.');
     return {
       videoPath: first.path, thumbnailPath: '', captionsPath: '',
       durationSec: first.durationSec, size: dims(o.size, true),
@@ -284,7 +288,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       voice: { provider: o.tts.name, voice: o.voiceName, synthetic: true },
       visualMode: withStock === 0 ? 'text-cards' : withStock === shots.length ? 'stock' : 'mixed',
       assets,
-      measurements: { audio, audioScore: silent ? 0 : 85, visualScore: visualScoreFor(shots), subtitleAccuracy: 100, avSyncDiffSec: 0, notes: o.notes },
+      measurements: { audio, audioScore: silent ? 0 : 85, visualScore: openingMissing ? Math.min(visualScoreFor(shots), 70) : visualScoreFor(shots), subtitleAccuracy: anyTrimmed ? 0 : 100, avSyncDiffSec: 0, notes: o.notes },
     };
   }
 
