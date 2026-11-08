@@ -23,6 +23,10 @@ export function scriptProblems(s: Pick<Script, 'hooks' | 'opening' | 'scenes' | 
   const hook = s.hooks[0] ?? '';
   if (countWords(hook) > 30) p.push(`Hook 1 has ${countWords(hook)} words: make it ≤ 25 words, start with the shock/question directly.`);
   const first = s.scenes[0];
+  if (first && (!first.onScreenText.trim() || countWords(first.voiceover) < 8))
+    p.push('Opening scene is not self-explanatory: give the subject a short on-screen label and a concrete first sentence.');
+  if (first && /^(اهلا|أهلا|مرحبا|مرحباً|في هذا الفيديو|خلينا|دعونا)/i.test(first.voiceover.trim()))
+    p.push('Opening starts with a greeting or generic intro: replace it with the concrete hook and viewer promise.');
   if (!first?.curiosityGap && !/[؟?]/.test(hook + (first?.voiceover.slice(0, 200) ?? ''))) p.push('The first 10 seconds open no curiosity gap: add a clear question or mystery right at the start.');
   if (countWords(s.opening) < 8) p.push('The opening does not state the promise of the video: say in one sentence what the viewer will learn.');
   const text = spokenText(s);
