@@ -150,7 +150,7 @@ export function alignedCutPoints(texts: string[], words: WordTime[], pauses: num
 }
 
 /** Caption chunks timed by the spoken words (≤ maxWords, breaking after punctuation). */
-export function timedChunks(words: WordTime[], offset: number, sceneEnd: number, maxWords: number): { start: number; end: number; text: string }[] {
+export function timedChunks(words: WordTime[], offset: number, sceneEnd: number, maxWords: number): { start: number; end: number; text: string; karaokeCs: number[] }[] {
   const groups: WordTime[][] = [];
   let cur: WordTime[] = [];
   for (const w of words) {
@@ -172,6 +172,15 @@ export function timedChunks(words: WordTime[], offset: number, sceneEnd: number,
     const start = offset + Math.max(0, g[0]!.start - 0.05);
     const nextStart = groups[i + 1] ? offset + groups[i + 1]![0]!.start - 0.05 : sceneEnd;
     const end = Math.min(nextStart, offset + g.at(-1)!.end + 0.35, sceneEnd);
-    return { start, end: Math.max(end, Math.min(start + 0.3, nextStart)), text: g.map((x) => x.w).join(' ') };
+    const fin = Math.max(end, Math.min(start + 0.3, nextStart));
+    // Each word lights up exactly when it is spoken: its \k lasts until the next word starts.
+    let t = start;
+    const karaokeCs = g.map((w, k) => {
+      const until = k < g.length - 1 ? offset + g[k + 1]!.start : Math.min(fin, offset + w.end);
+      const cs = Math.max(1, (until - t) * 100);
+      t = until;
+      return cs;
+    });
+    return { start, end: fin, text: g.map((x) => x.w).join(' '), karaokeCs };
   });
 }

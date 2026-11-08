@@ -57,7 +57,8 @@ export function timelineAss(scenes: TimedScene[], o: { width: number; height: nu
   const base = Math.min(o.width, o.height);
   const vertical = o.height > o.width;
   const styles: AssStyle[] = [
-    { name: 'Title', font: FONT, size: Math.round(base * (vertical ? 0.085 : 0.09)), color: '#FFFFFF', outline: '#000000', outlineWidth: Math.max(2, Math.round(base * 0.005)), alignment: vertical ? 8 : 5, marginV: Math.round(o.height * (vertical ? 0.22 : 0.08)), bold: true },
+    // Vertical: the code/feature sits in a solid box near the top for the whole Short (readable on any footage).
+    { name: 'Title', font: FONT, size: Math.round(base * (vertical ? 0.075 : 0.09)), color: vertical ? '#FFD400' : '#FFFFFF', outline: vertical ? '#111111' : '#000000', outlineWidth: vertical ? Math.round(base * 0.022) : Math.max(2, Math.round(base * 0.005)), alignment: vertical ? 8 : 5, marginV: Math.round(o.height * (vertical ? 0.14 : 0.08)), bold: true, boxed: vertical },
     { name: 'Accent', font: FONT, size: Math.round(base * 0.05), color: o.accent, outline: '#000000', outlineWidth: 2, alignment: 8, marginV: Math.round(o.height * 0.06), bold: true },
     { name: 'Sub', font: FONT, size: Math.round(base * (vertical ? 0.085 : 0.062)), color: '#FFD400', secondary: '#FFFFFF', outline: '#000000', outlineWidth: Math.max(3, Math.round(base * 0.007)), shadow: 3, alignment: vertical ? 5 : 2, marginV: Math.round(o.height * (vertical ? 0.12 : 0.08)), bold: true },
   ];
@@ -71,7 +72,8 @@ export function timelineAss(scenes: TimedScene[], o: { width: number; height: nu
       ? timedChunks(s.words, s.start, s.start + s.duration, vertical ? 4 : 7)
       : chunkSubtitles(s.voiceover, s.start, Math.max(0.1, s.duration), vertical ? 4 : 7);
     subs.push(...chunks);
-    events.push(...chunks.map((c) => ({ ...c, style: 'Sub' })));
+    // Measured chunks: words light up as spoken (yellow fill) and each line pops in.
+    events.push(...chunks.map((c) => ({ ...c, style: 'Sub', pop: 'karaokeCs' in c })));
   }
   if (o.endCard && scenes.length) {
     const last = scenes.at(-1)!;

@@ -6,12 +6,21 @@
 import { z } from 'zod';
 import type { AgentContext } from './base.ts';
 import { relevantExcerpt } from './auto-verifier.ts';
+import { loadPhoneLibrary, secretSource } from './niche/phone-library.ts';
 
 export interface ResearchSource { url: string; title?: string; excerpt: string }
 
 const QueriesLLM = z.object({ queries: z.array(z.string().min(2)).min(1).max(5) });
 
 export async function researchTopic(ctx: AgentContext, videoId: string, topic: string, angle = '', subject?: string, urls: string[] = []): Promise<ResearchSource[]> {
+  // A reviewed phone-secrets entry IS the source (the official page it comes from is cited with it).
+  const lib = subject ? loadPhoneLibrary(ctx.config.rootDir) : undefined;
+  const entry = lib?.secrets.find((x) => x.id === subject);
+  if (lib && entry) {
+    const out = [secretSource(lib, entry)];
+    ctx.repos.artifacts.save({ videoId, kind: 'research', agent: 'research', data: { queries: [entry.id], sources: out } });
+    return out;
+  }
   if (ctx.providers.web.name === 'mock-web') return []; // offline runs: no sources to fetch
   const q = await ctx.providers.llm.generateJson({
     task: 'research.queries',

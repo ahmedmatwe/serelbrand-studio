@@ -24,6 +24,7 @@ import { qcBlockers, qualityChecklist } from '../reports/qc.ts';
 import { quotaResetSeconds } from '../providers/tts/gemini-tts.ts';
 import { writePackage } from '../reports/package.ts';
 import { steps } from './steps.ts';
+import { loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
 
 export interface CycleOptions {
   now?: Date;
@@ -161,6 +162,15 @@ const PHONE_PACK_PROMPT = 'You plan VIRAL YouTube Shorts for an Egyptian Arabic 
 /** Three DIFFERENT, clear, specific Shorts topics, never repeating past titles, each with a real source. */
 export async function planShortsPack(ctx: AgentContext, niche: string, avoid: string[]) {
   const phone = /phone|mobile|موبايل/i.test(niche);
+  // Phone secrets: only reviewed entries from the approved library (never an AI-invented code).
+  const lib = phone ? loadPhoneLibrary(ctx.config.rootDir) : undefined;
+  if (lib) {
+    const used = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
+    const picks = pickPhoneSecrets(lib, used);
+    if (picks.length === 3) return picks.map((x): PackTopic => ({ title: x.title, subject: x.id, angle: `${x.steps.join(' ← ')} → ${x.result}`, kind: x.kind, sourceUrl: lib.sources[x.source] ?? '' }));
+    ctx.logger.child('autopilot').warn('phone-secrets library used up — add reviewed entries to config/phone-secrets.json', { left: picks.length });
+    // Out of reviewed entries: fall through to AI-proposed topics (still need a real source and the full gates).
+  }
   const r = await ctx.providers.llm.generateJson({
     task: 'shorts.topics',
     tier: 'light',

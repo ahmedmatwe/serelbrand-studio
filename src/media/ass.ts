@@ -23,7 +23,7 @@ export interface AssStyle {
   shadow?: number;
 }
 
-export interface AssEvent { start: number; end: number; style: string; text: string; fadeMs?: number; /** Word-by-word highlight (\k timing proportional to word length). */ karaoke?: boolean }
+export interface AssEvent { start: number; end: number; style: string; text: string; fadeMs?: number; /** Word-by-word highlight (\k timing proportional to word length). */ karaoke?: boolean; /** Measured word-by-word highlight: centiseconds per word (from forced alignment). */ karaokeCs?: number[]; /** Short scale-in "pop" when the line appears. */ pop?: boolean }
 
 /** Karaoke text: each word gets {\kN} (centiseconds) so it switches from Secondary to Primary colour when spoken. */
 export function karaokeText(text: string, durationSec: number): string {
@@ -81,7 +81,14 @@ export function buildAss(o: { width: number; height: number; styles: AssStyle[];
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
     ...o.events
       .filter((e) => e.end > e.start && e.text.trim())
-      .map((e) => `Dialogue: 0,${assTime(e.start)},${assTime(e.end)},${e.style},,0,0,0,,${e.fadeMs ? `{\\fad(${e.fadeMs},${e.fadeMs})}` : ''}${e.karaoke ? karaokeText(e.text, e.end - e.start) : assText(e.text)}`),
+      .map((e) => {
+        const words = e.text.trim().split(/\s+/);
+        const body = e.karaokeCs && e.karaokeCs.length === words.length
+          ? words.map((w, i) => `{\\k${Math.max(1, Math.round(e.karaokeCs![i]!))}}${assText(w)}`).join(' ')
+          : e.karaoke ? karaokeText(e.text, e.end - e.start) : assText(e.text);
+        const fx = `${e.fadeMs ? `\\fad(${e.fadeMs},${e.fadeMs})` : ''}${e.pop ? '\\fscx86\\fscy86\\t(0,110,\\fscx100\\fscy100)' : ''}`;
+        return `Dialogue: 0,${assTime(e.start)},${assTime(e.end)},${e.style},,0,0,0,,${fx ? `{${fx}}` : ''}${body}`;
+      }),
     '',
   ].join('\n');
 }

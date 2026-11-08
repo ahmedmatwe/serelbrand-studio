@@ -14,6 +14,7 @@ export function testContext(opts: CreateContextOptions & { env?: Record<string, 
   });
   // The live channel may be Shorts-only; tests also cover the long-video path (2 a week).
   ctx.config.channel.publishing.longPerWeek = 2;
+  ctx.config.channel.niche = 'business-stories'; // generic pipeline tests; the phone library has its own tests
   return ctx;
 }
 
