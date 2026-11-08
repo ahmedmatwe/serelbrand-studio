@@ -297,7 +297,8 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const shorts: RenderedShort[] = [];
     const packTopics = this.ctx.repos.artifacts.latest<{ topics?: { title: string; subject?: string }[] }>(o.videoId, 'calendar_entry')?.data.topics;
     const lib = loadPhoneLibrary(this.ctx.config.rootDir);
-    o.timed.forEach((s, i) => { s.ui = lib?.secrets.find((x) => x.id === packTopics?.[i]?.subject)?.ui; });
+    // Phone secrets: the screen drawing and the on-screen label always come from the reviewed library entry.
+    o.timed.forEach((s, i) => { const e = lib?.secrets.find((x) => x.id === packTopics?.[i]?.subject); if (e) { s.ui = e.ui; s.onScreenText = e.onScreen; } });
     for (const [i, s] of o.timed.entries()) {
       // A Short slightly over the limit is sped up a little (≤ 12%, still natural) instead of losing its ending.
       const tempo = s.duration > SHORT_MAX_SEC + 1 ? Math.min(1.12, s.duration / SHORT_MAX_SEC) : 1;

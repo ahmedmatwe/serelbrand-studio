@@ -55,3 +55,14 @@ test('phone screen: dialer types the code when it is spoken; settings walk the p
   for (const x of lib.secrets) if (x.ui?.type === 'dialer') assert.equal(x.ui.code, x.onScreen, x.id);
   assert.ok(lib.secrets.every((x) => (x.footage?.length ?? 0) >= 3), 'every secret has its own visuals');
 });
+
+test('verification: claims taken from a reviewed library entry are verified against it; foreign claims are not', async () => {
+  const { libraryCovers } = await import('../../src/agents/auto-verifier.ts');
+  const e = lib.secrets.find((x) => x.id === 'ios-silence-unknown')!;
+  // The exact claims the web verifier wrongly deleted in a real run.
+  assert.ok(libraryCovers("iPhone has a 'Silence Unknown Callers' feature that sends unknown numbers to voicemail.", e));
+  assert.ok(libraryCovers("In iOS 18, the Phone settings can be found under the 'Apps' section in the Settings app.", e));
+  assert.ok(libraryCovers('نظام iOS يحتوي على ميزة إسكات المتصلين المجهولين في إعدادات الهاتف لكتم الأرقام غير المسجلة مع حفظها في سجل المكالمات.', e));
+  assert.ok(!libraryCovers('Apple sold 230 million iPhones in 2015.', e), 'unrelated numbers never pass');
+  assert.ok(!libraryCovers('اكتب الكود *#9900# عشان تسرّع الموبايل', lib.secrets.find((x) => x.id === 'code-imei')!), 'a code not in the entry never passes');
+});

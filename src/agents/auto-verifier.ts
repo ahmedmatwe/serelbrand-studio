@@ -12,6 +12,7 @@ import { FactCheckerAgent, summarize } from './fact-checker.ts';
 import { JudgeLLM, ScriptLLM, type CheckedClaim, type FactCheckReport, type Script } from './schemas.ts';
 import { loadPrompt } from '../prompts.ts';
 import { editorProblems, spokenText } from './scriptwriter.ts';
+import { loadPhoneLibrary, secretSource, type PhoneSecret } from './niche/phone-library.ts';
 import { countWords } from './base.ts';
 import type { WebPage } from '../providers/web/web.ts';
 
@@ -100,9 +101,19 @@ export class AutoVerifierAgent extends Agent<AutoVerifyInput, AutoVerifyOutput> 
 
   private async verifyAll(report: FactCheckReport, videoId: string): Promise<CheckedClaim[]> {
     const claims: CheckedClaim[] = [];
+    // Phone secrets: each Short comes from a reviewed library entry; its claims are checked against that entry.
+    const topics = this.ctx.repos.artifacts.latest<{ topics?: { subject: string }[] }>(videoId, 'calendar_entry')?.data.topics;
+    const lib = topics ? loadPhoneLibrary(this.ctx.config.rootDir) : undefined;
+    const entryFor = (n?: number | null) => (n ? lib?.secrets.find((x) => x.id === topics?.[n - 1]?.subject) : undefined);
     for (const c of report.claims) {
       // Opinions/predictions need no source; claims a human already verified are kept.
       if (c.status === 'not_applicable' || (c.status === 'verified' && c.reasons.some((r) => r.startsWith('Verified by')))) { claims.push(c); continue; }
+      const entry = entryFor(c.sceneN) ?? lib?.secrets.find((x) => topics?.some((t) => t.subject === x.id) && libraryCovers(c.claim, x));
+      if (lib && entry && libraryCovers(c.claim, entry)) {
+        const src = secretSource(lib, entry);
+        claims.push({ ...c, sourceUrl: src.url, sourceTitle: entry.title, status: 'verified', humanReviewRequired: false, evidence: [{ url: src.url, quote: entry.facts.slice(0, 300), verdict: 'supported' }], reasons: ['Verified against the reviewed phone-secrets library entry'] });
+        continue;
+      }
       const ev = await this.evidenceFor(c, videoId);
       const supported = ev.filter((e) => e.verdict === 'supported');
       const sites = new Set(supported.map((e) => siteOf(e.url)));
@@ -254,4 +265,20 @@ export function cutClaimSentences(script: Script, claims: Pick<CheckedClaim, 'cl
   }
   const out: Script = { ...script, scenes: scenes.map(({ sentences, ...s }) => ({ ...s, voiceover: sentences.filter(Boolean).join(' ') })) };
   return { script: out, removed, removedWords };
+}
+
+/**
+ * A claim is covered by a reviewed library entry when all its numbers/codes appear in the entry and most of
+ * its meaningful words do (Arabic or English, normalised).
+ */
+export function libraryCovers(claim: string, e: PhoneSecret): boolean {
+  const text = [e.title, e.platforms, e.onScreen, ...e.steps, e.result, e.use, e.facts].join(' ');
+  const codes = claim.match(/[*#][*#0-9]+[*#]?/g) ?? [];
+  if (!codes.every((x) => text.includes(x))) return false;
+  if (!numbersCovered(claim, text)) return false;
+  const words = [...tokens(claim)].filter((w) => w.length > 2);
+  if (!words.length) return false;
+  const have = tokens(text);
+  const hit = words.filter((w) => have.has(w) || [...have].some((h) => h.length > 3 && (h.includes(w) || w.includes(h)))).length;
+  return hit / words.length >= 0.5;
 }
