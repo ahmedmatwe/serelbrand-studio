@@ -43,6 +43,8 @@ test('autopilot: a daily AI quota stops production until the reset (no burned at
   const { isDailyQuota, nextQuotaReset } = await import('../../src/workflows/autopilot.ts');
   assert.ok(isDailyQuota('HTTP 429: You exceeded your current quota ... Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 500'));
   assert.ok(!isDailyQuota('HTTP 503: model overloaded'));
+  // The blocker text is cut at 200 chars, before Google names the metric: still a quota stop.
+  assert.ok(isDailyQuota('production failed: HTTP 429: You exceeded your current quota, please check your plan and billing details.'));
   assert.equal(nextQuotaReset(new Date('2026-11-09T07:00:00Z')), '2026-11-09T08:10:00.000Z');
   assert.equal(nextQuotaReset(new Date('2026-11-09T09:00:00Z')), '2026-11-10T08:10:00.000Z');
 });

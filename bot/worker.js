@@ -33,9 +33,9 @@ async function videosMenu(env) {
 }
 
 /** Starts the GitHub "bot" workflow (fresh report, or fetching videos the bot has no copy of yet). */
-async function dispatch(env, inputs = {}) {
+async function dispatch(env, inputs = {}, workflow = 'bot.yml') {
   if (!env.GH_TOKEN) return false;
-  const r = await fetch('https://api.github.com/repos/ahmedmatwe/serelbrand-studio/actions/workflows/bot.yml/dispatches', {
+  const r = await fetch(`https://api.github.com/repos/ahmedmatwe/serelbrand-studio/actions/workflows/${workflow}/dispatches`, {
     method: 'POST', headers: { authorization: `Bearer ${env.GH_TOKEN}`, accept: 'application/vnd.github+json', 'user-agent': 'ser-mobile-bot', 'content-type': 'application/json' },
     body: JSON.stringify({ ref: 'main', inputs }),
   }).catch(() => undefined);
@@ -59,7 +59,19 @@ async function sendVideos(env, which) {
   }
 }
 
+/**
+ * The channel's clock. GitHub's own schedule drops most runs on a busy day (9 Nov: 2 of 8 autopilot runs,
+ * 1 of 17 social runs → a Short reached Facebook 5 h late), Cloudflare's cron fires on time: it starts the
+ * workflows itself. Crons are in wrangler.toml.
+ */
+const CRON_WORKFLOW = { '20 */3 * * *': 'autopilot.yml', '4 5-21 * * *': 'social.yml' };
+
 export default {
+  async scheduled(event, env) {
+    const wf = CRON_WORKFLOW[event.cron];
+    if (wf) await dispatch(env, {}, wf);
+  },
+
   async fetch(req, env) {
     const url = new URL(req.url);
     if (req.method !== 'POST') return new Response('ok');

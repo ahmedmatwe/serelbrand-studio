@@ -6,3 +6,7 @@ compatibility_date = "2025-06-01"
 [[kv_namespaces]]
 binding = "BOT"
 id = "a7508baf9d87468fbe2b9d6fcac38fb3"
+
+# Starts the GitHub workflows on time (GitHub's own cron skips runs). Must match CRON_WORKFLOW in worker.js.
+[triggers]
+crons = ["20 */3 * * *", "4 5-21 * * *"]

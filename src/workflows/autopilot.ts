@@ -272,7 +272,8 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   }
   for (;;) {
     // Attempts that died only because the free voice quota was used up don't count toward the daily limit.
-    const quotaOnly = (id: string) => (ctx.repos.artifacts.latest<{ blockers: string[] }>(id, 'auto_blocked')?.data.blockers ?? []).some((b) => b.includes('TTS_DAILY_QUOTA'));
+    // Same for the AI writing quota (Gemini 429): it's not the topic's fault, so it must not burn the day's 3 tries.
+    const quotaOnly = (id: string) => (ctx.repos.artifacts.latest<{ blockers: string[] }>(id, 'auto_blocked')?.data.blockers ?? []).some((b) => b.includes('TTS_DAILY_QUOTA') || isDailyQuota(b));
     const todays = ctx.repos.videos.list().filter((v) => planned.has(v.id) && v.created_at.slice(0, 10) === day(now) && !quotaOnly(v.id));
     const ok = (f: string) => todays.some((v) => v.format === f && !ctx.repos.artifacts.latest(v.id, 'auto_blocked'));
     const failed = (f: string) => todays.filter((v) => v.format === f && ctx.repos.artifacts.latest(v.id, 'auto_blocked')).length;
@@ -479,7 +480,7 @@ async function learnCycle(ctx: AgentContext, now: Date): Promise<string[]> {
 
 /** Gemini free-tier daily quota (not a per-minute burst): retrying today only burns attempts and topics. */
 export function isDailyQuota(msg: string): boolean {
-  return /429|RESOURCE_EXHAUSTED|quota/i.test(msg) && /per ?day|PerDay|free_tier_requests|daily/i.test(msg);
+  return /429|RESOURCE_EXHAUSTED|quota/i.test(msg) && /per ?day|PerDay|free_tier_requests|daily|exceeded your current quota/i.test(msg);
 }
 /** Gemini daily quotas reset at midnight Pacific time (~08:00 UTC); wait until a bit after. */
 export function nextQuotaReset(now: Date): string {
