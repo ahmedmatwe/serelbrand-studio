@@ -12,7 +12,7 @@ import { loadPhoneLibrary, type PhoneUi } from '../agents/niche/phone-library.ts
 import { FallbackTTS } from '../providers/tts/gemini-tts.ts';
 import { buildAss, chunkSubtitles, type AssEvent, type AssStyle } from './ass.ts';
 import { ffmpeg, filterPath, probeDuration, volumeStats, type VolumeStats } from './ffmpeg.ts';
-import { fetchShotVisuals, layoutShots, queriesForSentences, queryParts, splitSentences, type Shot } from './shots.ts';
+import { auditFrames, fetchShotVisuals, layoutShots, queriesForSentences, queryParts, splitSentences, type Shot } from './shots.ts';
 import { renderThumbnail } from './thumbnail.ts';
 import { cuesFor, mixSoundtrackSafe, pickMusic } from './sound.ts';
 import { z } from 'zod';
@@ -25,7 +25,7 @@ interface TimedScene { /** Phone screen to draw while the steps are said (phone-
 /** One background segment of the timeline (a shot, or a whole scene when it has no shots). */
 interface Segment { n: number; duration: number; visual?: SceneVisual }
 
-export interface RenderedShort { path: string; durationSec: number; scenes: number[]; title: string }
+export interface RenderedShort { path: string; durationSec: number; scenes: number[]; title: string; /** Set when the frame audit found an immodest shot: never published. */ heldReason?: string }
 
 export interface RenderOutput {
   videoPath: string;
@@ -289,6 +289,18 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     for (const s of scenes) s.visual = s.shots?.find((x) => x.visual)?.visual;
   }
 
+  /** Frames every 2 s of a rendered video → vision modesty audit. Returns the reason if any frame fails. */
+  private async modestyAudit(video: string, dir: string, tag: string, videoId: string): Promise<string | undefined> {
+    const fdir = resolve(dir, `audit-${tag}`);
+    mkdirSync(fdir, { recursive: true });
+    try {
+      await ffmpeg(['-i', video, '-vf', 'fps=1/2,scale=360:-1', '-q:v', '5', resolve(fdir, 'f-%03d.jpg')]);
+      const { readdirSync, readFileSync } = await import('node:fs');
+      const frames = readdirSync(fdir).filter((f) => f.endsWith('.jpg')).sort().map((f) => readFileSync(resolve(fdir, f)));
+      return await auditFrames(this.ctx, frames, videoId);
+    } catch { return undefined; } finally { rmSync(fdir, { recursive: true, force: true }); }
+  }
+
   private async renderPack(o: { videoId: string; dir: string; timed: TimedScene[]; t: number; size: RenderSize; palette: string[]; preset: string; notes: string[]; tts: TTSProvider; voiceName: string; th: ThumbnailOutput }): Promise<RenderOutput> {
     const bp = this.ctx.repos.artifacts.latest<Blueprint>(o.videoId, 'blueprint')!.data;
     const script = this.ctx.repos.artifacts.latest<Script>(o.videoId, 'script')!.data;
@@ -316,7 +328,10 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       };
       await this.renderTimeline([scaled], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
       const sc = script.scenes.find((x) => x.n === s.n);
-      shorts.push({ path, durationSec: Number(d.toFixed(2)), scenes: [s.n], title: packTopics?.[i]?.title || sc?.curiosityGap || sc?.onScreenText || script.mainTitle });
+      // Final safety net: the finished Short is looked at frame by frame (every 2 s) for modesty.
+      const held = await this.modestyAudit(path, o.dir, `short-${s.n}`, o.videoId);
+      if (held) o.notes.push(`Short ${s.n} held back (modesty): ${held}`);
+      shorts.push({ path, durationSec: Number(d.toFixed(2)), scenes: [s.n], title: packTopics?.[i]?.title || sc?.curiosityGap || sc?.onScreenText || script.mainTitle, ...(held ? { heldReason: held } : {}) });
     }
     const first = shorts[0]!;
     const audio = await volumeStats(resolve(o.dir, `short-${o.timed[0]!.n}.m4a`));

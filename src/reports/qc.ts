@@ -25,10 +25,13 @@ export function packExclusions(ctx: AgentContext, videoId: string): number[] {
   if (!script || script.format !== 'short') return [];
   const fc = ctx.repos.artifacts.latest<FactCheckReport>(videoId, 'fact_check')?.data;
   const editor = ctx.repos.artifacts.latest<{ problems: string[] }>(videoId, 'editor_review')?.data;
-  const bad = script.scenes.filter((sc) =>
+  const render = ctx.repos.artifacts.latest<{ shorts?: { scenes: number[]; heldReason?: string }[] }>(videoId, 'render')?.data;
+  const immodest = new Set((render?.shorts ?? []).filter((x) => x.heldReason).flatMap((x) => x.scenes));
+  const bad = script.scenes.filter((sc) => immodest.has(sc.n) ||
     !(fc?.claims ?? []).some((c) => c.status === 'verified' && c.sceneN === sc.n) ||
     (editor?.problems ?? []).some((p) => new RegExp(`^Scene ${sc.n}\\b`).test(p))).map((sc) => sc.n);
-  return bad.length < script.scenes.length ? bad : [];
+  // Immodest Shorts are held back in every case; other problems only when part of the pack is still fine.
+  return bad.length < script.scenes.length ? bad : [...immodest];
 }
 
 export function qualityChecklist(ctx: AgentContext, videoId: string): QcItem[] {
@@ -54,6 +57,9 @@ export function qualityChecklist(ctx: AgentContext, videoId: string): QcItem[] {
   const held = packExclusions(ctx, videoId);
   const editorLeft = (editor?.problems ?? []).filter((p) => !held.some((n) => new RegExp(`^Scene ${n}\\b`).test(p)));
   if (held.length) add('هل كل الشورتس جاهزة للنشر؟', true, false, `الشورت رقم ${held.join(' و ')} اتأجل لأنه فيه مشكلة، والباقي هيتنشر`);
+  const rnd = get<RenderOutput>('render');
+  const modestOk = (rnd?.shorts ?? []).some((x) => !(x as { heldReason?: string }).heldReason) || !(rnd?.shorts ?? []).length;
+  add('هل كل اللقطات محتشمة؟', modestOk, true, (rnd?.shorts ?? []).filter((x) => (x as { heldReason?: string }).heldReason).map((x) => `${x.title}: ${(x as { heldReason?: string }).heldReason}`).join(' / ') || 'المراجعة كادر كادر عدّت');
   add('هل كل فيديو بيبدأ بموضوعه وكلامه مترابط؟', !editorLeft.length, true, editorLeft.length ? editorLeft.slice(0, 2).join(' / ') : 'المحرر راجع النص النهائي');
   add('هل أول 10 ثوانٍ قوية؟', Boolean(script) && countWords(hook) <= 30 && Boolean(first?.curiosityGap || first?.beat === 'hook' || /[؟?]/.test(hook)), true, `Hook: ${countWords(hook)} كلمة`);
   add('هل الوعد واضح؟', Boolean(brief?.promise && script?.opening), true, brief?.promise ?? 'لا يوجد brief');

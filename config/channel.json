@@ -32,10 +32,10 @@
   "faceless": true,
   "competitors": [],
   "fallbackFootage": [
-    "using smartphone",
     "hand holding smartphone",
-    "smartphone screen",
-    "phone closeup",
-    "typing on phone"
+    "smartphone screen closeup",
+    "phone on table",
+    "typing on phone",
+    "phone closeup"
   ]
 }

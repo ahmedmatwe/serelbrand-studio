@@ -78,3 +78,10 @@ test('self-healing pack: broken Shorts are detected one by one', async () => {
   const claims = [{ sceneN: 1, status: 'verified' }, { sceneN: 2, status: 'verified' }] as any;
   assert.deepEqual(brokenShorts(script, claims), [{ index: 1, why: 'only 20 spoken words' }, { index: 2, why: 'no verified fact' }]);
 });
+
+test('modesty: no footage search invites bedroom/swimwear/party scenes; the rule guards every visual check', async () => {
+  const { MODESTY_RULE } = await import('../../src/media/shots.ts');
+  for (const s of lib.secrets) for (const q of s.footage ?? []) assert.doesNotMatch(q, /sleep|bed|selfie|swim|beach|party|dance|couple/i, `${s.id}: ${q}`);
+  assert.match(MODESTY_RULE, /sleeveless/);
+  assert.match(MODESTY_RULE, /in bed/);
+});

@@ -96,7 +96,7 @@ export async function queriesForSentences(ctx: AgentContext, sentences: string[]
       task: 'production.shots',
       tier: 'light',
       system:
-        'You are a documentary video editor choosing stock footage. For EACH Arabic sentence give: query = a concrete English stock-footage search (2–4 words) of what the viewer should literally SEE while it is spoken, and alt = a simpler 1–2 word fallback that surely exists in stock libraries. ' +
+        'You are a documentary video editor choosing stock footage for a family channel. Prefer phones, screens, hands, objects and places over people; never people in bed, swimwear, parties or anything suggestive. For EACH Arabic sentence give: query = a concrete English stock-footage search (2–4 words) of what the viewer should literally SEE while it is spoken, and alt = a simpler 1–2 word fallback that surely exists in stock libraries. ' +
         'The query MUST contain the main concrete noun the sentence names or implies (price tag, shirt, cashier, factory, smartphone…). Rules: show real, filmable things (people, places, objects, actions) that match the sentence AND the video topic; turn abstract ideas into a literal scene (e.g. "humble beginnings" → "small garage workshop", "huge success" → "busy office team celebrating", "competition" → "chess game closeup"). ' +
         'Never abstract textures, crystals, particles, fractals or generic backgrounds. No brand names, logos, celebrities or on-screen text in query/alt. The FIRST sentence is the hook: return a literal, instantly understandable visual for it; never return a generic documentary, landscape, person, or abstract background. If a sentence has no safe literal visual, use an object/action from its concrete example instead. Vary the visuals; never repeat a query twice in a row. ' +
         'entity = if the sentence explicitly names a real person, company, product, building or place, its common English Wikipedia name (e.g. "Jeff Bezos", "Toyota Prius", "Amazon Spheres"); otherwise "". Output JSON only.',
@@ -123,6 +123,11 @@ export function rankRelevant(list: MediaAsset[], query: string, used: Set<string
     .sort((x, y) => (y.r ?? 0.5) - (x.r ?? 0.5) || x.idx - y.idx)
     .map((x) => x.a);
 }
+
+/**
+ * Channel standard for an Egyptian / Arab family audience: every shot must be modest. Used by every visual check.
+ */
+export const MODESTY_RULE = 'MODESTY (absolute, overrides relevance): reject any image showing revealing or tight clothing — sleeveless or strappy tops, camisoles, bare shoulders, cleavage, bare midriff, shorts or short skirts, swimwear, lingerie, people in bed or bedroom/intimate settings, couples being intimate, dancing, nightclubs, alcohol, gambling or anything suggestive. People are acceptable only when fully and modestly dressed (or only hands/arms in normal sleeves are visible). Prefer shots of phones, screens, hands, objects and places.';
 
 /** Max shots per video checked by vision (each request carries 2 shots × up to 6 small previews). */
 export const VISION_BUDGET = 60;
@@ -172,7 +177,7 @@ export async function pickByVision(ctx: AgentContext, items: { text: string; can
     const r = await ctx.providers.llm.generateJson({
       task: 'shots.pick',
       tier: 'light',
-      system: 'You are a strict documentary film editor. Each image is preceded by a label "Shot X — candidate N". For each shot list ALL candidates that fit, best first, i.e. that show what the narrator says at that moment: the concrete thing named (a price tag, a shirt, a cashier, a factory, the named product or person) or the exact place/action where it happens (a supermarket aisle fits "a price on a supermarket shelf"). Never list a scene unrelated to the sentence (fish, nature, music, random people) — return an empty list when none fits. JSON only.',
+      system: MODESTY_RULE + ' You are a strict documentary film editor. Each image is preceded by a label "Shot X — candidate N". For each shot list ALL candidates that fit (and pass the modesty rule), best first, i.e. that show what the narrator says at that moment: the concrete thing named (a price tag, a shirt, a cashier, a factory, the named product or person) or the exact place/action where it happens (a supermarket aisle fits "a price on a supermarket shelf"). Never list a scene unrelated to the sentence (fish, nature, music, random people) — return an empty list when none fits. JSON only.',
       prompt: lines.join('\n') + '\nReturn {"picks":[{"shot":1,"ok":[<candidate numbers that fit, best first>],"why":"…"}]}',
       schema: PickLLM,
       images,
@@ -240,7 +245,7 @@ export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { ta
     const retry = await ctx.providers.llm.generateJson({
       task: 'production.shots.retry',
       tier: 'light',
-      system: 'Stock-footage searches failed for these Arabic sentences. For each, give 2 NEW, different English stock-video queries (2–3 words, very common filmable things that surely exist in free stock libraries: e.g. "cashier counter", "shopping bags", "price label", "folded shirts", "office meeting", "counting money"). JSON only.',
+      system: 'Family channel: queries for objects, hands, phones and places only (no people in bed, swimwear or parties). Stock-footage searches failed for these Arabic sentences. For each, give 2 NEW, different English stock-video queries (2–3 words, very common filmable things that surely exist in free stock libraries: e.g. "cashier counter", "shopping bags", "price label", "folded shirts", "office meeting", "counting money"). JSON only.',
       prompt: JSON.stringify({ shots: rejectedIdx.map((i) => ({ i, text: shots[i]!.text, failed: shots[i]!.query })) }),
       schema: z.object({ shots: z.array(z.object({ i: z.number().int(), queries: z.array(z.string()).min(1) })) }),
       videoId: o.videoId,
@@ -281,7 +286,9 @@ export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { ta
   for (const q of o.fallbackQueries ?? []) {
     const open = shots.filter((s) => !s.visual);
     if (!open.length) break;
-    for (const a of rankRelevant(await search(q), q, o.used)) {
+    // Fallback clips skip the relevance check, never the modesty check.
+    const pool = await modestOnly(ctx, rankRelevant(await search(q), q, o.used).slice(0, 8), o.videoId);
+    for (const a of pool) {
       const s = shots.find((x) => !x.visual);
       if (!s) break;
       try {
@@ -309,4 +316,54 @@ export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { ta
   // narration-led text card in the renderer; the opening is never allowed to inherit another scene's footage.
   const missing = shots.map((s, i) => (!s.visual ? i + 1 : 0)).filter(Boolean);
   if (missing.length) o.notes.push(`Intentional text-card fallback for unmatched shots: ${missing.join(', ')}.`);
+}
+
+/**
+ * Keeps only candidates a vision model confirms as modest (see MODESTY_RULE). When vision is unavailable the
+ * list is returned unchanged — the rendered-video audit (auditFrames) is the final safety net.
+ */
+export async function modestOnly(ctx: AgentContext, list: MediaAsset[], videoId?: string): Promise<MediaAsset[]> {
+  if (!list.length || ctx.providers.llm.name.startsWith('mock')) return list;
+  const images: { mimeType: string; data: string; label: string }[] = [];
+  const idx: number[] = [];
+  for (const [i, a] of list.entries()) {
+    const im = a.previewUrl ? await previewImage(a.previewUrl) : undefined;
+    if (im) { images.push({ ...im, label: `Image ${images.length + 1}:` }); idx.push(i); }
+  }
+  if (!images.length) return [];
+  const r = await ctx.providers.llm.generateJson({
+    task: 'shots.modesty',
+    tier: 'light',
+    system: `${MODESTY_RULE} For each numbered image say whether it passes. JSON only: {"pass":[image numbers that pass]}`,
+    prompt: 'Which images pass the modesty rule?',
+    schema: z.object({ pass: z.array(z.number().int()).default([]) }),
+    images,
+    videoId,
+    maxOutputTokens: 400,
+  }).catch(() => undefined);
+  if (!r) return list;
+  return r.data.pass.map((n) => idx[n - 1]).filter((i): i is number => i !== undefined).map((i) => list[i]!);
+}
+
+/**
+ * Final safety net on the RENDERED video: frames every 2 s are shown to the vision model; any immodest frame
+ * returns a reason (the Short is then held back from publishing). Undefined = clean (or vision unavailable).
+ */
+export async function auditFrames(ctx: AgentContext, framesJpeg: Buffer[], videoId?: string): Promise<string | undefined> {
+  if (!framesJpeg.length || ctx.providers.llm.name.startsWith('mock')) return undefined;
+  for (let i = 0; i < framesJpeg.length; i += 12) {
+    const batch = framesJpeg.slice(i, i + 12);
+    const r = await ctx.providers.llm.generateJson({
+      task: 'video.modesty_audit',
+      tier: 'light',
+      system: `${MODESTY_RULE} These are frames of one short video. JSON only: {"ok":true|false,"reason":"short description of the problem frame, if any"}`,
+      prompt: 'Does EVERY frame pass the modesty rule?',
+      schema: z.object({ ok: z.boolean(), reason: z.string().default('') }),
+      images: batch.map((b, k) => ({ mimeType: 'image/jpeg', data: b.toString('base64'), label: `Frame ${i + k + 1}:` })),
+      videoId,
+      maxOutputTokens: 300,
+    }).catch(() => undefined);
+    if (r && !r.data.ok) return r.data.reason || 'immodest frame';
+  }
+  return undefined;
 }

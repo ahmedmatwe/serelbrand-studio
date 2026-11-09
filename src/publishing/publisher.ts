@@ -58,6 +58,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     // A pack with one broken Short: upload the good ones, hold the broken one back.
     const held = packExclusions(this.ctx, videoId);
     if (render?.data.shorts && held.length) render.data.shorts = render.data.shorts.filter((sh) => !(sh.scenes ?? []).some((n) => held.includes(n)));
+    if (render?.data.packOnly && !render.data.shorts?.length) throw new PublishBlockedError('Every Short of this pack is held back');
     const pack = Boolean(render?.data.packOnly && render.data.shorts?.length);
     // YouTube's free API quota (~10,000 units/day, 1,600 per upload) allows ~6 uploads per Pacific day.
     // Never start a batch that would hit the limit half-way: the video stays approved and the next cycle uploads it.
