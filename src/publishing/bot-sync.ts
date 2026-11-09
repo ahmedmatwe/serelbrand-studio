@@ -72,8 +72,8 @@ export function liveReport(live: Live[], followers: { youtube?: number; facebook
 }
 
 /** Video list for "فيديو": recent productions' Shorts with status and Telegram file_id. */
-export function videoList(ctx: AgentContext, now: Date): { title: string; status: string; icon: string; file_id?: string }[] {
-  const items: { title: string; status: string; icon: string; file_id?: string; at: string }[] = [];
+export function videoList(ctx: AgentContext, now: Date, queued: { asset: string; title: string; publishAt: string }[] = []): { title: string; status: string; icon: string; file_id?: string; asset?: string }[] {
+  const items: { title: string; status: string; icon: string; file_id?: string; asset?: string; at: string }[] = [];
   for (const a of ctx.repos.artifacts.listKind<{ shorts: TgVideo[] }>('telegram_videos')) {
     if (now.getTime() - new Date(a.created_at).getTime() > 4 * 86_400_000) continue;
     for (const v of a.data.shorts) {
@@ -85,12 +85,20 @@ export function videoList(ctx: AgentContext, now: Date): { title: string; status
       });
     }
   }
+  // Shorts still waiting in the Facebook/Instagram queue (scheduled), even if they were never sent to Telegram:
+  // the bot fetches the file from GitHub when you pick one.
+  for (const q of queued) {
+    const same = items.find((x) => x.title.replace(/\s*#Shorts$/, '') === q.title.replace(/\s*#Shorts$/, ''));
+    if (same) { same.asset ??= q.asset; continue; }
+    const future = new Date(q.publishAt) > now;
+    items.push({ title: q.title, asset: q.asset, at: q.publishAt, icon: future ? '⏰' : '✅', status: future ? `هينزل ${cairoTime(q.publishAt, now)}` : `نزل ${cairoTime(q.publishAt, now)}` });
+  }
   // Scheduled first (soonest first), then the newest published.
   return items.sort((a, b) => Number(b.icon === '⏰') - Number(a.icon === '⏰') || (a.icon === '⏰' ? a.at.localeCompare(b.at) : b.at.localeCompare(a.at))).map(({ at: _, ...x }) => x);
 }
 
 /** Builds everything and pushes it to the Worker. No-op without BOT_URL / BOT_INGEST_SECRET. */
-export async function syncBot(ctx: AgentContext, src: LiveStats, now = new Date(), extra: { messages?: string[] } = {}): Promise<string> {
+export async function syncBot(ctx: AgentContext, src: LiveStats, now = new Date(), extra: { messages?: string[]; sendReport?: boolean } = {}): Promise<string> {
   const url = process.env.BOT_URL, secret = process.env.BOT_INGEST_SECRET;
   if (!url || !secret) return 'bot not connected';
   const posts = allPosts(ctx);
@@ -99,12 +107,52 @@ export async function syncBot(ctx: AgentContext, src: LiveStats, now = new Date(
   const body = {
     report: liveReport(live, { youtube: yc?.subscribers, facebook: fol?.facebook, instagram: fol?.instagram }),
     reportAt: cairoTime(now.toISOString(), now),
-    videos: videoList(ctx, now),
+    videos: videoList(ctx, now, await queuedShorts().catch(() => [])),
     alerts: viralAlerts(live, posts, now),
-    messages: extra.messages ?? [],
+    messages: [...(extra.messages ?? [])],
   };
   // Until Telegram can reach the Worker (a new workers.dev address can take hours to resolve), retry the link.
   await fetch(`${url.replace(/\/$/, '')}/setup`, { method: 'POST', headers: { authorization: `Bearer ${secret}` } }).catch(() => undefined);
+  if (extra.sendReport) body.messages.push(`${body.report}\n\n🕐 ${body.reportAt}`);
   const res = await fetch(`${url.replace(/\/$/, '')}/ingest`, { method: 'POST', headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   return `bot sync: HTTP ${res.status}, ${live.length} live numbers, ${body.videos.length} videos, ${body.alerts.length} alert candidates`;
+}
+
+/** Shorts waiting in the social queue (video asset name + title + time), read from its JSON tickets. */
+async function queuedShorts(): Promise<{ asset: string; title: string; publishAt: string }[]> {
+  const { socialFromEnv } = await import('./social.ts');
+  const s = socialFromEnv({ META_PAGE_ID: process.env.META_PAGE_ID, META_PAGE_TOKEN: process.env.META_PAGE_TOKEN, META_GRAPH_VERSION: 'v27.0' });
+  if (!s) return [];
+  const assets = await s.queue.assets();
+  const out: { asset: string; title: string; publishAt: string }[] = [];
+  for (const a of assets.filter((x) => x.name.endsWith('.mp4.json'))) {
+    const t = JSON.parse((await s.queue.download(a.id)).toString('utf8')) as { title: string; publishAt: string; video: string };
+    out.push({ asset: t.video, title: t.title, publishAt: t.publishAt });
+  }
+  return out;
+}
+
+/** Sends chosen queued Shorts (by asset name) to the owner's Telegram chat — used when the bot has no copy yet. */
+export async function sendQueuedVideos(names: string[], tmpDir: string): Promise<string[]> {
+  const { socialFromEnv } = await import('./social.ts');
+  const { telegramFromEnv } = await import('./telegram.ts');
+  const { writeFileSync, rmSync } = await import('node:fs');
+  const s = socialFromEnv({ META_PAGE_ID: process.env.META_PAGE_ID, META_PAGE_TOKEN: process.env.META_PAGE_TOKEN, META_GRAPH_VERSION: 'v27.0' });
+  const tg = telegramFromEnv();
+  if (!s || !tg) return ['not connected'];
+  const assets = await s.queue.assets();
+  const log: string[] = [];
+  for (const name of names) {
+    const v = assets.find((a) => a.name === name);
+    const ticket = assets.find((a) => a.name === `${name}.json`);
+    if (!v) { log.push(`missing ${name}`); continue; }
+    const t = ticket ? (JSON.parse((await s.queue.download(ticket.id)).toString('utf8')) as { title: string; publishAt: string }) : { title: name, publishAt: '' };
+    const file = `${tmpDir}/${name}`;
+    writeFileSync(file, await s.queue.download(v.id));
+    const future = t.publishAt && new Date(t.publishAt) > new Date();
+    await tg.video(file, `🎬 ${t.title}\n${future ? `⏰ هينزل ${cairoTime(t.publishAt)}` : '✅ نزل'}`);
+    rmSync(file, { force: true });
+    log.push(`sent ${name}`);
+  }
+  return log;
 }

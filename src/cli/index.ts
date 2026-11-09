@@ -20,7 +20,7 @@ import { loadAuth, readClientJson, runLoopbackFlow, saveAuth, TokenSource } from
 import { RealYouTube } from '../providers/youtube/youtube.ts';
 import { YOUTUBE_AUTH_FILE } from '../core/config.ts';
 import { acquireLock, liveStats, releaseLock, runCycle } from '../workflows/autopilot.ts';
-import { syncBot } from '../publishing/bot-sync.ts';
+import { sendQueuedVideos, syncBot } from '../publishing/bot-sync.ts';
 import { startDashboard } from '../dashboard/server.ts';
 import { processQueue, readPosted, socialFromEnv } from '../publishing/social.ts';
 import { telegramFromEnv } from '../publishing/telegram.ts';
@@ -89,7 +89,7 @@ async function main() {
       url: { type: 'string' }, 'source-title': { type: 'string' }, date: { type: 'string' }, note: { type: 'string' },
       visibility: { type: 'string' }, 'publish-at': { type: 'string' }, 'accept-risks': { type: 'boolean' }, hours: { type: 'string' },
       by: { type: 'string', default: process.env.USER ?? 'human' },
-      render: { type: 'boolean' }, preview: { type: 'boolean' }, client: { type: 'string' }, check: { type: 'boolean' },
+      render: { type: 'boolean' }, preview: { type: 'boolean' }, client: { type: 'string' }, check: { type: 'boolean' }, 'send-report': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -148,9 +148,16 @@ async function main() {
         if (tgc && log.length) await tgc.send(log.map((l) => l.replace(/^facebook:/, '📘 فيسبوك:').replace(/^instagram:/, '📸 إنستجرام:').replace(/ posted /, ' اتنشر ').replace(/ FAILED /, ' فشل ')).join('\n')).catch(() => {});
         return out(log.length ? log.join('\n') : 'Nothing due.');
       }
+      case 'bot:videos': {
+        // The bot asked for Shorts it has no Telegram copy of: fetch them from the queue and send them.
+        // Only plain queue file names (time__id__short-N.mp4) are accepted.
+        const names = (positionals[1] ?? '').split(',').map((x) => x.trim()).filter((x) => /^[\w.-]{1,120}\.mp4$/.test(x)).slice(0, 10);
+        return out((await sendQueuedVideos(names, resolve(ctx.config.rootDir, 'data'))).join('\n'));
+      }
       case 'bot:sync': {
         // Hourly (social.yml): live report, video list and viral alerts for the Telegram assistant.
-        return out(await syncBot(ctx, liveStats(ctx)));
+        // --send-report: someone asked the bot for «تقرير» → the fresh report also goes straight to the chat.
+        return out(await syncBot(ctx, liveStats(ctx), new Date(), { sendReport: process.argv.includes('--send-report') }));
       }
       case 'dashboard': {
         const d = await startDashboard(ctx);

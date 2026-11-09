@@ -32,13 +32,30 @@ async function videosMenu(env) {
   return say(env, `🎬 الفيديوهات (${list.length}):\n\n${lines.join('\n')}\n\nاختار اللي عايز تشوفه 👇`, { reply_markup: { inline_keyboard: rows } });
 }
 
+/** Starts the GitHub "bot" workflow (fresh report, or fetching videos the bot has no copy of yet). */
+async function dispatch(env, inputs = {}) {
+  if (!env.GH_TOKEN) return false;
+  const r = await fetch('https://api.github.com/repos/ahmedmatwe/serelbrand-studio/actions/workflows/bot.yml/dispatches', {
+    method: 'POST', headers: { authorization: `Bearer ${env.GH_TOKEN}`, accept: 'application/vnd.github+json', 'user-agent': 'ser-mobile-bot', 'content-type': 'application/json' },
+    body: JSON.stringify({ ref: 'main', inputs }),
+  }).catch(() => undefined);
+  return Boolean(r && r.status === 204);
+}
+
 async function sendVideos(env, which) {
   const list = JSON.parse((await env.BOT.get('videos')) || '[]');
   const chosen = which === 'all' ? list : [list[Number(which)]].filter(Boolean);
+  const fetchLater = [];
   for (const v of chosen) {
     const caption = `${v.icon || '🎬'} ${v.title}\n${v.status}`;
     const r = v.file_id ? await tg(env, 'sendVideo', { chat_id: env.CHAT_ID, video: v.file_id, caption, supports_streaming: true }) : { ok: false };
-    if (!r.ok) await say(env, `${caption}\n(الفيديو مش متاح للإرسال${v.url ? `: ${v.url}` : ''})`);
+    if (r.ok) continue;
+    if (v.asset) fetchLater.push(v.asset);
+    else await say(env, `${caption}\n(الفيديو ده مش متاح للإرسال)`);
+  }
+  if (fetchLater.length) {
+    const ok = await dispatch(env, { videos: fetchLater.join(',') });
+    await say(env, ok ? `⏳ بجيبلك ${fetchLater.length === 1 ? 'الفيديو' : `${fetchLater.length} فيديوهات`} — هيوصل خلال دقيقة أو اتنين.` : 'الفيديو ده محتاج يتجاب من GitHub والربط لسه مش متفعّل.');
   }
 }
 
@@ -63,7 +80,10 @@ export default {
       if (/تقرير|احصا|مشاهد|متابع|لايك|report|stats/.test(t)) {
         const rep = await env.BOT.get('report');
         const at = await env.BOT.get('report_at');
-        await say(env, rep ? `${rep}${at ? `\n\n🕐 آخر تحديث: ${at}` : ''}` : 'التقرير لسه بيتجهز — هيبقى جاهز خلال ساعة.');
+        // Ask GitHub (where the platform keys live) for fresh numbers now; they arrive in about a minute.
+        const fresh = await dispatch(env, { report: 'true' });
+        const tail = fresh ? '\n\n⏳ بجيبلك أحدث الأرقام دلوقتي — هتوصلك خلال دقيقة.' : '';
+        await say(env, rep ? `${rep}${at ? `\n\n🕐 آخر تحديث: ${at}` : ''}${tail}` : (fresh ? '⏳ بجهزلك التقرير — هيوصلك خلال دقيقة.' : 'التقرير بيتجهز — هيوصلك قريب.'));
       } else if (/فيديو|فديو|فيديوهات|مجدول|video/.test(t)) {
         await videosMenu(env);
       } else {

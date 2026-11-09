@@ -1,0 +1,64 @@
+# On-demand fresh report for the Telegram assistant: the bot (Cloudflare Worker) starts this when you write
+# «تقرير»; it reads live numbers from YouTube / Facebook / Instagram and sends the report to your chat (~1 min).
+name: bot
+
+on:
+  workflow_dispatch:
+    inputs:
+      report:
+        description: 'Send a fresh report'
+        type: string
+        default: ''
+      videos:
+        description: 'Queued video asset names to send (comma-separated)'
+        type: string
+        default: ''
+
+concurrency:
+  group: bot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DRY_RUN: 'false'
+      DATABASE_URL: 'sqlite:data/studio.db'
+      YOUTUBE_PROVIDER: real
+      YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+      YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+      YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+      META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+      META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
+      META_IG_USER_ID: ${{ secrets.META_IG_USER_ID }}
+      GITHUB_TOKEN: ${{ github.token }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      BOT_URL: ${{ secrets.BOT_URL }}
+      BOT_INGEST_SECRET: ${{ secrets.BOT_INGEST_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+      - name: Latest state (read-only)
+        run: |
+          mkdir -p data
+          git fetch -q origin state && git show origin/state:studio.db > data/studio.db || true
+      - name: Chosen videos → Telegram
+        if: inputs.videos != ''
+        # The input is passed as data (env), never pasted into the shell command.
+        env:
+          VIDEOS: ${{ inputs.videos }}
+        run: node --no-warnings src/cli/index.ts bot:videos "$VIDEOS"
+      - name: Fresh report → Telegram
+        if: inputs.report != ''
+        run: node --no-warnings src/cli/index.ts bot:sync --send-report
