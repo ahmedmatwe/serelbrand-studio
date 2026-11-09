@@ -50,7 +50,7 @@ printf '' | pbcopy
 
 # Link Telegram → bot. A brand-new workers.dev address can take a while to resolve for Telegram; if so, the
 # autopilot retries this every hour by itself (and the bot greets you the moment it works).
-SETUP=$(curl -s -X POST "$URL/setup" -H "authorization: Bearer $INGEST")
+SETUP=$(curl -s -X POST "$URL/setup?force=1" -H "authorization: Bearer $INGEST")
 if echo "$SETUP" | grep -q '"ok":true'; then echo "✓ تليجرام اتربط بالبوت"; else echo "⏳ تليجرام لسه مش شايف عنوان البوت الجديد — هيتربط لوحده خلال ساعة أو اتنين وهيبعتلك رسالة ترحيب"; fi
 curl -s -X POST "$URL/ingest" -H "authorization: Bearer $INGEST" -H 'content-type: application/json' \
   -d '{"messages":["✅ اتربطت! اكتبلي «تقرير» أو «فيديو» في أي وقت، ولو فيديو ضرب مشاهدات هنبهك لوحدي."]}' > /dev/null

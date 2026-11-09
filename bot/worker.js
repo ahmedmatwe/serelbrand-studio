@@ -95,7 +95,8 @@ export default {
     // --- Self-registration of the Telegram webhook (retried hourly until Telegram can reach us) ---------
     if (url.pathname === '/setup') {
       if (req.headers.get('authorization') !== `Bearer ${env.INGEST_SECRET}`) return new Response('forbidden', { status: 403 });
-      if (await env.BOT.get('webhook_ok')) return json({ ok: true, already: true });
+      // ?force=1 (from the setup script) re-registers even if linked before, e.g. after the secrets changed.
+      if (!url.searchParams.has('force') && await env.BOT.get('webhook_ok')) return json({ ok: true, already: true });
       const r = await tg(env, 'setWebhook', { url: `${url.origin}/telegram`, secret_token: env.WEBHOOK_SECRET, allowed_updates: ['message', 'callback_query'] });
       if (r.ok) { await env.BOT.put('webhook_ok', '1'); await say(env, HELP); }
       return json(r);
