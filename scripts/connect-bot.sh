@@ -38,15 +38,6 @@ printf %s "$CHAT"   | $W secret put CHAT_ID > /dev/null
 printf %s "$INGEST" | $W secret put INGEST_SECRET > /dev/null
 printf %s "$HOOK"   | $W secret put WEBHOOK_SECRET > /dev/null
 
-# A brand-new workers.dev address can take a few minutes to resolve for Telegram: retry for ~5 minutes.
-for i in $(seq 1 20); do
-  R=$(curl -s "https://api.telegram.org/bot$TOKEN/setWebhook" --data-urlencode "url=$URL/telegram" --data-urlencode "secret_token=$HOOK" --data-urlencode 'allowed_updates=["message","callback_query"]')
-  echo "$R" | grep -q '"ok":true' && break
-  echo "… تليجرام لسه مش شايف البوت ($(echo "$R" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("description",""))' 2>/dev/null)) — هحاول تاني بعد 15 ثانية ($i/20)"
-  sleep 15
-done
-echo "$R" | grep -q '"ok":true' || { echo "✗ ربط تليجرام بالبوت فشل: $R"; exit 1; }
-echo "✓ تليجرام اتربط بالبوت"
 
 printf %s "$TOKEN"  | gh secret set TELEGRAM_BOT_TOKEN -R "$REPO"
 gh secret set TELEGRAM_CHAT_ID -R "$REPO" -b "$CHAT"
@@ -54,6 +45,10 @@ gh secret set BOT_URL -R "$REPO" -b "$URL"
 printf %s "$INGEST" | gh secret set BOT_INGEST_SECRET -R "$REPO"
 printf '' | pbcopy
 
+# Link Telegram → bot. A brand-new workers.dev address can take a while to resolve for Telegram; if so, the
+# autopilot retries this every hour by itself (and the bot greets you the moment it works).
+SETUP=$(curl -s -X POST "$URL/setup" -H "authorization: Bearer $INGEST")
+if echo "$SETUP" | grep -q '"ok":true'; then echo "✓ تليجرام اتربط بالبوت"; else echo "⏳ تليجرام لسه مش شايف عنوان البوت الجديد — هيتربط لوحده خلال ساعة أو اتنين وهيبعتلك رسالة ترحيب"; fi
 curl -s -X POST "$URL/ingest" -H "authorization: Bearer $INGEST" -H 'content-type: application/json' \
   -d '{"messages":["✅ اتربطت! اكتبلي «تقرير» أو «فيديو» في أي وقت، ولو فيديو ضرب مشاهدات هنبهك لوحدي."]}' > /dev/null
 echo "✓ البوت شغال على $URL — بص على تليجرام"

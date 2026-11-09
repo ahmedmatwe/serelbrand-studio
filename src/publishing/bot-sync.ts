@@ -103,6 +103,8 @@ export async function syncBot(ctx: AgentContext, src: LiveStats, now = new Date(
     alerts: viralAlerts(live, posts, now),
     messages: extra.messages ?? [],
   };
+  // Until Telegram can reach the Worker (a new workers.dev address can take hours to resolve), retry the link.
+  await fetch(`${url.replace(/\/$/, '')}/setup`, { method: 'POST', headers: { authorization: `Bearer ${secret}` } }).catch(() => undefined);
   const res = await fetch(`${url.replace(/\/$/, '')}/ingest`, { method: 'POST', headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   return `bot sync: HTTP ${res.status}, ${live.length} live numbers, ${body.videos.length} videos, ${body.alerts.length} alert candidates`;
 }
