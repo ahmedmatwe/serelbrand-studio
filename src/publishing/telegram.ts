@@ -21,8 +21,9 @@ export class Telegram {
   }
 
   /** Sends a video file (≤ 50 MB for bots) that plays inline in the chat. */
-  async video(path: string, caption: string): Promise<void> {
-    if (!existsSync(path)) return this.send(`${caption}\n(الفيديو مش موجود: ${basename(path)})`);
+  /** Returns Telegram's file_id, so the bot can re-send the same video later without uploading it again. */
+  async video(path: string, caption: string): Promise<string | undefined> {
+    if (!existsSync(path)) { await this.send(`${caption}\n(الفيديو مش موجود: ${basename(path)})`); return undefined; }
     const form = new FormData();
     form.append('chat_id', this.o.chatId);
     form.append('caption', caption.slice(0, 1000));
@@ -30,6 +31,8 @@ export class Telegram {
     form.append('video', new Blob([new Uint8Array(readFileSync(path))], { type: 'video/mp4' }), basename(path));
     const res = await this.f(this.url('sendVideo'), { method: 'POST', body: form });
     if (!res.ok) throw new Error(`Telegram sendVideo: HTTP ${res.status}`);
+    const j = (await res.json().catch(() => ({}))) as { result?: { video?: { file_id?: string }; document?: { file_id?: string } } };
+    return j.result?.video?.file_id ?? j.result?.document?.file_id;
   }
 }
 

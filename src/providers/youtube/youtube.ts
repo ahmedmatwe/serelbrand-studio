@@ -153,6 +153,14 @@ export class RealYouTube implements YouTubeProvider {
     return { youtubeVideoId: videoId, visibility: req.visibility, publishAt: req.publishAt, warnings };
   }
 
+  /** Channel subscribers and total views (Data API). */
+  async channelStats(): Promise<{ subscribers: number; views: number }> {
+    const res = await this.o.fetchImpl(`${API}/youtube/v3/channels?part=statistics&mine=true`, { headers: await this.auth() });
+    if (!res.ok) await this.fail(res, 'channels.statistics');
+    const st = ((await res.json()) as { items?: { statistics: Record<string, string> }[] }).items?.[0]?.statistics ?? {};
+    return { subscribers: Number(st.subscriberCount ?? 0), views: Number(st.viewCount ?? 0) };
+  }
+
   /** Real-time view/like/comment counters (Data API videos.list, 1 quota unit per 50 videos). */
   async statistics(ids: string[]): Promise<Record<string, { views: number; likes: number; comments: number }>> {
     const out: Record<string, { views: number; likes: number; comments: number }> = {};

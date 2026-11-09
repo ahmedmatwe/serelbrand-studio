@@ -136,6 +136,7 @@ export interface YouTubeProvider {
   metrics(youtubeVideoId: string, hoursSincePublish: number): Promise<Record<string, number>>;
   /** Real-time public counters for several videos (Data API, no lag). */
   statistics?(ids: string[]): Promise<Record<string, { views: number; likes: number; comments: number }>>;
+  channelStats?(): Promise<{ subscribers: number; views: number }>;
 }
 
 export class MockYouTube implements YouTubeProvider {

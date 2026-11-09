@@ -1,0 +1,8 @@
+name = "ser-mobile-bot"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+# KV store for the latest report / video list / sent alerts. The id is filled in by scripts/connect-bot.sh.
+[[kv_namespaces]]
+binding = "BOT"
+id = "REPLACE_WITH_KV_ID"

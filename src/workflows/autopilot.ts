@@ -26,6 +26,7 @@ import { writePackage } from '../reports/package.ts';
 import { steps } from './steps.ts';
 import { dailyReport, learnedFamilyWeights, registerPost, runLearning } from '../analytics/learner.ts';
 import { cairoTime, telegramFromEnv, type Telegram } from '../publishing/telegram.ts';
+import { syncBot, type LiveStats } from '../publishing/bot-sync.ts';
 import { readPosted, socialFromEnv } from '../publishing/social.ts';
 import { family, loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
 
@@ -395,6 +396,8 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   if (decisions.length) notify('سر الموبايل: الفريق اتعلّم حاجة جديدة', decisions.join(' · ').slice(0, 600));
 
   if (tg && sent.length) await tg.send(sent.join('\n\n')).catch(() => {});
+  // Keep the Telegram assistant's report / video list / viral alerts fresh.
+  await syncBot(ctx, liveStats(ctx)).catch((err) => log.warn('bot sync failed', { error: (err as Error).message }));
   // Daily stats report on Telegram, once a day from 21:00 Cairo (19:00 UTC).
   const today = now.toISOString().slice(0, 10);
   if (tg && now.getUTCHours() >= 19 && ctx.repos.artifacts.latest<{ date: string }>(null, 'telegram_daily')?.data.date !== today) {
@@ -494,10 +497,26 @@ async function sendShortsToTelegram(ctx: AgentContext, tg: Telegram, videoId: st
     return;
   }
   const ytTimes = pub ? [pub.publishAt, ...(pub.shorts ?? []).map((x) => x.publishAt)] : [];
+  const blocked = produced.autoApproved ? undefined : (produced.autoApproveBlockedBy ?? ['سبب غير معروف'])[0]!.slice(0, 200);
+  const sentVideos: { title: string; file_id?: string; publishAt?: string; blocked?: string }[] = [];
   for (const [i, sh] of render.shorts.entries()) {
-    const status = produced.autoApproved
-      ? `✅ هينزل ${cairoTime(ytTimes[i])} على يوتيوب وفيسبوك وإنستجرام`
-      : `⛔ اتوقف ومش هيتنشر: ${(produced.autoApproveBlockedBy ?? ['سبب غير معروف'])[0]!.slice(0, 200)}`;
-    await tg.video(sh.path, `🎬 ${sh.title}\n${status}\nمدته ${Math.round(sh.durationSec)} ثانية`);
+    const status = blocked ? `⛔ اتوقف ومش هيتنشر: ${blocked}` : `✅ هينزل ${cairoTime(ytTimes[i])} على يوتيوب وفيسبوك وإنستجرام`;
+    const fileId = await tg.video(sh.path, `🎬 ${sh.title}\n${status}\nمدته ${Math.round(sh.durationSec)} ثانية`);
+    sentVideos.push({ title: sh.title, file_id: fileId, publishAt: blocked ? undefined : ytTimes[i] ?? undefined, blocked });
   }
+  // The assistant bot re-sends these on request ("فيديو") by file_id, without uploading again.
+  ctx.repos.artifacts.save({ videoId, kind: 'telegram_videos', agent: 'autopilot', data: { shorts: sentVideos } });
+}
+
+/** Live numbers for the assistant bot from the connected platforms. */
+export function liveStats(ctx: AgentContext): LiveStats {
+  const yt = ctx.providers.youtube;
+  const social = socialFromEnv(ctx.config.env);
+  return {
+    youtubeVideos: yt.statistics ? (ids) => yt.statistics!(ids) : undefined,
+    youtubeChannel: yt.channelStats ? () => yt.channelStats!() : undefined,
+    facebook: social ? (id) => social.meta.facebookStats(id) : undefined,
+    instagram: social ? (id) => social.meta.instagramStats(id) : undefined,
+    followers: social ? () => social.meta.followers() : undefined,
+  };
 }

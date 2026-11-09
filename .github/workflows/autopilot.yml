@@ -62,6 +62,8 @@ jobs:
       # Telegram reporting bot (videos + notifications); empty = off
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      BOT_URL: ${{ secrets.BOT_URL }}
+      BOT_INGEST_SECRET: ${{ secrets.BOT_INGEST_SECRET }}
     steps:
       - uses: actions/checkout@v4
         with:

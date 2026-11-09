@@ -19,7 +19,8 @@ import { readFileSync } from 'node:fs';
 import { loadAuth, readClientJson, runLoopbackFlow, saveAuth, TokenSource } from '../providers/youtube/oauth.ts';
 import { RealYouTube } from '../providers/youtube/youtube.ts';
 import { YOUTUBE_AUTH_FILE } from '../core/config.ts';
-import { acquireLock, releaseLock, runCycle } from '../workflows/autopilot.ts';
+import { acquireLock, liveStats, releaseLock, runCycle } from '../workflows/autopilot.ts';
+import { syncBot } from '../publishing/bot-sync.ts';
 import { startDashboard } from '../dashboard/server.ts';
 import { processQueue, readPosted, socialFromEnv } from '../publishing/social.ts';
 import { telegramFromEnv } from '../publishing/telegram.ts';
@@ -146,6 +147,10 @@ async function main() {
         const tgc = telegramFromEnv();
         if (tgc && log.length) await tgc.send(log.map((l) => l.replace(/^facebook:/, '📘 فيسبوك:').replace(/^instagram:/, '📸 إنستجرام:').replace(/ posted /, ' اتنشر ').replace(/ FAILED /, ' فشل ')).join('\n')).catch(() => {});
         return out(log.length ? log.join('\n') : 'Nothing due.');
+      }
+      case 'bot:sync': {
+        // Hourly (social.yml): live report, video list and viral alerts for the Telegram assistant.
+        return out(await syncBot(ctx, liveStats(ctx)));
       }
       case 'dashboard': {
         const d = await startDashboard(ctx);

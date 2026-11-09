@@ -1,0 +1,92 @@
+/**
+ * "سر الموبايل" Telegram assistant — Cloudflare Worker (free, always on, replies instantly).
+ *
+ *  /telegram  ← Telegram webhook: the owner writes "تقرير" (report), "فيديو" (scheduled videos as buttons → the
+ *               chosen one or all arrive as playable videos), anything else → help. Only CHAT_ID is answered.
+ *  /ingest    ← the autopilot (GitHub Actions) pushes the latest report, the video list (Telegram file_ids, so
+ *               videos are re-sent without re-uploading) and alerts (e.g. a video going viral).
+ *
+ * Bindings: KV namespace BOT. Secrets: TELEGRAM_BOT_TOKEN, CHAT_ID, INGEST_SECRET, WEBHOOK_SECRET.
+ */
+const json = (x, status = 200) => new Response(JSON.stringify(x), { status, headers: { 'content-type': 'application/json' } });
+
+async function tg(env, method, body) {
+  const r = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  return r.json();
+}
+const say = (env, text, extra = {}) => tg(env, 'sendMessage', { chat_id: env.CHAT_ID, text: text.slice(0, 4000), disable_web_page_preview: true, ...extra });
+
+const HELP = 'أهلاً 👋 أنا مساعد قناة سر الموبايل.\n\n' +
+  '📊 اكتب «تقرير» — المشاهدات واللايكات والمتابعين على يوتيوب وفيسبوك وإنستجرام\n' +
+  '🎬 اكتب «فيديو» — الفيديوهات المجدولة والجديدة، تختار واحد أو الكل\n' +
+  '🔥 ولو فيديو ضرب مشاهدات عالية هبعتلك تنبيه لوحدي في أي وقت';
+
+const norm = (t) => (t || '').trim().replace(/[إأآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
+
+async function videosMenu(env) {
+  const list = JSON.parse((await env.BOT.get('videos')) || '[]');
+  if (!list.length) return say(env, 'مفيش فيديوهات جاهزة دلوقتي — أول ما الشورتس الجاية تجهز هتلاقيها هنا.');
+  const rows = list.slice(0, 12).map((v, i) => [{ text: `${v.icon || '🎬'} ${v.title}`.slice(0, 60), callback_data: `v:${i}` }]);
+  rows.push([{ text: '📦 ابعتلي الكل', callback_data: 'v:all' }]);
+  const lines = list.slice(0, 12).map((v) => `${v.icon || '🎬'} ${v.title}\n     ${v.status}`);
+  return say(env, `🎬 الفيديوهات (${list.length}):\n\n${lines.join('\n')}\n\nاختار اللي عايز تشوفه 👇`, { reply_markup: { inline_keyboard: rows } });
+}
+
+async function sendVideos(env, which) {
+  const list = JSON.parse((await env.BOT.get('videos')) || '[]');
+  const chosen = which === 'all' ? list : [list[Number(which)]].filter(Boolean);
+  for (const v of chosen) {
+    const caption = `${v.icon || '🎬'} ${v.title}\n${v.status}`;
+    const r = v.file_id ? await tg(env, 'sendVideo', { chat_id: env.CHAT_ID, video: v.file_id, caption, supports_streaming: true }) : { ok: false };
+    if (!r.ok) await say(env, `${caption}\n(الفيديو مش متاح للإرسال${v.url ? `: ${v.url}` : ''})`);
+  }
+}
+
+export default {
+  async fetch(req, env) {
+    const url = new URL(req.url);
+    if (req.method !== 'POST') return new Response('ok');
+
+    // --- Telegram webhook -------------------------------------------------------------------------
+    if (url.pathname === '/telegram') {
+      if (req.headers.get('x-telegram-bot-api-secret-token') !== env.WEBHOOK_SECRET) return new Response('forbidden', { status: 403 });
+      const u = await req.json();
+      const chat = String(u.message?.chat?.id ?? u.callback_query?.message?.chat?.id ?? '');
+      if (chat !== String(env.CHAT_ID)) return json({ ok: true }); // only the owner
+      if (u.callback_query) {
+        await tg(env, 'answerCallbackQuery', { callback_query_id: u.callback_query.id, text: 'ثواني وهيوصلك…' });
+        const d = u.callback_query.data || '';
+        if (d.startsWith('v:')) await sendVideos(env, d.slice(2));
+        return json({ ok: true });
+      }
+      const t = norm(u.message?.text);
+      if (/تقرير|احصا|مشاهد|متابع|لايك|report|stats/.test(t)) {
+        const rep = await env.BOT.get('report');
+        const at = await env.BOT.get('report_at');
+        await say(env, rep ? `${rep}${at ? `\n\n🕐 آخر تحديث: ${at}` : ''}` : 'التقرير لسه بيتجهز — هيبقى جاهز خلال ساعة.');
+      } else if (/فيديو|فديو|فيديوهات|مجدول|video/.test(t)) {
+        await videosMenu(env);
+      } else {
+        await say(env, HELP);
+      }
+      return json({ ok: true });
+    }
+
+    // --- Autopilot → bot ------------------------------------------------------------------------------
+    if (url.pathname === '/ingest') {
+      if (req.headers.get('authorization') !== `Bearer ${env.INGEST_SECRET}`) return new Response('forbidden', { status: 403 });
+      const b = await req.json();
+      if (b.report) { await env.BOT.put('report', b.report); await env.BOT.put('report_at', b.reportAt || ''); }
+      if (Array.isArray(b.videos)) await env.BOT.put('videos', JSON.stringify(b.videos));
+      for (const a of b.alerts || []) {
+        // Each alert once only (the autopilot may resend it every hour).
+        if (await env.BOT.get(`alert:${a.id}`)) continue;
+        await env.BOT.put(`alert:${a.id}`, '1', { expirationTtl: 60 * 60 * 24 * 30 });
+        await say(env, a.text);
+      }
+      for (const m of b.messages || []) await say(env, m);
+      return json({ ok: true });
+    }
+    return new Response('not found', { status: 404 });
+  },
+};

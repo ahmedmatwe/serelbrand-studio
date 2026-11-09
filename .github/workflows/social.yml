@@ -4,7 +4,7 @@ name: social
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '4 5-21 * * *'   # hourly 07:00–23:00 Cairo (posts land a few minutes after their slot; saves Actions minutes)
   workflow_dispatch:
     inputs:
       check:
@@ -31,7 +31,14 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      DATABASE_URL: 'sqlite::memory:'
+      DATABASE_URL: 'sqlite:data/studio.db'
+      YOUTUBE_PROVIDER: real
+      YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+      YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+      YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+      # Telegram assistant (Cloudflare Worker): live report / video list / viral alerts, refreshed hourly
+      BOT_URL: ${{ secrets.BOT_URL }}
+      BOT_INGEST_SECRET: ${{ secrets.BOT_INGEST_SECRET }}
     steps:
       - name: Skip when Facebook/Instagram are not connected
         id: gate
@@ -39,6 +46,8 @@ jobs:
           if [ -z "$META_PAGE_ID" ] || [ -z "$META_PAGE_TOKEN" ]; then echo "connected=false" >> "$GITHUB_OUTPUT"; echo "Meta not connected yet."; else echo "connected=true" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/checkout@v4
         if: steps.gate.outputs.connected == 'true'
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         if: steps.gate.outputs.connected == 'true'
         with:
@@ -46,6 +55,15 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund --ignore-scripts
         if: steps.gate.outputs.connected == 'true'
+      - name: Read the latest state (read-only)
+        if: steps.gate.outputs.connected == 'true'
+        run: |
+          mkdir -p data
+          git fetch -q origin state && git show origin/state:studio.db > data/studio.db || true
       - name: Post due Reels
         if: steps.gate.outputs.connected == 'true'
-        run: mkdir -p data && node --no-warnings src/cli/index.ts social ${{ inputs.check && '--check' || '' }}
+        run: node --no-warnings src/cli/index.ts social ${{ inputs.check && '--check' || '' }}
+      - name: Refresh the Telegram assistant (live numbers, videos, viral alerts)
+        if: steps.gate.outputs.connected == 'true' && env.BOT_URL != ''
+        continue-on-error: true
+        run: node --no-warnings src/cli/index.ts bot:sync

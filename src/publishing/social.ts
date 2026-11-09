@@ -62,6 +62,12 @@ export class MetaClient {
     return { views: opt('views') ?? 0, likes: base.like_count, comments: base.comments_count, shares: opt('shares'), saves: opt('saved'), reach: opt('reach'), ...(err ? { insightsError: err.slice(0, 200) } : {}) };
   }
 
+  /** Followers of the Facebook Page and the Instagram account. */
+  async followers(): Promise<{ facebook?: number; instagram?: number }> {
+    const p = await this.graph(this.o.pageId, { fields: 'followers_count,fan_count,instagram_business_account{followers_count}' }, 'GET');
+    return { facebook: p.followers_count ?? p.fan_count, instagram: p.instagram_business_account?.followers_count };
+  }
+
   /** Instagram professional account linked to the Page. */
   async instagramUser(): Promise<string | undefined> {
     if (this.igUser) return this.igUser;
