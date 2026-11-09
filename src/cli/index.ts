@@ -21,7 +21,7 @@ import { RealYouTube } from '../providers/youtube/youtube.ts';
 import { YOUTUBE_AUTH_FILE } from '../core/config.ts';
 import { acquireLock, releaseLock, runCycle } from '../workflows/autopilot.ts';
 import { startDashboard } from '../dashboard/server.ts';
-import { processQueue, socialFromEnv } from '../publishing/social.ts';
+import { processQueue, readPosted, socialFromEnv } from '../publishing/social.ts';
 import { installSchedule, kickSchedule, removeSchedule, scheduleStatus } from '../workflows/schedule-macos.ts';
 
 const HELP = `
@@ -129,7 +129,16 @@ async function main() {
         if (!social) return out('Facebook/Instagram not connected (META_PAGE_ID / META_PAGE_TOKEN / GITHUB_TOKEN missing) — nothing to do.');
         if (process.argv.includes('--check')) {
           const c = await social.meta.check();
-          return out(`✓ Facebook Page: ${c.page}\n${c.instagram ? `✓ Instagram: @${c.instagram}` : '✗ No Instagram professional account linked to this Page'}`);
+          const lines = [`✓ Facebook Page: ${c.page}`, c.instagram ? `✓ Instagram: @${c.instagram}` : '✗ No Instagram professional account linked to this Page'];
+          // Insights check on the latest posted Reels (proves the analytics permissions work).
+          const posted = await readPosted(social.queue).catch(() => []);
+          for (const plat of ['facebook', 'instagram'] as const) {
+            const last = posted.filter((p) => p.platform === plat).at(-1);
+            if (!last) continue;
+            const st = await (plat === 'facebook' ? social.meta.facebookStats(last.id) : social.meta.instagramStats(last.id)).catch((e: Error) => ({ error: e.message.slice(0, 160) }));
+            lines.push(`${plat} stats for "${last.title}": ${JSON.stringify(st)}`);
+          }
+          return out(lines.join('\n'));
         }
         const log = await processQueue(social.queue, social.meta, new Date(), resolve(ctx.config.rootDir, 'data'));
         return out(log.length ? log.join('\n') : 'Nothing due.');
