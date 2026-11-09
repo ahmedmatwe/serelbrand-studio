@@ -44,19 +44,22 @@ export class MetaClient {
   }
 
   /** Facebook Reel counters (plays from insights when allowed, else likes/comments only). */
-  async facebookStats(id: string): Promise<{ views: number; likes?: number; comments?: number }> {
+  async facebookStats(id: string): Promise<{ views: number; likes?: number; comments?: number; insightsError?: string }> {
     const base = await this.graph(id, { fields: 'likes.summary(true).limit(0),comments.summary(true).limit(0)' }, 'GET').catch(() => ({} as Record<string, any>));
-    const ins = await this.graph(`${id}/video_insights`, { metric: 'blue_reels_play_count' }, 'GET').catch(() => undefined);
+    let err = '';
+    const ins = await this.graph(`${id}/video_insights`, { metric: 'blue_reels_play_count' }, 'GET').catch((e: Error) => { err = e.message; return undefined; });
     const plays = Number(ins?.data?.[0]?.values?.[0]?.value ?? NaN);
-    return { views: Number.isFinite(plays) ? plays : 0, likes: base.likes?.summary?.total_count, comments: base.comments?.summary?.total_count };
+    return { views: Number.isFinite(plays) ? plays : 0, likes: base.likes?.summary?.total_count, comments: base.comments?.summary?.total_count, ...(err ? { insightsError: err.slice(0, 200) } : {}) };
   }
 
   /** Instagram Reel counters (views/shares/saves from insights when allowed, else likes/comments). */
-  async instagramStats(id: string): Promise<{ views: number; likes?: number; comments?: number; shares?: number }> {
+  async instagramStats(id: string): Promise<{ views: number; likes?: number; comments?: number; shares?: number; saves?: number; reach?: number; insightsError?: string }> {
     const base = await this.graph(id, { fields: 'like_count,comments_count' }, 'GET');
-    const ins = await this.graph(`${id}/insights`, { metric: 'views,shares' }, 'GET').catch(() => undefined);
+    let err = '';
+    const ins = await this.graph(`${id}/insights`, { metric: 'views,shares,saved,reach' }, 'GET').catch((e: Error) => { err = e.message; return undefined; });
     const get = (n: string) => Number((ins?.data as { name: string; values: { value: number }[] }[] | undefined)?.find((d) => d.name === n)?.values?.[0]?.value ?? NaN);
-    return { views: Number.isFinite(get('views')) ? get('views') : 0, likes: base.like_count, comments: base.comments_count, shares: Number.isFinite(get('shares')) ? get('shares') : undefined };
+    const opt = (n: string) => (Number.isFinite(get(n)) ? get(n) : undefined);
+    return { views: opt('views') ?? 0, likes: base.like_count, comments: base.comments_count, shares: opt('shares'), saves: opt('saved'), reach: opt('reach'), ...(err ? { insightsError: err.slice(0, 200) } : {}) };
   }
 
   /** Instagram professional account linked to the Page. */
