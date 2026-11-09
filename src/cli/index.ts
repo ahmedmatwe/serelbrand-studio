@@ -87,7 +87,7 @@ async function main() {
       url: { type: 'string' }, 'source-title': { type: 'string' }, date: { type: 'string' }, note: { type: 'string' },
       visibility: { type: 'string' }, 'publish-at': { type: 'string' }, 'accept-risks': { type: 'boolean' }, hours: { type: 'string' },
       by: { type: 'string', default: process.env.USER ?? 'human' },
-      render: { type: 'boolean' }, preview: { type: 'boolean' }, client: { type: 'string' },
+      render: { type: 'boolean' }, preview: { type: 'boolean' }, client: { type: 'string' }, check: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
   });
