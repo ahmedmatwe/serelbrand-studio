@@ -189,3 +189,35 @@ export async function runLearning(ctx: AgentContext, src: MetricsSource, now = n
   for (const p of detectProblems(posts, scored)) log.push(`⚠️ ${p}`);
   return log;
 }
+
+/**
+ * Daily report for the owner (Arabic, plain text): every Short of the last 3 days with its views on each
+ * platform, today's best one, totals per platform, and the team's current decisions.
+ */
+export function dailyReport(ctx: AgentContext, now = new Date()): string {
+  const posts = allPosts(ctx).filter((p) => now.getTime() - new Date(p.publish_at).getTime() < 3 * 86_400_000 && new Date(p.publish_at) <= now);
+  const icon: Record<string, string> = { youtube: '▶️', facebook: '📘', instagram: '📸' };
+  const views = (p: Post) => p.metrics.h72?.views ?? p.metrics.h24?.views;
+  const byTitle = new Map<string, Post[]>();
+  for (const p of posts) { const k = (p.title ?? '').replace(/\s*#Shorts$/, ''); byTitle.set(k, [...(byTitle.get(k) ?? []), p]); }
+  const lines = ['📊 تقرير سر الموبايل اليومي', ''];
+  const totals: Record<string, number> = {};
+  let best: { title: string; v: number } | undefined;
+  for (const [title, ps] of byTitle) {
+    const parts = ps.sort((a, b) => a.platform.localeCompare(b.platform)).map((p) => { const v = views(p); if (v !== undefined) totals[p.platform] = (totals[p.platform] ?? 0) + v; return `${icon[p.platform]} ${v ?? '⏳'}`; });
+    const sum = ps.reduce((a, p) => a + (views(p) ?? 0), 0);
+    if (!best || sum > best.v) best = { title, v: sum };
+    lines.push(`• ${title}`, `   ${parts.join('   ')}`);
+  }
+  if (!byTitle.size) lines.push('لسه مفيش منشورات في آخر 3 أيام.');
+  lines.push('', `الإجمالي: ${Object.entries(totals).map(([k, v]) => `${icon[k]} ${v}`).join('   ') || '⏳ القياس الأول بعد 24 ساعة من النشر'}`);
+  if (best && best.v > 0) lines.push(`🏆 الأحسن: ${best.title} (${best.v} مشاهدة)`);
+  const hours = learnedShortHours(ctx);
+  if (hours) lines.push(`🕒 مواعيد النشر الحالية: ${hours.map((h) => `${((h + 2 + 11) % 12) + 1} ${h + 2 < 12 ? 'ص' : 'م'}`).join(' و ')}`);
+  const w = learnedFamilyWeights(ctx);
+  if (w) { const name: Record<string, string> = { apps: 'التطبيقات', code: 'الأكواد', ios: 'الآيفون', android: 'الأندرويد' }; const top = Object.entries(w).sort((a, b) => b[1] - a[1])[0]!; if (top[1] > 1.05) lines.push(`📈 الأكتر نجاحاً: أسرار ${name[top[0]] ?? top[0]}`); }
+  const lessons = ctx.repos.knowledge.byCategory('lesson').slice(0, 2);
+  if (lessons.length) lines.push('', '📝 آخر دروس الفريق:', ...lessons.map((l) => `- ${l.insight.slice(0, 160)}`));
+  lines.push('', '⏳ = لسه ما اتقاسش (بيتقاس بعد 24 ساعة من النشر)');
+  return lines.join('\n');
+}

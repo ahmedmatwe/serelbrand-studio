@@ -46,3 +46,19 @@ test('autopilot: a daily AI quota stops production until the reset (no burned at
   assert.equal(nextQuotaReset(new Date('2026-11-09T07:00:00Z')), '2026-11-09T08:10:00.000Z');
   assert.equal(nextQuotaReset(new Date('2026-11-09T09:00:00Z')), '2026-11-10T08:10:00.000Z');
 });
+
+test('daily report: every Short with its views per platform, totals and the best one', async () => {
+  const { testContext } = await import('../helpers.ts');
+  const { registerPost, dailyReport } = await import('../../src/analytics/learner.ts');
+  const ctx = testContext();
+  const at = '2026-11-09T11:00:00.000Z';
+  registerPost(ctx, { platform: 'youtube', external_id: 'y1', title: 'كود سري #Shorts', publish_at: at });
+  registerPost(ctx, { platform: 'instagram', external_id: 'i1', title: 'كود سري', publish_at: at });
+  (ctx as any).db.run(`UPDATE posts SET metrics = '{"h24":{"views":120}}' WHERE id = 'instagram:i1'`);
+  const r = dailyReport(ctx, new Date('2026-11-10T19:30:00Z'));
+  assert.match(r, /• كود سري/);
+  assert.match(r, /📸 120/);
+  assert.match(r, /▶️ ⏳/);
+  assert.match(r, /🏆 الأحسن: كود سري \(120 مشاهدة\)/);
+  ctx.close();
+});

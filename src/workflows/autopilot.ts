@@ -24,7 +24,8 @@ import { qcBlockers, qualityChecklist } from '../reports/qc.ts';
 import { quotaResetSeconds } from '../providers/tts/gemini-tts.ts';
 import { writePackage } from '../reports/package.ts';
 import { steps } from './steps.ts';
-import { learnedFamilyWeights, registerPost, runLearning } from '../analytics/learner.ts';
+import { dailyReport, learnedFamilyWeights, registerPost, runLearning } from '../analytics/learner.ts';
+import { cairoTime, telegramFromEnv, type Telegram } from '../publishing/telegram.ts';
 import { readPosted, socialFromEnv } from '../publishing/social.ts';
 import { family, loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
 
@@ -209,7 +210,10 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
 
 export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise<CycleReport> {
   const now = o.now ?? new Date();
-  const notify = o.notify ?? macNotify;
+  const tg = o.notify ? undefined : telegramFromEnv();
+  const sent: string[] = [];
+  const baseNotify = o.notify ?? macNotify;
+  const notify = (title: string, body: string) => { sent.push(`🔔 ${title}\n${body}`); baseNotify(title, body); };
   const rep: CycleReport = { startedAt: now.toISOString(), published: [], analyticsUpdated: [], produced: null, pendingApprovals: 0, needsFactReview: [], errors: [], blockedAttempts: [] };
   const log = ctx.logger.child('autopilot');
 
@@ -360,6 +364,8 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
             ctx.repos.artifacts.save({ videoId: r.videoId, kind: 'auto_blocked', agent: 'autopilot', data: { blockers } });
           }
         }
+        // Telegram: the owner sees every finished Short right away, with its status and publishing time.
+        if (tg) await sendShortsToTelegram(ctx, tg, r.videoId, rep.produced).catch((err) => rep.errors.push(`telegram: ${(err as Error).message.slice(0, 120)}`));
       }
     } catch (err) {
       rep.errors.push(`production: ${(err as Error).message.slice(0, 300)}`);
@@ -388,6 +394,12 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   const decisions = (rep.learning ?? []).filter((l) => /^(🕒|📈|✂️|⚠️)/.test(l));
   if (decisions.length) notify('سر الموبايل: الفريق اتعلّم حاجة جديدة', decisions.join(' · ').slice(0, 600));
 
+  if (tg && sent.length) await tg.send(sent.join('\n\n')).catch(() => {});
+  // Daily stats report on Telegram, once a day from 21:00 Cairo (19:00 UTC).
+  const today = now.toISOString().slice(0, 10);
+  if (tg && now.getUTCHours() >= 19 && ctx.repos.artifacts.latest<{ date: string }>(null, 'telegram_daily')?.data.date !== today) {
+    await tg.send(dailyReport(ctx, now)).then(() => ctx.repos.artifacts.save({ videoId: null, kind: 'telegram_daily', agent: 'autopilot', data: { date: today } })).catch(() => {});
+  }
   writeDailyReport(ctx, rep, now);
   ctx.audit.record({ actor: 'autopilot', action: 'cycle.completed', details: { published: rep.published.length, produced: rep.produced?.videoId, errors: rep.errors.length } });
   log.info('cycle done', { published: rep.published.length, analytics: rep.analyticsUpdated.length, produced: rep.produced?.videoId ?? null, errors: rep.errors.length });
@@ -471,4 +483,21 @@ export function nextQuotaReset(now: Date): string {
   const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 8, 10));
   if (t <= now) t.setUTCDate(t.getUTCDate() + 1);
   return t.toISOString();
+}
+
+/** Sends each rendered Short of a production to Telegram as a video, captioned with title + status + times. */
+async function sendShortsToTelegram(ctx: AgentContext, tg: Telegram, videoId: string, produced: NonNullable<CycleReport['produced']>) {
+  const render = ctx.repos.artifacts.latest<RenderOutput>(videoId, 'render')?.data;
+  const pub = ctx.repos.artifacts.latest<PublishLog>(videoId, 'publish_log')?.data;
+  if (!render?.shorts?.length) {
+    await tg.send(`⚠️ محاولة إنتاج ما كملتش: ${produced.title.slice(0, 120)}\n${(produced.autoApproveBlockedBy ?? []).slice(0, 2).join('\n')}`);
+    return;
+  }
+  const ytTimes = pub ? [pub.publishAt, ...(pub.shorts ?? []).map((x) => x.publishAt)] : [];
+  for (const [i, sh] of render.shorts.entries()) {
+    const status = produced.autoApproved
+      ? `✅ هينزل ${cairoTime(ytTimes[i])} على يوتيوب وفيسبوك وإنستجرام`
+      : `⛔ اتوقف ومش هيتنشر: ${(produced.autoApproveBlockedBy ?? ['سبب غير معروف'])[0]!.slice(0, 200)}`;
+    await tg.video(sh.path, `🎬 ${sh.title}\n${status}\nمدته ${Math.round(sh.durationSec)} ثانية`);
+  }
 }

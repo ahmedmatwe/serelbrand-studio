@@ -22,6 +22,7 @@ import { YOUTUBE_AUTH_FILE } from '../core/config.ts';
 import { acquireLock, releaseLock, runCycle } from '../workflows/autopilot.ts';
 import { startDashboard } from '../dashboard/server.ts';
 import { processQueue, readPosted, socialFromEnv } from '../publishing/social.ts';
+import { telegramFromEnv } from '../publishing/telegram.ts';
 import { installSchedule, kickSchedule, removeSchedule, scheduleStatus } from '../workflows/schedule-macos.ts';
 
 const HELP = `
@@ -141,6 +142,9 @@ async function main() {
           return out(lines.join('\n'));
         }
         const log = await processQueue(social.queue, social.meta, new Date(), resolve(ctx.config.rootDir, 'data'));
+        // Tell the owner on Telegram what went out (or failed) on Facebook / Instagram.
+        const tgc = telegramFromEnv();
+        if (tgc && log.length) await tgc.send(log.map((l) => l.replace(/^facebook:/, '📘 فيسبوك:').replace(/^instagram:/, '📸 إنستجرام:').replace(/ posted /, ' اتنشر ').replace(/ FAILED /, ' فشل ')).join('\n')).catch(() => {});
         return out(log.length ? log.join('\n') : 'Nothing due.');
       }
       case 'dashboard': {
