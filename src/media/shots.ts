@@ -127,6 +127,10 @@ export function rankRelevant(list: MediaAsset[], query: string, used: Set<string
 /**
  * Channel standard for an Egyptian / Arab family audience: every shot must be modest. Used by every visual check.
  */
+/** Raw production footage that looks amateur on screen (chroma-key plates, tracking markers, watermarks). */
+export const RAW_FOOTAGE = /\b(green ?screen|greenscreen|chroma ?key|chromakey|blue ?screen|tracking ?markers?|mock ?up|mockup|watermark)\b/i;
+export const isRawFootage = (a: MediaAsset) => RAW_FOOTAGE.test((a.tags ?? []).join(' '));
+export const LOOK_RULE = 'LOOK: also reject unfinished production footage — green/blue screens (chroma key), screens with tracking markers or crosses, mockup templates, watermarks, blank or black screens.';
 export const MODESTY_RULE = 'MODESTY (absolute, overrides relevance): reject any image showing revealing or tight clothing — sleeveless or strappy tops, camisoles, bare shoulders, cleavage, bare midriff, shorts or short skirts, swimwear, lingerie, people in bed or bedroom/intimate settings, couples being intimate, dancing, nightclubs, alcohol, gambling or anything suggestive. People are acceptable only when fully and modestly dressed (or only hands/arms in normal sleeves are visible). Prefer shots of phones, screens, hands, objects and places.';
 
 /** Max shots per video checked by vision (each request carries 2 shots × up to 6 small previews). */
@@ -177,7 +181,7 @@ export async function pickByVision(ctx: AgentContext, items: { text: string; can
     const r = await ctx.providers.llm.generateJson({
       task: 'shots.pick',
       tier: 'light',
-      system: MODESTY_RULE + ' You are a strict documentary film editor. Each image is preceded by a label "Shot X — candidate N". For each shot list ALL candidates that fit (and pass the modesty rule), best first, i.e. that show what the narrator says at that moment: the concrete thing named (a price tag, a shirt, a cashier, a factory, the named product or person) or the exact place/action where it happens (a supermarket aisle fits "a price on a supermarket shelf"). Never list a scene unrelated to the sentence (fish, nature, music, random people) — return an empty list when none fits. JSON only.',
+      system: MODESTY_RULE + ' ' + LOOK_RULE + ' You are a strict documentary film editor. Each image is preceded by a label "Shot X — candidate N". For each shot list ALL candidates that fit (and pass the modesty rule), best first, i.e. that show what the narrator says at that moment: the concrete thing named (a price tag, a shirt, a cashier, a factory, the named product or person) or the exact place/action where it happens (a supermarket aisle fits "a price on a supermarket shelf"). Never list a scene unrelated to the sentence (fish, nature, music, random people) — return an empty list when none fits. JSON only.',
       prompt: lines.join('\n') + '\nReturn {"picks":[{"shot":1,"ok":[<candidate numbers that fit, best first>],"why":"…"}]}',
       schema: PickLLM,
       images,
@@ -203,7 +207,7 @@ export async function fetchShotVisuals(ctx: AgentContext, shots: Shot[], o: { ta
     if (!results.has(q)) {
       const vids = await stock.search(q, 'video', { orientation: o.orientation, targetWidth: o.targetWidth, perPage: 12 }).catch(() => []);
       const imgs = vids.length >= 1 ? [] : await stock.search(q, 'image', { orientation: o.orientation, targetWidth: o.targetWidth, perPage: 8 }).catch(() => []);
-      results.set(q, [...vids, ...imgs]);
+      results.set(q, [...vids, ...imgs].filter((a) => !isRawFootage(a)));
     }
     return results.get(q)!;
   };
@@ -334,7 +338,7 @@ export async function modestOnly(ctx: AgentContext, list: MediaAsset[], videoId?
   const r = await ctx.providers.llm.generateJson({
     task: 'shots.modesty',
     tier: 'light',
-    system: `${MODESTY_RULE} For each numbered image say whether it passes. JSON only: {"pass":[image numbers that pass]}`,
+    system: `${MODESTY_RULE} ${LOOK_RULE} For each numbered image say whether it passes. JSON only: {"pass":[image numbers that pass]}`,
     prompt: 'Which images pass the modesty rule?',
     schema: z.object({ pass: z.array(z.number().int()).default([]) }),
     images,
