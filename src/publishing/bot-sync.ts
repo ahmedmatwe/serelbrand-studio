@@ -17,7 +17,7 @@ export interface LiveStats {
 export interface TgVideo { title: string; file_id?: string; publishAt?: string; blocked?: string }
 interface Live { post: Post; views: number; likes: number }
 
-const ICON: Record<string, string> = { youtube: '▶️', facebook: '📘', instagram: '📸' };
+const NAME: Record<string, string> = { youtube: '▶️ يوتيوب', facebook: '📘 فيسبوك', instagram: '📸 إنستجرام' };
 const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)]! : 0; };
 
 /** Live numbers for every post of the last `days` days (pure apart from the injected fetchers). */
@@ -47,7 +47,7 @@ export function viralAlerts(live: Live[], history: Post[], now: Date): { id: str
     // One alert per milestone: 300 → 1k → 5k → 20k → 100k …
     const tier = [300, 1000, 5000, 20000, 100000, 500000].filter((t) => l.views >= t).pop() ?? 300;
     const times = base ? ` (${Math.round(l.views / Math.max(1, base))}× المعتاد)` : '';
-    out.push({ id: `${l.post.id}:${tier}`, text: `🔥 فيديو بيضرب!\n${l.post.title?.replace(/\s*#Shorts$/, '')}\n${ICON[l.post.platform]} ${l.views.toLocaleString('en')} مشاهدة في ${Math.max(1, Math.round(ageH))} ساعة${times}\n👍 ${l.likes} لايك` });
+    out.push({ id: `${l.post.id}:${tier}`, text: `🔥 فيديو بيضرب!\n${l.post.title?.replace(/\s*#Shorts$/, '')}\n${NAME[l.post.platform]}: ${l.views.toLocaleString('en')} مشاهدة في ${Math.max(1, Math.round(ageH))} ساعة${times}\n👍 ${l.likes} لايك` });
   }
   return out;
 }
@@ -55,17 +55,17 @@ export function viralAlerts(live: Live[], history: Post[], now: Date): { id: str
 /** Report text for "تقرير". */
 export function liveReport(live: Live[], followers: { youtube?: number; facebook?: number; instagram?: number }): string {
   const lines = ['📊 تقرير سر الموبايل', ''];
-  lines.push(`👥 المتابعين:  ▶️ ${followers.youtube ?? '—'}   📘 ${followers.facebook ?? '—'}   📸 ${followers.instagram ?? '—'}`, '');
+  lines.push('👥 المتابعين:', `   ▶️ يوتيوب: ${followers.youtube ?? '—'} مشترك`, `   📘 فيسبوك: ${followers.facebook ?? '—'} متابع`, `   📸 إنستجرام: ${followers.instagram ?? '—'} متابع`, '');
   const by = new Map<string, Live[]>();
   for (const l of live) { const k = (l.post.title ?? '').replace(/\s*#Shorts$/, ''); by.set(k, [...(by.get(k) ?? []), l]); }
   const sorted = [...by].sort((a, b) => (b[1][0]!.post.publish_at).localeCompare(a[1][0]!.post.publish_at)).slice(0, 10);
   for (const [title, ls] of sorted) {
-    lines.push(`• ${title}`, `   ${ls.sort((a, b) => a.post.platform.localeCompare(b.post.platform)).map((l) => `${ICON[l.post.platform]} ${l.views} 👁  ${l.likes} 👍`).join('   ')}`);
+    lines.push(`🎬 ${title}`, ...['youtube', 'facebook', 'instagram'].flatMap((pl) => ls.filter((l) => l.post.platform === pl).map((l) => `   ${NAME[pl]}: ${l.views} مشاهدة · ${l.likes} لايك`)), '');
   }
   if (!live.length) lines.push('لسه مفيش أرقام — أول منشورات بتتقاس خلال ساعة من نشرها.');
   const tot = (pl: string, k: 'views' | 'likes') => live.filter((l) => l.post.platform === pl).reduce((a, l) => a + l[k], 0);
   lines.push('', `الإجمالي (آخر 7 أيام):`);
-  for (const pl of ['youtube', 'facebook', 'instagram']) lines.push(`   ${ICON[pl]} ${tot(pl, 'views')} مشاهدة · ${tot(pl, 'likes')} لايك`);
+  for (const pl of ['youtube', 'facebook', 'instagram']) lines.push(`   ${NAME[pl]}: ${tot(pl, 'views')} مشاهدة · ${tot(pl, 'likes')} لايك`);
   const best = [...by].map(([t, ls]) => ({ t, v: ls.reduce((a, l) => a + l.views, 0) })).sort((a, b) => b.v - a.v)[0];
   if (best && best.v > 0) lines.push('', `🏆 الأقوى: ${best.t} (${best.v} مشاهدة على كل المنصات)`);
   return lines.join('\n');

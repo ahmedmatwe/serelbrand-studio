@@ -57,8 +57,8 @@ test('daily report: every Short with its views per platform, totals and the best
   (ctx as any).db.run(`UPDATE posts SET metrics = '{"h24":{"views":120}}' WHERE id = 'instagram:i1'`);
   const r = dailyReport(ctx, new Date('2026-11-10T19:30:00Z'));
   assert.match(r, /• كود سري/);
-  assert.match(r, /📸 120/);
-  assert.match(r, /▶️ ⏳/);
+  assert.match(r, /📸 إنستجرام 120/);
+  assert.match(r, /▶️ يوتيوب ⏳/);
   assert.match(r, /🏆 الأحسن: كود سري \(120 مشاهدة\)/);
   ctx.close();
 });

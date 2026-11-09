@@ -196,7 +196,7 @@ export async function runLearning(ctx: AgentContext, src: MetricsSource, now = n
  */
 export function dailyReport(ctx: AgentContext, now = new Date()): string {
   const posts = allPosts(ctx).filter((p) => now.getTime() - new Date(p.publish_at).getTime() < 3 * 86_400_000 && new Date(p.publish_at) <= now);
-  const icon: Record<string, string> = { youtube: '▶️', facebook: '📘', instagram: '📸' };
+  const icon: Record<string, string> = { youtube: '▶️ يوتيوب', facebook: '📘 فيسبوك', instagram: '📸 إنستجرام' };
   const views = (p: Post) => p.metrics.h72?.views ?? p.metrics.h24?.views;
   const byTitle = new Map<string, Post[]>();
   for (const p of posts) { const k = (p.title ?? '').replace(/\s*#Shorts$/, ''); byTitle.set(k, [...(byTitle.get(k) ?? []), p]); }

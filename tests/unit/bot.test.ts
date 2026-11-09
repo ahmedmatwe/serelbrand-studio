@@ -20,8 +20,9 @@ test('bot: a Short that takes off triggers one alert per milestone', () => {
 test('bot: report lists followers, each Short per platform and totals', () => {
   const now = new Date('2026-11-10T12:00:00Z');
   const r = liveReport([{ post: p('x', 'youtube', 5, now), views: 40, likes: 2 }, { post: { ...p('x2', 'instagram', 5, now), title: 't-x' }, views: 120, likes: 4 }], { youtube: 3, facebook: 1, instagram: 12 });
-  assert.match(r, /👥 المتابعين:  ▶️ 3   📘 1   📸 12/);
-  assert.match(r, /• t-x\n   📸 120 👁  4 👍   ▶️ 40 👁  2 👍/);
+  assert.match(r, /▶️ يوتيوب: 3 مشترك/);
+  assert.match(r, /📸 إنستجرام: 12 متابع/);
+  assert.match(r, /🎬 t-x\n   ▶️ يوتيوب: 40 مشاهدة · 2 لايك\n   📸 إنستجرام: 120 مشاهدة · 4 لايك/);
   assert.match(r, /🏆 الأقوى: t-x \(160/);
 });
 
