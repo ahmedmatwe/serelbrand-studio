@@ -6,6 +6,7 @@ import { scriptProblems } from './stage-checks.ts';
 import { researchTopic, type ResearchSource } from './research.ts';
 import { StudioError } from '../core/errors.ts';
 import { loadPhoneLibrary } from './niche/phone-library.ts';
+import { allPosts, learnedShortWords, scorePosts } from '../analytics/learner.ts';
 
 export interface ScriptInput { videoId: string; title: string; angle?: string; format: 'long' | 'short'; audience?: string }
 
@@ -67,6 +68,22 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
   readonly name = 'scriptwriter';
   readonly artifactKind = 'script';
 
+  /**
+   * The team's experience, read before writing: lessons from past mistakes, the Shorts that performed best
+   * (titles to learn the winning hook style from — never to copy), and the Short length viewers finish.
+   */
+  private experience(phone: boolean) {
+    const lessons = this.ctx.repos.knowledge.byCategory('lesson').slice(0, 8).map((k) => k.insight);
+    const scored = scorePosts(allPosts(this.ctx)).sort((a, b) => b.score - a.score);
+    const winners = scored.slice(0, 5).filter((x) => x.score > 0.2).map((x) => `${x.post.title} (${x.post.platform}, ×${Math.exp(x.score).toFixed(1)} the usual views)`);
+    const words = learnedShortWords(this.ctx);
+    return {
+      ...(lessons.length ? { lessonsFromPastMistakes: lessons, lessonsRule: 'Apply every lesson; never repeat these mistakes.' } : {}),
+      ...(winners.length ? { bestPerformingShorts: winners, winnersRule: 'Learn the hook style and pacing of these winners; never copy their topic or wording.' } : {}),
+      ...(phone && words ? { learnedShortLength: `about ${words} spoken words per Short (measured: this is the length viewers finish)` } : {}),
+    };
+  }
+
   protected async execute(input: ScriptInput): Promise<Script> {
     const t = this.ctx.config.thresholds.script;
     const target =
@@ -99,7 +116,7 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
       task: 'script.write',
       tier: 'writing',
       system: loadPrompt('scriptwriter'),
-      prompt: JSON.stringify({ ...input, ...pack, ...sourcing, brief: this.ctx.repos.artifacts.latest(input.videoId, 'brief')?.data, targetWords: target, dialect: this.ctx.config.channel.dialect }),
+      prompt: JSON.stringify({ ...input, ...pack, ...sourcing, ...this.experience(phone), brief: this.ctx.repos.artifacts.latest(input.videoId, 'brief')?.data, targetWords: target, dialect: this.ctx.config.channel.dialect }),
       schema: ScriptLLM,
       maxOutputTokens: 16000,
       videoId: input.videoId,

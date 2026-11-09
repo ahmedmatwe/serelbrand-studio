@@ -153,6 +153,18 @@ export class RealYouTube implements YouTubeProvider {
     return { youtubeVideoId: videoId, visibility: req.visibility, publishAt: req.publishAt, warnings };
   }
 
+  /** Real-time view/like/comment counters (Data API videos.list, 1 quota unit per 50 videos). */
+  async statistics(ids: string[]): Promise<Record<string, { views: number; likes: number; comments: number }>> {
+    const out: Record<string, { views: number; likes: number; comments: number }> = {};
+    for (let i = 0; i < ids.length; i += 50) {
+      const res = await this.o.fetchImpl(`${API}/youtube/v3/videos?part=statistics&id=${ids.slice(i, i + 50).map(encodeURIComponent).join(',')}`, { headers: await this.auth() });
+      if (!res.ok) await this.fail(res, 'videos.statistics');
+      const j = (await res.json()) as { items?: { id: string; statistics: Record<string, string> }[] };
+      for (const it of j.items ?? []) out[it.id] = { views: Number(it.statistics.viewCount ?? 0), likes: Number(it.statistics.likeCount ?? 0), comments: Number(it.statistics.commentCount ?? 0) };
+    }
+    return out;
+  }
+
   /**
    * Lifetime metrics from YouTube Analytics (data lags ~1–3 days). Impressions/CTR are not exposed by this API;
    * they are omitted rather than guessed.

@@ -15,6 +15,9 @@ export type SlotFormat = 'long' | 'short';
 export function currentSlots(knowledge: KnowledgeRepo, minSamples: number): { slots: typeof DEFAULT_SLOTS_UTC; learned: { long?: number; short?: number } } {
   const slots = { long: [...DEFAULT_SLOTS_UTC.long], short: [...DEFAULT_SLOTS_UTC.short] };
   const learned: { long?: number; short?: number } = {};
+  // The learner's current plan for Shorts (UCB over every published post, incl. trial hours) wins.
+  const plan = knowledge.byCategory('learning').find((k) => k.insight.startsWith('short_utc_hours='));
+  if (plan) { slots.short = plan.insight.slice('short_utc_hours='.length).split(',').map(Number).filter((h) => h >= 0 && h < 24); learned.short = plan.sample_size; }
   for (const k of knowledge.byCategory('publish_time')) {
     if (k.sample_size < minSamples) continue;
     const m = k.insight.match(/^(long|short)_utc_hours=([\d,]+)$/);
@@ -22,7 +25,7 @@ export function currentSlots(knowledge: KnowledgeRepo, minSamples: number): { sl
     const f: SlotFormat | undefined = m ? (m[1] as SlotFormat) : legacy ? 'long' : undefined;
     const hours = m ? m[2]! : legacy?.[1];
     if (!f || !hours) continue;
-    if (learned[f] !== undefined) continue; // byCategory is sorted by confidence: keep the best one
+    if (learned[f] !== undefined) continue; // byCategory is sorted by confidence: keep the best one (or the learner's plan)
     slots[f] = hours.split(',').map(Number).filter((h) => h >= 0 && h < 24);
     learned[f] = k.sample_size;
   }

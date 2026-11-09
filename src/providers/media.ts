@@ -134,6 +134,8 @@ export interface YouTubeProvider {
   upload(req: UploadRequest): Promise<UploadResult>;
   /** Returns cumulative metrics for a video. */
   metrics(youtubeVideoId: string, hoursSincePublish: number): Promise<Record<string, number>>;
+  /** Real-time public counters for several videos (Data API, no lag). */
+  statistics?(ids: string[]): Promise<Record<string, { views: number; likes: number; comments: number }>>;
 }
 
 export class MockYouTube implements YouTubeProvider {

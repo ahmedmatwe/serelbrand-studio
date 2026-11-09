@@ -8,7 +8,9 @@ import type { UploadResult, Visibility } from '../providers/media.ts';
 import type { PrePublicationReport } from '../reports/prepublication.ts';
 import { currentSlots, nextSlots } from './schedule.ts';
 import { buildReport } from './approval.ts';
-import { enqueue, socialCaption, socialFromEnv } from './social.ts';
+import { enqueue, platformCaptions, socialCaption, socialFromEnv } from './social.ts';
+import { registerPost } from '../analytics/learner.ts';
+import { family, loadPhoneLibrary } from '../agents/niche/phone-library.ts';
 import { EXPERIMENTAL, packExclusions, qcBlockers, qualityChecklist } from '../reports/qc.ts';
 
 export interface PublishInput { videoId: string }
@@ -124,15 +126,27 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
         this.ctx.logger.warn('short upload failed', { videoId, error: (err as Error).message });
       }
     }
+    // Every Short is registered for the learner (measured at 24 h / 72 h on each platform).
+    const topics = this.ctx.repos.artifacts.latest<{ topics?: { subject: string }[] }>(videoId, 'calendar_entry')?.data.topics;
+    const lib = loadPhoneLibrary(this.ctx.config.rootDir);
+    const secretOf = (sh: { scenes?: number[] }) => { const sid = topics?.[(sh.scenes?.[0] ?? 1) - 1]?.subject; const e = lib?.secrets.find((x) => x.id === sid); return { secretId: sid, family: e ? family(e) : undefined }; };
+    const times = [scheduled, ...restShorts.map((_, i) => (scheduled ? shortTimes[i] : undefined))];
+    if (pack && !env.DRY_RUN) {
+      const ytIds = [res.youtubeVideoId, ...shorts.map((x) => x.youtubeVideoId)];
+      for (const [i, sh] of (render?.data.shorts ?? []).entries()) {
+        if (!ytIds[i]) continue;
+        registerPost(this.ctx, { platform: 'youtube', external_id: ytIds[i]!, video_id: videoId, title: sh.title, publish_at: times[i] ?? new Date().toISOString(), ...(() => { const x = secretOf(sh); return { secret_id: x.secretId, family: x.family }; })() });
+      }
+    }
     // Same Shorts as Reels on the Facebook Page + Instagram, at the same time they go public on YouTube.
     const social = !env.DRY_RUN && pack ? socialFromEnv(env) : undefined;
     if (social) {
-      const times = [scheduled, ...restShorts.map((_, i) => (scheduled ? shortTimes[i] : undefined))];
       for (const [i, sh] of (render?.data.shorts ?? []).entries()) {
         const sc = script?.scenes.find((x) => sh.scenes?.includes(x.n));
         const lead = sc ? (sc.voiceover.match(/[^.!؟?…]+[.!؟?…]+/g) ?? [sc.voiceover]).slice(0, 2).join(' ') : '';
         try {
-          await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), publishAt: times[i] ?? new Date().toISOString(), platforms: ['facebook', 'instagram'] });
+          const captions = sc ? await platformCaptions(this.ctx, sh.title, sc.voiceover, seo.hashtags, videoId) : {};
+          await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), captions, publishAt: times[i] ?? new Date().toISOString(), platforms: ['facebook', 'instagram'], videoId, ...secretOf(sh) });
         } catch (err) {
           this.ctx.logger.warn('social queue failed', { videoId, short: sh.title, error: (err as Error).message });
         }

@@ -24,7 +24,9 @@ import { qcBlockers, qualityChecklist } from '../reports/qc.ts';
 import { quotaResetSeconds } from '../providers/tts/gemini-tts.ts';
 import { writePackage } from '../reports/package.ts';
 import { steps } from './steps.ts';
-import { loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
+import { learnedFamilyWeights, registerPost, runLearning } from '../analytics/learner.ts';
+import { readPosted, socialFromEnv } from '../publishing/social.ts';
+import { family, loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
 
 export interface CycleOptions {
   now?: Date;
@@ -45,6 +47,8 @@ export interface CycleReport {
   errors: string[];
   /** Videos blocked in this run before a later attempt (if any) succeeded. */
   blockedAttempts: { title: string; reason: string }[];
+  /** What the learner measured, decided or flagged this cycle (Arabic). */
+  learning?: string[];
 }
 
 const LOCK_STALE_MS = 3 * 3600_000;
@@ -166,7 +170,7 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
   const lib = phone ? loadPhoneLibrary(ctx.config.rootDir) : undefined;
   if (lib) {
     const used = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
-    const picks = pickPhoneSecrets(lib, used);
+    const picks = pickPhoneSecrets(lib, used, 3, learnedFamilyWeights(ctx));
     if (picks.length === 3) return picks.map((x): PackTopic => ({ title: x.title, subject: x.id, angle: `${x.steps.join(' ← ')} → ${x.result}`, kind: x.kind, sourceUrl: lib.sources[x.source] ?? '' }));
     ctx.logger.child('autopilot').warn('phone-secrets library used up — add reviewed entries to config/phone-secrets.json', { left: picks.length });
     // Out of reviewed entries: fall through to AI-proposed topics (still need a real source and the full gates).
@@ -229,6 +233,10 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
 
   // Re-learn the best publishing hours from mature analytics (no-op until there is enough data).
   learnPublishSlots(ctx, ctx.config.thresholds.analytics.minVideosForStrategicConclusion);
+
+  // The learning loop across YouTube + Facebook + Instagram: measure every post, learn hours/content/length,
+  // turn problems into written lessons the writers read next time.
+  try { rep.learning = await learnCycle(ctx, now); } catch (err) { rep.errors.push(`learning: ${(err as Error).message.slice(0, 160)}`); }
 
   // 3) Production, every day: a pack of 3 standalone Shorts (3 different topics), plus — on long-video days
   //    (2 a week) — one standalone long video (no Shorts cut from it). A blocked or crashed video doesn't use
@@ -368,6 +376,8 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   if (locked.length) notify('سر الموبايل: YouTube قفل الفيديو private', 'لازم مراجعة YouTube API (مجانية) عشان النشر العلني التلقائي يشتغل');
   else if (rep.published.length) notify('سر الموبايل', `اترفع ${rep.published.length} فيديو على القناة`);
   if (rep.errors.length) notify('سر الموبايل: مشكلة', rep.errors[0]!.slice(0, 120));
+  const decisions = (rep.learning ?? []).filter((l) => /^(🕒|📈|✂️|⚠️)/.test(l));
+  if (decisions.length) notify('سر الموبايل: الفريق اتعلّم حاجة جديدة', decisions.join(' · ').slice(0, 600));
 
   writeDailyReport(ctx, rep, now);
   ctx.audit.record({ actor: 'autopilot', action: 'cycle.completed', details: { published: rep.published.length, produced: rep.produced?.videoId, errors: rep.errors.length } });
@@ -387,6 +397,7 @@ export function writeDailyReport(ctx: AgentContext, rep: CycleReport, now: Date)
     `- تحليلات اتحدّثت: ${rep.analyticsUpdated.length}`,
     rep.produced ? `- فيديو جديد: **${rep.produced.title}** (${rep.produced.recommendation}) — ادعاءات محتاجة تأكيد: ${rep.produced.claimsToVerify}${rep.produced.autoApproved ? ` — ✅ اتوافق واتنشر تلقائياً${rep.produced.publishAt ? ` (موعد الظهور ${rep.produced.publishAt})` : ''}` : rep.produced.autoApproveBlockedBy ? ` — ⛔ متنشرش: ${rep.produced.autoApproveBlockedBy.join('؛ ')}` : ''}` : `- إنتاج: ${rep.skippedProductionReason ?? '—'}`,
     `- مستني موافقتك: ${rep.pendingApprovals} · محتاج تأكيد مصادر: ${rep.needsFactReview.length}`,
+    ...(rep.learning ?? []).map((l) => `- ${l}`),
     ...rep.errors.map((e) => `- ⚠️ ${e}`),
   ];
   writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : head) + lines.join('\n') + '\n');
@@ -395,4 +406,49 @@ export function writeDailyReport(ctx: AgentContext, rep: CycleReport, now: Date)
 
 export function releaseLock(path: string) {
   rmSync(path, { force: true });
+}
+
+/** Lessons the team learned from its own mistakes and results, read by the writers before every script. */
+export function addLesson(ctx: AgentContext, lesson: string, evidence: string) {
+  const have = ctx.repos.knowledge.byCategory('lesson').map((k) => k.insight);
+  if (!have.includes(lesson)) ctx.repos.knowledge.add({ category: 'lesson', insight: lesson, evidence, confidence: Date.now() / 1e13, sampleSize: 1 });
+}
+
+async function learnCycle(ctx: AgentContext, now: Date): Promise<string[]> {
+  const social = socialFromEnv(ctx.config.env);
+  // Reels posted by the social workflow → registered for measuring.
+  if (social) {
+    for (const e of await readPosted(social.queue).catch(() => [])) {
+      registerPost(ctx, { platform: e.platform, external_id: e.id, video_id: e.videoId ?? null, secret_id: e.secretId ?? null, family: e.family ?? null, title: e.title, publish_at: e.at });
+    }
+  }
+  // Backfill: every Short already uploaded to YouTube (incl. before the learner existed) is measured too.
+  const lib = loadPhoneLibrary(ctx.config.rootDir);
+  for (const a of ctx.repos.artifacts.listKind<PublishLog>('publish_log')) {
+    const l = a.data;
+    if (l.dryRun || !a.video_id || ctx.repos.videos.get(a.video_id)?.status === 'deleted') continue;
+    const topics = ctx.repos.artifacts.latest<{ topics?: { subject: string; title: string }[] }>(a.video_id, 'calendar_entry')?.data.topics;
+    const items = [{ youtubeVideoId: l.youtubeVideoId, title: topics?.[0]?.title ?? '', publishAt: l.publishAt }, ...(l.shorts ?? [])];
+    items.forEach((it, i) => {
+      if (!it.youtubeVideoId) return;
+      const e = lib?.secrets.find((x) => x.id === topics?.[i]?.subject);
+      registerPost(ctx, { platform: 'youtube', external_id: it.youtubeVideoId, video_id: a.video_id, secret_id: e?.id ?? null, family: e ? family(e) : null, title: it.title.replace(/\s*#Shorts$/, '') || topics?.[i]?.title, publish_at: it.publishAt ?? l.uploadedAt });
+    });
+  }
+  const yt = ctx.providers.youtube;
+  const lines = await runLearning(ctx, {
+    youtube: yt.statistics ? (ids) => yt.statistics!(ids) : undefined,
+    youtubeRetention: yt.name.startsWith('mock') ? undefined : async (id) => (await yt.metrics(id, 72)).avgPercentViewed,
+    facebook: social ? (id) => social.meta.facebookStats(id) : undefined,
+    instagram: social ? (id) => social.meta.instagramStats(id) : undefined,
+  }, now);
+  // Mistakes → lessons (what to avoid next time), wins → patterns (what to repeat).
+  for (const l of lines.filter((x) => x.startsWith('⚠️') && x.includes('البداية'))) addLesson(ctx, 'Viewers left early on a recent Short: open with the surprising benefit in the first 5 words and show the code/setting immediately.', l);
+  for (const b of ctx.repos.artifacts.listKind<{ blockers: string[] }>('auto_blocked').filter((a) => a.created_at > new Date(now.getTime() - 86_400_000).toISOString())) {
+    for (const reason of b.data.blockers.slice(0, 2)) addLesson(ctx, `A video was blocked before publishing because: ${reason.slice(0, 180)} — prevent this in the script.`, b.video_id ?? '');
+  }
+  for (const r of ctx.repos.artifacts.listKind<{ log: string[] }>('pack_repair').filter((a) => a.created_at > new Date(now.getTime() - 86_400_000).toISOString())) {
+    for (const x of r.data.log.slice(0, 2)) addLesson(ctx, `A Short needed repair (${x.slice(0, 160)}) — write each Short complete on the first try.`, r.video_id ?? '');
+  }
+  return lines;
 }

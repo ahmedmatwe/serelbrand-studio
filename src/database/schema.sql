@@ -104,3 +104,18 @@ CREATE TABLE IF NOT EXISTS knowledge_entries (
   sample_size INTEGER NOT NULL,
   created_at TEXT NOT NULL
 );
+
+-- Every published post on every platform (each Short on YouTube, Facebook, Instagram) + its measured performance.
+CREATE TABLE IF NOT EXISTS posts (
+  id TEXT PRIMARY KEY,               -- platform:external_id
+  platform TEXT NOT NULL,            -- youtube | facebook | instagram
+  external_id TEXT NOT NULL,
+  video_id TEXT,                     -- the production (pack) it came from
+  secret_id TEXT,                    -- phone-secrets library entry
+  family TEXT,                       -- code | ios | android
+  title TEXT,
+  publish_at TEXT NOT NULL,          -- when it went public (UTC)
+  metrics TEXT NOT NULL DEFAULT '{}',-- {"h24":{views,likes,...},"h72":{...}}
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_posts_publish ON posts(publish_at);

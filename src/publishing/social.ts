@@ -11,7 +11,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 
-export interface SocialTicket { title: string; caption: string; publishAt: string; platforms: ('facebook' | 'instagram')[]; done: string[]; tries: number; lastError?: string; video: string }
+export interface SocialTicket { title: string; caption: string; /** Platform-specific caption (written by each platform's specialist). */ captions?: Partial<Record<'facebook' | 'instagram', string>>; publishAt: string; videoId?: string; secretId?: string; family?: string; platforms: ('facebook' | 'instagram')[]; done: string[]; tries: number; lastError?: string; video: string }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -41,6 +41,22 @@ export class MetaClient {
     const p = await this.graph(this.o.pageId, { fields: 'name,instagram_business_account{username}' }, 'GET');
     if (p.instagram_business_account?.id) this.igUser ??= p.instagram_business_account.id;
     return { page: p.name, instagram: p.instagram_business_account?.username };
+  }
+
+  /** Facebook Reel counters (plays from insights when allowed, else likes/comments only). */
+  async facebookStats(id: string): Promise<{ views: number; likes?: number; comments?: number }> {
+    const base = await this.graph(id, { fields: 'likes.summary(true).limit(0),comments.summary(true).limit(0)' }, 'GET').catch(() => ({} as Record<string, any>));
+    const ins = await this.graph(`${id}/video_insights`, { metric: 'blue_reels_play_count' }, 'GET').catch(() => undefined);
+    const plays = Number(ins?.data?.[0]?.values?.[0]?.value ?? NaN);
+    return { views: Number.isFinite(plays) ? plays : 0, likes: base.likes?.summary?.total_count, comments: base.comments?.summary?.total_count };
+  }
+
+  /** Instagram Reel counters (views/shares/saves from insights when allowed, else likes/comments). */
+  async instagramStats(id: string): Promise<{ views: number; likes?: number; comments?: number; shares?: number }> {
+    const base = await this.graph(id, { fields: 'like_count,comments_count' }, 'GET');
+    const ins = await this.graph(`${id}/insights`, { metric: 'views,shares' }, 'GET').catch(() => undefined);
+    const get = (n: string) => Number((ins?.data as { name: string; values: { value: number }[] }[] | undefined)?.find((d) => d.name === n)?.values?.[0]?.value ?? NaN);
+    return { views: Number.isFinite(get('views')) ? get('views') : 0, likes: base.like_count, comments: base.comments_count, shares: Number.isFinite(get('shares')) ? get('shares') : undefined };
   }
 
   /** Instagram professional account linked to the Page. */
@@ -134,8 +150,9 @@ export async function enqueue(q: SocialQueue, file: string, t: Omit<SocialTicket
 /** Posts every due ticket on the platforms it still lacks. Returns a log line per action. */
 export async function processQueue(q: SocialQueue, meta: MetaClient, now = new Date(), tmpDir = '/tmp'): Promise<string[]> {
   const log: string[] = [];
+  const posted: PostedEntry[] = [];
   const assets = await q.assets();
-  for (const tAsset of assets.filter((a) => a.name.endsWith('.json'))) {
+  for (const tAsset of assets.filter((a) => a.name.endsWith('.json') && a.name !== POSTED)) {
     const t = JSON.parse((await q.download(tAsset.id)).toString('utf8')) as SocialTicket;
     if (new Date(t.publishAt) > now) continue;
     const vAsset = assets.find((a) => a.name === t.video);
@@ -145,9 +162,11 @@ export async function processQueue(q: SocialQueue, meta: MetaClient, now = new D
     writeFileSync(file, await q.download(vAsset.id));
     for (const p of t.platforms.filter((x) => !t.done.includes(x))) {
       try {
-        const id = p === 'facebook' ? await meta.facebookReel(file, t.caption) : await meta.instagramReel(file, t.caption);
+        const cap = t.captions?.[p] || t.caption;
+        const id = p === 'facebook' ? await meta.facebookReel(file, cap) : await meta.instagramReel(file, cap);
         t.done.push(p);
         log.push(`${p}: posted "${t.title}" (${id})`);
+        posted.push({ platform: p, id, at: new Date().toISOString(), title: t.title, videoId: t.videoId, secretId: t.secretId, family: t.family });
       } catch (err) {
         t.lastError = `${p}: ${(err as Error).message.slice(0, 200)}`;
         log.push(`${p}: FAILED "${t.title}" — ${t.lastError}`);
@@ -164,7 +183,22 @@ export async function processQueue(q: SocialQueue, meta: MetaClient, now = new D
       await q.upload(tAsset.name, Buffer.from(JSON.stringify(t)), 'application/json');
     }
   }
+  if (posted.length) await appendPosted(q, posted);
   return log;
+}
+
+/** What was posted where (read by the autopilot's learner to measure each Reel). */
+export interface PostedEntry { platform: 'facebook' | 'instagram'; id: string; at: string; title: string; videoId?: string; secretId?: string; family?: string }
+const POSTED = 'posted-log.json';
+export async function readPosted(q: SocialQueue): Promise<PostedEntry[]> {
+  const a = (await q.assets()).find((x) => x.name === POSTED);
+  return a ? (JSON.parse((await q.download(a.id)).toString('utf8')) as PostedEntry[]) : [];
+}
+async function appendPosted(q: SocialQueue, entries: PostedEntry[]) {
+  const a = (await q.assets()).find((x) => x.name === POSTED);
+  const all = [...(a ? (JSON.parse((await q.download(a.id)).toString('utf8')) as PostedEntry[]) : []), ...entries].slice(-2000);
+  if (a) await q.remove(a.id);
+  await q.upload(POSTED, Buffer.from(JSON.stringify(all)), 'application/json');
 }
 
 export function socialFromEnv(env: { META_PAGE_ID?: string; META_PAGE_TOKEN?: string; META_IG_USER_ID?: string; META_GRAPH_VERSION: string }) {
@@ -174,4 +208,27 @@ export function socialFromEnv(env: { META_PAGE_ID?: string; META_PAGE_TOKEN?: st
     queue: new SocialQueue({ repo, token }),
     meta: new MetaClient({ pageId: env.META_PAGE_ID, token: env.META_PAGE_TOKEN, igUserId: env.META_IG_USER_ID, version: env.META_GRAPH_VERSION }),
   };
+}
+
+/**
+ * Platform specialists: the same Short gets a caption written the way each platform works —
+ * Instagram: strong first line (shown before "more"), save/share call, 8–12 niche hashtags;
+ * Facebook: conversational question that invites comments, 2–3 hashtags.
+ * Facts only from the Short's own narration. Falls back to the plain caption if the model is unavailable.
+ */
+export async function platformCaptions(ctx: { providers: { llm: { generateJson: (r: any) => Promise<{ data: any }> } } }, title: string, narration: string, hashtags: string[], videoId?: string): Promise<Partial<Record<'facebook' | 'instagram', string>>> {
+  const { z } = await import('zod');
+  const r = await ctx.providers.llm.generateJson({
+    task: 'social.captions',
+    tier: 'light',
+    system: 'You are the social media manager of an Egyptian Arabic channel about phone secrets ("سر الموبايل"). Write captions in natural Egyptian Arabic for the SAME Reel on two platforms, each in its native style. ' +
+      'instagram: first line = a hook that makes people tap "more" (≤ 10 words, emoji ok); 2–3 short lines with the exact code/steps from the narration; a call to SAVE and SEND to a friend; then 8–12 relevant Arabic+English hashtags (#سر_الموبايل first). ' +
+      'facebook: 2–4 conversational lines, end with a question that invites comments (e.g. "جربتها؟ قولنا في الكومنتات"), 2–3 hashtags. ' +
+      'Never add facts, codes or steps that are not in the narration. JSON only: {"instagram":"…","facebook":"…"}.',
+    prompt: JSON.stringify({ title, narration, hashtags }),
+    schema: z.object({ instagram: z.string().min(20), facebook: z.string().min(20) }),
+    videoId,
+    maxOutputTokens: 1500,
+  }).catch(() => undefined);
+  return r ? { instagram: String(r.data.instagram).slice(0, 2100), facebook: String(r.data.facebook).slice(0, 2100) } : {};
 }

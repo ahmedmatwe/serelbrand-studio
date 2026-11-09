@@ -45,7 +45,8 @@ test('social: queued Short is posted on Facebook + Instagram at its time, then t
     const log = await processQueue(q, meta, new Date('2026-11-09T11:05:00Z'), d);
     assert.equal(log.length, 2, log.join('\n'));
     assert.deepEqual(posted, ['facebook:كود سري', 'instagram'], 'caption has no #Shorts tag');
-    assert.equal(assets.size, 0, 'queue emptied');
+    assert.deepEqual([...assets.values()].map((a) => a.name), ['posted-log.json'], 'queue emptied; only the posted log stays');
+    assert.equal(JSON.parse([...assets.values()][0]!.data.toString()).length, 2, 'both posts logged for the learner');
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
@@ -59,9 +60,9 @@ test('social: a failed platform is retried next run without re-posting the other
     await enqueue(q, file, { title: 'x', caption: 'x', publishAt: '2026-01-01T00:00:00Z', platforms: ['facebook', 'instagram'] });
     await processQueue(q, meta, new Date('2026-01-02T00:00:00Z'), d);
     assert.deepEqual(posted, ['facebook:x']);
-    assert.equal(assets.size, 2, 'kept for the retry');
+    assert.equal([...assets.values()].filter((a) => a.name !== 'posted-log.json').length, 2, 'kept for the retry');
     await processQueue(q, meta, new Date('2026-01-02T00:15:00Z'), d);
     assert.deepEqual(posted, ['facebook:x', 'instagram'], 'facebook not posted twice');
-    assert.equal(assets.size, 0);
+    assert.deepEqual([...assets.values()].map((a) => a.name), ['posted-log.json']);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
