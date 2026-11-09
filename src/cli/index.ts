@@ -21,6 +21,7 @@ import { RealYouTube } from '../providers/youtube/youtube.ts';
 import { YOUTUBE_AUTH_FILE } from '../core/config.ts';
 import { acquireLock, releaseLock, runCycle } from '../workflows/autopilot.ts';
 import { startDashboard } from '../dashboard/server.ts';
+import { processQueue, socialFromEnv } from '../publishing/social.ts';
 import { installSchedule, kickSchedule, removeSchedule, scheduleStatus } from '../workflows/schedule-macos.ts';
 
 const HELP = `
@@ -55,6 +56,7 @@ Workflows (Orchestrator)
   package <videoId>                           Write the 17-part production package (reports/packages/)
 
 Autopilot
+  social                                      Post due Shorts on Facebook + Instagram (queue)
   autopilot [--preview]                       One cycle: upload approved → analytics → produce today's video → report
   dashboard                                   Open the approval dashboard (http://127.0.0.1:8787)
   schedule:install | schedule:remove | schedule:status | schedule:run-now
@@ -120,6 +122,13 @@ async function main() {
           out({ published: r.published, analytics: r.analyticsUpdated.length, produced: r.produced, skipped: r.skippedProductionReason, pendingApprovals: r.pendingApprovals, needsFactReview: r.needsFactReview.length, errors: r.errors });
         } finally { releaseLock(lock); }
         break;
+      }
+      case 'social': {
+        // Posts the Shorts whose time has come on Facebook + Instagram (run by .github/workflows/social.yml).
+        const social = socialFromEnv(ctx.config.env);
+        if (!social) return out('Facebook/Instagram not connected (META_PAGE_ID / META_PAGE_TOKEN / GITHUB_TOKEN missing) — nothing to do.');
+        const log = await processQueue(social.queue, social.meta, new Date(), resolve(ctx.config.rootDir, 'data'));
+        return out(log.length ? log.join('\n') : 'Nothing due.');
       }
       case 'dashboard': {
         const d = await startDashboard(ctx);

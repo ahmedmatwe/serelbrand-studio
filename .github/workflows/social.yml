@@ -1,0 +1,44 @@
+# Posts the Shorts whose time has come as Reels on the Facebook Page + Instagram (see src/publishing/social.ts).
+# Light and fast: no rendering, no database — the queue lives in the "social-queue" release.
+name: social
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: social
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # read/delete queued videos (release assets)
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DRY_RUN: 'false'
+      META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+      META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
+      META_IG_USER_ID: ${{ secrets.META_IG_USER_ID }}
+      GITHUB_TOKEN: ${{ github.token }}
+      DATABASE_URL: 'sqlite::memory:'
+    steps:
+      - name: Skip when Facebook/Instagram are not connected
+        id: gate
+        run: |
+          if [ -z "$META_PAGE_ID" ] || [ -z "$META_PAGE_TOKEN" ]; then echo "connected=false" >> "$GITHUB_OUTPUT"; echo "Meta not connected yet."; else echo "connected=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.connected == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.connected == 'true'
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+        if: steps.gate.outputs.connected == 'true'
+      - name: Post due Reels
+        if: steps.gate.outputs.connected == 'true'
+        run: mkdir -p data && node --no-warnings src/cli/index.ts social

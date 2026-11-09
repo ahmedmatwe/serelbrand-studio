@@ -8,6 +8,7 @@ import type { UploadResult, Visibility } from '../providers/media.ts';
 import type { PrePublicationReport } from '../reports/prepublication.ts';
 import { currentSlots, nextSlots } from './schedule.ts';
 import { buildReport } from './approval.ts';
+import { enqueue, socialCaption, socialFromEnv } from './social.ts';
 import { EXPERIMENTAL, packExclusions, qcBlockers, qualityChecklist } from '../reports/qc.ts';
 
 export interface PublishInput { videoId: string }
@@ -121,6 +122,20 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
       } catch (err) {
         // The long video is already up; a failed Short must not fail the whole publish.
         this.ctx.logger.warn('short upload failed', { videoId, error: (err as Error).message });
+      }
+    }
+    // Same Shorts as Reels on the Facebook Page + Instagram, at the same time they go public on YouTube.
+    const social = !env.DRY_RUN && pack ? socialFromEnv(env) : undefined;
+    if (social) {
+      const times = [scheduled, ...restShorts.map((_, i) => (scheduled ? shortTimes[i] : undefined))];
+      for (const [i, sh] of (render?.data.shorts ?? []).entries()) {
+        const sc = script?.scenes.find((x) => sh.scenes?.includes(x.n));
+        const lead = sc ? (sc.voiceover.match(/[^.!؟?…]+[.!؟?…]+/g) ?? [sc.voiceover]).slice(0, 2).join(' ') : '';
+        try {
+          await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), publishAt: times[i] ?? new Date().toISOString(), platforms: ['facebook', 'instagram'] });
+        } catch (err) {
+          this.ctx.logger.warn('social queue failed', { videoId, short: sh.title, error: (err as Error).message });
+        }
       }
     }
     for (const w of res.warnings ?? []) this.ctx.logger.warn(w, { videoId });

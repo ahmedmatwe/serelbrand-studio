@@ -17,6 +17,11 @@ const EnvSchema = z.object({
   /** Max YouTube uploads per Pacific day (free API quota ≈ 6 uploads). */
   YOUTUBE_DAILY_UPLOADS: z.coerce.number().int().positive().default(6),
   CLOUDFLARE_API_TOKEN: z.string().optional(),
+  /** Facebook Page + linked Instagram account (Meta Graph API). Empty = cross-posting off. */
+  META_PAGE_ID: z.string().optional(),
+  META_PAGE_TOKEN: z.string().optional(),
+  META_IG_USER_ID: z.string().optional(),
+  META_GRAPH_VERSION: z.string().default('v23.0'),
   STOCK_PROVIDER: z.enum(['mock', 'pexels', 'pixabay']).default('mock'),
   YOUTUBE_PROVIDER: providerMode.default('mock'),
   TRENDS_PROVIDER: providerMode.default('mock'),
@@ -163,4 +168,5 @@ export const SECRET_ENV_KEYS = [
   'PIXABAY_API_KEY',
   'YOUTUBE_CLIENT_SECRET',
   'YOUTUBE_REFRESH_TOKEN',
+  'META_PAGE_TOKEN',
 ] as const;
