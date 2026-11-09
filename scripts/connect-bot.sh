@@ -14,8 +14,11 @@ NAME=$(curl -s "https://api.telegram.org/bot$TOKEN/getMe" | python3 -c 'import j
 [ -n "$NAME" ] || { echo "✗ تليجرام رفض المفتاح — اتأكد إنك نسخته كامل"; exit 1; }
 # Any old webhook would hide your /start message from getUpdates.
 curl -s "https://api.telegram.org/bot$TOKEN/deleteWebhook" > /dev/null
-CHAT=$(curl -s "https://api.telegram.org/bot$TOKEN/getUpdates" | python3 -c 'import json,sys; r=json.load(sys.stdin).get("result",[]); ids=[u.get("message",{}).get("chat",{}).get("id") for u in r if u.get("message")]; print(ids[-1] if ids else "")')
+CACHE="$HOME/.ser-mobile-bot-chat"   # remembered after the first successful run (it's only your chat number)
+CHAT=$(cat "$CACHE" 2>/dev/null || true)
+[ -n "$CHAT" ] || CHAT=$(curl -s "https://api.telegram.org/bot$TOKEN/getUpdates" | python3 -c 'import json,sys; r=json.load(sys.stdin).get("result",[]); ids=[u.get("message",{}).get("chat",{}).get("id") for u in r if u.get("message")]; print(ids[-1] if ids else "")')
 [ -n "$CHAT" ] || { echo "✗ افتح البوت @$NAME على تليجرام ودوس Start (أو ابعتله أي رسالة) وبعدين شغّل الأمر تاني"; exit 1; }
+echo "$CHAT" > "$CACHE"
 echo "✓ البوت @$NAME — الشات بتاعك اتعرف"
 
 echo "… تسجيل الدخول لـ Cloudflare (هيفتح المتصفح مرة واحدة — وافق)"
