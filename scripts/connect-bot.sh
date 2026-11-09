@@ -7,8 +7,9 @@ REPO=ahmedmatwe/serelbrand-studio
 DIR="$(cd "$(dirname "$0")/.." && pwd)/bot"
 W="npx --yes wrangler@4"
 
-TOKEN="$(pbpaste | tr -d '[:space:]')"
-[[ "$TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]{30,}$ ]] || { echo "✗ الحافظة مفيهاش مفتاح بوت — انسخ المفتاح اللي بعتهولك BotFather"; exit 1; }
+# Works whether you copied the token alone or the whole BotFather message.
+TOKEN="$(pbpaste | grep -oE '[0-9]{6,}:[A-Za-z0-9_-]{30,}' | head -1)"
+[ -n "$TOKEN" ] || { echo "✗ الحافظة مفيهاش مفتاح بوت (فيها $(pbpaste | wc -c | tr -d ' ') حرف) — انسخ المفتاح اللي بعتهولك BotFather"; exit 1; }
 NAME=$(curl -s "https://api.telegram.org/bot$TOKEN/getMe" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["result"]["username"] if d.get("ok") else "")')
 [ -n "$NAME" ] || { echo "✗ تليجرام رفض المفتاح — اتأكد إنك نسخته كامل"; exit 1; }
 # Any old webhook would hide your /start message from getUpdates.
