@@ -37,7 +37,15 @@ printf %s "$CHAT"   | $W secret put CHAT_ID > /dev/null
 printf %s "$INGEST" | $W secret put INGEST_SECRET > /dev/null
 printf %s "$HOOK"   | $W secret put WEBHOOK_SECRET > /dev/null
 
-curl -s "https://api.telegram.org/bot$TOKEN/setWebhook" --data-urlencode "url=$URL/telegram" -d "secret_token=$HOOK" -d 'allowed_updates=["message","callback_query"]' | grep -q '"ok":true' || { echo "✗ ربط تليجرام بالبوت فشل"; exit 1; }
+# A brand-new workers.dev address can take a few minutes to resolve for Telegram: retry for ~5 minutes.
+for i in $(seq 1 20); do
+  R=$(curl -s "https://api.telegram.org/bot$TOKEN/setWebhook" --data-urlencode "url=$URL/telegram" --data-urlencode "secret_token=$HOOK" --data-urlencode 'allowed_updates=["message","callback_query"]')
+  echo "$R" | grep -q '"ok":true' && break
+  echo "… تليجرام لسه مش شايف البوت ($(echo "$R" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("description",""))' 2>/dev/null)) — هحاول تاني بعد 15 ثانية ($i/20)"
+  sleep 15
+done
+echo "$R" | grep -q '"ok":true' || { echo "✗ ربط تليجرام بالبوت فشل: $R"; exit 1; }
+echo "✓ تليجرام اتربط بالبوت"
 
 printf %s "$TOKEN"  | gh secret set TELEGRAM_BOT_TOKEN -R "$REPO"
 gh secret set TELEGRAM_CHAT_ID -R "$REPO" -b "$CHAT"
