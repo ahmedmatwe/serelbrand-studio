@@ -21,7 +21,7 @@ const EnvSchema = z.object({
   META_PAGE_ID: z.string().optional(),
   META_PAGE_TOKEN: z.string().optional(),
   META_IG_USER_ID: z.string().optional(),
-  META_GRAPH_VERSION: z.string().default('v23.0'),
+  META_GRAPH_VERSION: z.string().default('v27.0'),
   STOCK_PROVIDER: z.enum(['mock', 'pexels', 'pixabay']).default('mock'),
   YOUTUBE_PROVIDER: providerMode.default('mock'),
   TRENDS_PROVIDER: providerMode.default('mock'),
