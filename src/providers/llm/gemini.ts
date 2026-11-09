@@ -38,6 +38,9 @@ export function extractJson(text: string): unknown {
  * Google Gemini via the public REST API (works on the free tier of Google AI Studio).
  * The API key is sent in a header, never in the URL, so it cannot leak into logs of request URLs.
  */
+/** Models out of daily quota in this process. */
+const exhaustedToday = new Set<string>();
+
 export class GeminiLLM implements LLMProvider {
   readonly name = 'gemini';
   private readonly o: Required<Omit<GeminiOptions, 'fetchImpl'>> & { fetchImpl: typeof fetch };
@@ -95,13 +98,16 @@ export class GeminiLLM implements LLMProvider {
    */
   private async callWithFallback(models: string[], system: string, userText: string, maxOutputTokens: number, images?: { mimeType: string; data: string; label?: string }[]) {
     let last: unknown;
-    for (const model of models) {
+    // Models whose DAILY free quota is used up are skipped for the rest of this run (no wasted calls/backoff).
+    const live = models.filter((m) => !exhaustedToday.has(m));
+    for (const model of live.length ? live : models) {
       try {
         return { ...(await this.call(model, system, userText, maxOutputTokens, images)), model };
       } catch (err) {
         last = err;
         const m = (err as Error).message;
         if (!(err instanceof ProviderError) || !/HTTP (503|429|404)/.test(m)) throw err;
+        if (/HTTP 429/.test(m) && /PerDay|per ?day|free_tier_requests/i.test(m)) exhaustedToday.add(model);
       }
     }
     throw last;

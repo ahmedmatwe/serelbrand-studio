@@ -19,15 +19,19 @@ test('phone library: every entry is complete, unique and safe', () => {
   assert.ok(lib.secrets.length >= 30);
 });
 
-test('phone library: a pack mixes a code, an iPhone and an Android secret, never repeating', () => {
+test('phone library: a pack mixes kinds (apps, codes, iPhone, Android), never repeating', async () => {
+  const { family } = await import('../../src/agents/niche/phone-library.ts');
   const p = pickPhoneSecrets(lib, new Set());
   assert.equal(p.length, 3);
-  assert.equal(p[0]!.kind, 'code');
-  assert.ok(p[1]!.id.startsWith('ios-'));
-  assert.ok(!p[2]!.id.startsWith('ios-') && p[2]!.kind !== 'code');
+  assert.equal(new Set(p.map(family)).size, 3, 'three different kinds a day');
+  assert.ok(p.some((x) => family(x) === 'apps'), 'big-app secrets are part of the mix');
+  // Over a few days every family rotates in.
+  const used = new Set<string>(); const seen = new Set<string>();
+  for (let d = 0; d < 4; d++) for (const x of pickPhoneSecrets(lib, used)) { used.add(x.id); seen.add(family(x)); }
+  assert.deepEqual([...seen].sort(), ['android', 'apps', 'code', 'ios']);
   const next = pickPhoneSecrets(lib, new Set(p.map((x) => x.id)));
   assert.ok(next.every((x) => !p.includes(x)));
-  assert.match(secretSource(lib, p[0]!).excerpt, /\*#06#/);
+  assert.match(secretSource(lib, lib.secrets.find((x) => x.id === 'code-imei')!).excerpt, /\*#06#/);
 });
 
 test('captions: measured word-by-word highlight with a pop-in', () => {

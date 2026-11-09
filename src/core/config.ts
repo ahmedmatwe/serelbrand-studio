@@ -39,7 +39,7 @@ const EnvSchema = z.object({
   AUTO_APPROVE: z.string().default('false').transform((v) => v.toLowerCase() === 'true'),
   GEMINI_TTS_MODEL: z.string().default('gemini-3.8-flash-tts,gemini-3.1-flash-tts-preview,gemini-3.8-flash-lite-tts,gemini-2.5-flash-preview-tts'),
   GEMINI_TTS_VOICE: z.string().default('Charon'),
-  GEMINI_TTS_STYLE: z.string().default('Calm, confident, natural Arabic documentary narrator; steady medium pace; no exaggeration.'),
+  GEMINI_TTS_STYLE: z.string().default('Native Egyptian speaker from Cairo. Speak in natural Egyptian colloquial Arabic (عامية مصرية) with authentic Egyptian pronunciation and intonation (e.g. ج as in Cairo, ق often as a glottal stop, Egyptian vowels) — like a friendly, energetic Egyptian tech YouTuber talking to a friend. Never Modern Standard Arabic pronunciation. Warm, lively, clear, medium-fast pace.'),
   ANTHROPIC_API_KEY: z.string().optional(),
   LLM_MODEL_WRITING: z.string().default('claude-sonnet-5-5'),
   LLM_MODEL_LIGHT: z.string().default('claude-haiku-5-5'),

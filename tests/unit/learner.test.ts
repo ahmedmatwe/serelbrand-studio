@@ -38,3 +38,11 @@ test('learner: content appetite and length adapt from evidence', () => {
   assert.match(l.reason!, /shortened/);
   assert.ok(detectProblems(posts, scorePosts(posts)).some((p) => p.includes('بتمشي بدري')));
 });
+
+test('autopilot: a daily AI quota stops production until the reset (no burned attempts)', async () => {
+  const { isDailyQuota, nextQuotaReset } = await import('../../src/workflows/autopilot.ts');
+  assert.ok(isDailyQuota('HTTP 429: You exceeded your current quota ... Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 500'));
+  assert.ok(!isDailyQuota('HTTP 503: model overloaded'));
+  assert.equal(nextQuotaReset(new Date('2026-11-09T07:00:00Z')), '2026-11-09T08:10:00.000Z');
+  assert.equal(nextQuotaReset(new Date('2026-11-09T09:00:00Z')), '2026-11-10T08:10:00.000Z');
+});

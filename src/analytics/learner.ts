@@ -88,7 +88,7 @@ export function chooseHours(scored: { post: Post; score: number }[], count = 3, 
 export function familyWeights(scored: { post: Post; score: number }[]): Record<string, number> {
   const by = new Map<string, number[]>();
   for (const { post, score } of scored) if (post.family) by.set(post.family, [...(by.get(post.family) ?? []), score]);
-  const w: Record<string, number> = { code: 1, ios: 1, android: 1 };
+  const w: Record<string, number> = { apps: 1, code: 1, ios: 1, android: 1 };
   for (const [f, xs] of by) {
     const shrink = xs.length / (xs.length + 4); // few posts → stay near 1
     w[f] = Math.min(2, Math.max(0.5, Math.exp(shrink * (xs.reduce((a, b) => a + b, 0) / xs.length))));
@@ -180,7 +180,7 @@ export async function runLearning(ctx: AgentContext, src: MetricsSource, now = n
   }
   const w = familyWeights(scored);
   if (writeKnowledge(ctx, 'family_weights=', JSON.stringify(Object.fromEntries(Object.entries(w).map(([k, v]) => [k, Number(v.toFixed(2))]))), `${scored.length} scored posts`, scored.length)) {
-    const name: Record<string, string> = { code: 'الأكواد', ios: 'أسرار الآيفون', android: 'أسرار الأندرويد' };
+    const name: Record<string, string> = { apps: 'أسرار التطبيقات (واتساب/إنستجرام/تيك توك…)', code: 'الأكواد', ios: 'أسرار الآيفون', android: 'أسرار الأندرويد' };
     const best = Object.entries(w).sort((a, b) => b[1] - a[1])[0]!;
     if (best[1] > 1.15) log.push(`📈 ${name[best[0]] ?? best[0]} بتجيب مشاهدات أكتر — هتاخد نصيب أكبر من الأيام الجاية`);
   }

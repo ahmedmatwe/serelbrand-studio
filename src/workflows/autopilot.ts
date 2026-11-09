@@ -169,7 +169,10 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
   // Phone secrets: only reviewed entries from the approved library (never an AI-invented code).
   const lib = phone ? loadPhoneLibrary(ctx.config.rootDir) : undefined;
   if (lib) {
-    const used = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
+    // A secret counts as used only if its video was really made: productions that crashed (quota, network)
+    // give their secrets back to the library.
+    const crashed = new Set(ctx.repos.artifacts.listKind<{ blockers: string[] }>('auto_blocked').filter((a) => a.data.blockers.some((b) => b.startsWith('production failed'))).map((a) => a.video_id));
+    const used = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').filter((a) => !crashed.has(a.video_id)).flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
     const picks = pickPhoneSecrets(lib, used, 3, learnedFamilyWeights(ctx));
     if (picks.length === 3) return picks.map((x): PackTopic => ({ title: x.title, subject: x.id, angle: `${x.steps.join(' ← ')} → ${x.result}`, kind: x.kind, sourceUrl: lib.sources[x.source] ?? '' }));
     ctx.logger.child('autopilot').warn('phone-secrets library used up — add reviewed entries to config/phone-secrets.json', { left: picks.length });
@@ -275,6 +278,8 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     if (o.produce === false) { rep.skippedProductionReason = 'production disabled for this run'; break; }
     const quota = ctx.repos.artifacts.latest<{ until: string }>(null, 'tts_quota_exhausted')?.data;
     if (quota && quota.until > now.toISOString()) { rep.skippedProductionReason = `voice quota used up — waiting until ${quota.until.slice(0, 16)} UTC`; break; }
+    const llmQuota = ctx.repos.artifacts.latest<{ until: string }>(null, 'llm_quota_exhausted')?.data;
+    if (llmQuota && llmQuota.until > new Date().toISOString()) { rep.skippedProductionReason = `AI writing quota used up — waiting until ${llmQuota.until.slice(0, 16)} UTC`; break; }
     if (attempts >= 5) break;
     const forceNow = o.force && !forcedDone;
     if (!forceNow && !longDue && !packDue) { if (!attempts) rep.skippedProductionReason = ok('short') ? "today's videos are already produced" : '3 attempts today were blocked — trying again tomorrow'; break; }
@@ -316,6 +321,9 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
         const r = await produceVideo(ctx, { title, videoId: vid.id, format, niche, render: true, renderSize: o.renderSize ?? 'full' });
         if (!r.completed) {
           const why = `${r.steps.find((s) => s.status !== 'succeeded')?.error}`;
+          if (isDailyQuota(why)) {
+            ctx.repos.artifacts.save({ videoId: null, kind: 'llm_quota_exhausted', agent: 'autopilot', data: { until: nextQuotaReset(new Date()) } });
+          }
           if (why.includes('TTS_DAILY_QUOTA')) {
             const until = new Date(Date.now() + quotaResetSeconds(why) * 1000 + 5 * 60_000).toISOString();
             ctx.repos.artifacts.save({ videoId: null, kind: 'tts_quota_exhausted', agent: 'autopilot', data: { until } });
@@ -354,7 +362,8 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
         }
       }
     } catch (err) {
-      rep.errors.push(`production: ${(err as Error).message}`);
+      rep.errors.push(`production: ${(err as Error).message.slice(0, 300)}`);
+      if (isDailyQuota((err as Error).message)) ctx.repos.artifacts.save({ videoId: null, kind: 'llm_quota_exhausted', agent: 'autopilot', data: { until: nextQuotaReset(new Date()) } });
     }
     // Without full automation a human reviews each video: one per cycle is enough.
     if (!ctx.config.env.AUTO_APPROVE) break;
@@ -451,4 +460,15 @@ async function learnCycle(ctx: AgentContext, now: Date): Promise<string[]> {
     for (const x of r.data.log.slice(0, 2)) addLesson(ctx, `A Short needed repair (${x.slice(0, 160)}) — write each Short complete on the first try.`, r.video_id ?? '');
   }
   return lines;
+}
+
+/** Gemini free-tier daily quota (not a per-minute burst): retrying today only burns attempts and topics. */
+export function isDailyQuota(msg: string): boolean {
+  return /429|RESOURCE_EXHAUSTED|quota/i.test(msg) && /per ?day|PerDay|free_tier_requests|daily/i.test(msg);
+}
+/** Gemini daily quotas reset at midnight Pacific time (~08:00 UTC); wait until a bit after. */
+export function nextQuotaReset(now: Date): string {
+  const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 8, 10));
+  if (t <= now) t.setUTCDate(t.getUTCDate() + 1);
+  return t.toISOString();
 }
