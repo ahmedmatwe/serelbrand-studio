@@ -36,6 +36,13 @@ export class MetaClient {
     if (!res.ok || j.success === false || j.error) throw new Error(`Meta upload: ${j.error?.message ?? j.debug_info?.message ?? res.status}`);
   }
 
+  /** Read-only connection check: page name, token validity, linked Instagram account. Posts nothing. */
+  async check(): Promise<{ page: string; instagram?: string }> {
+    const p = await this.graph(this.o.pageId, { fields: 'name,instagram_business_account{username}' }, 'GET');
+    if (p.instagram_business_account?.id) this.igUser ??= p.instagram_business_account.id;
+    return { page: p.name, instagram: p.instagram_business_account?.username };
+  }
+
   /** Instagram professional account linked to the Page. */
   async instagramUser(): Promise<string | undefined> {
     if (this.igUser) return this.igUser;

@@ -127,6 +127,10 @@ async function main() {
         // Posts the Shorts whose time has come on Facebook + Instagram (run by .github/workflows/social.yml).
         const social = socialFromEnv(ctx.config.env);
         if (!social) return out('Facebook/Instagram not connected (META_PAGE_ID / META_PAGE_TOKEN / GITHUB_TOKEN missing) — nothing to do.');
+        if (process.argv.includes('--check')) {
+          const c = await social.meta.check();
+          return out(`✓ Facebook Page: ${c.page}\n${c.instagram ? `✓ Instagram: @${c.instagram}` : '✗ No Instagram professional account linked to this Page'}`);
+        }
         const log = await processQueue(social.queue, social.meta, new Date(), resolve(ctx.config.rootDir, 'data'));
         return out(log.length ? log.join('\n') : 'Nothing due.');
       }
