@@ -290,7 +290,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
   }
 
   /** Frames every 2 s of a rendered video → vision modesty audit. Returns the reason if any frame fails. */
-  private async modestyAudit(video: string, dir: string, tag: string, videoId: string): Promise<string | undefined> {
+  private async modestyAudit(video: string, dir: string, tag: string, videoId: string): Promise<{ reason: string; frames: number[] } | undefined> {
     const fdir = resolve(dir, `audit-${tag}`);
     mkdirSync(fdir, { recursive: true });
     try {
@@ -311,6 +311,8 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const lib = loadPhoneLibrary(this.ctx.config.rootDir);
     // Phone secrets: the screen drawing and the on-screen label always come from the reviewed library entry.
     o.timed.forEach((s, i) => { const e = lib?.secrets.find((x) => x.id === packTopics?.[i]?.subject); if (e) { s.ui = e.ui; s.onScreenText = e.onScreen; } });
+    // Clips already used anywhere in the pack + clips that failed the modesty audit are never picked again.
+    const banned = new Set<string>(o.timed.flatMap((x) => (x.shots ?? []).map((sh) => sh.visual?.asset.id).filter((id): id is string => Boolean(id))));
     for (const [i, s] of o.timed.entries()) {
       // A Short slightly over the limit is sped up a little (≤ 12%, still natural) instead of losing its ending.
       const tempo = s.duration > SHORT_MAX_SEC + 1 ? Math.min(1.12, s.duration / SHORT_MAX_SEC) : 1;
@@ -328,8 +330,21 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       };
       await this.renderTimeline([scaled], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
       const sc = script.scenes.find((x) => x.n === s.n);
-      // Final safety net: the finished Short is looked at frame by frame (every 2 s) for modesty.
-      const held = await this.modestyAudit(path, o.dir, `short-${s.n}`, o.videoId);
+      // Final safety net: the finished Short is looked at frame by frame (every 2 s) for modesty. A failing shot
+      // is banned, replaced by another modest clip and the Short re-rendered (up to 2 times) before giving up.
+      let held: string | undefined;
+      for (let attempt = 0; ; attempt++) {
+        const audit = await this.modestyAudit(path, o.dir, `short-${s.n}`, o.videoId);
+        if (!audit) { held = undefined; break; }
+        held = audit.reason;
+        const times = audit.frames.map((f) => (f - 1) * 2);
+        const badShots = (scaled.shots ?? []).filter((x) => x.visual && times.some((t) => t >= x.start - 0.5 && t <= x.start + x.duration + 0.5));
+        if (attempt >= 2 || !badShots.length) break;
+        o.notes.push(`Short ${s.n}: replaced ${badShots.length} shot(s) that failed the modesty audit (${audit.reason.slice(0, 120)})`);
+        for (const b of badShots) { banned.add(b.visual!.asset.id); b.visual = undefined; }
+        await fetchShotVisuals(this.ctx, badShots, { targetWidth: o.size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used: banned, notes: o.notes, videoId: o.videoId, fallbackQueries: [...(lib?.secrets.find((x) => x.id === packTopics?.[i]?.subject)?.footage ?? []), ...this.ctx.config.channel.fallbackFootage] });
+        await this.renderTimeline([scaled], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
+      }
       if (held) o.notes.push(`Short ${s.n} held back (modesty): ${held}`);
       shorts.push({ path, durationSec: Number(d.toFixed(2)), scenes: [s.n], title: packTopics?.[i]?.title || sc?.curiosityGap || sc?.onScreenText || script.mainTitle, ...(held ? { heldReason: held } : {}) });
     }

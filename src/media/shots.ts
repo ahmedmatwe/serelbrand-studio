@@ -349,21 +349,23 @@ export async function modestOnly(ctx: AgentContext, list: MediaAsset[], videoId?
  * Final safety net on the RENDERED video: frames every 2 s are shown to the vision model; any immodest frame
  * returns a reason (the Short is then held back from publishing). Undefined = clean (or vision unavailable).
  */
-export async function auditFrames(ctx: AgentContext, framesJpeg: Buffer[], videoId?: string): Promise<string | undefined> {
+export async function auditFrames(ctx: AgentContext, framesJpeg: Buffer[], videoId?: string): Promise<{ reason: string; frames: number[] } | undefined> {
   if (!framesJpeg.length || ctx.providers.llm.name.startsWith('mock')) return undefined;
+  const bad: number[] = [];
+  let reason = '';
   for (let i = 0; i < framesJpeg.length; i += 12) {
     const batch = framesJpeg.slice(i, i + 12);
     const r = await ctx.providers.llm.generateJson({
       task: 'video.modesty_audit',
       tier: 'light',
-      system: `${MODESTY_RULE} These are frames of one short video. JSON only: {"ok":true|false,"reason":"short description of the problem frame, if any"}`,
-      prompt: 'Does EVERY frame pass the modesty rule?',
-      schema: z.object({ ok: z.boolean(), reason: z.string().default('') }),
+      system: `${MODESTY_RULE} These are frames of one short video, numbered. JSON only: {"fail":[numbers of frames that fail],"reason":"what is wrong"}`,
+      prompt: 'List every frame that fails the modesty rule (empty list if all pass).',
+      schema: z.object({ fail: z.array(z.number().int()).default([]), reason: z.string().default('') }),
       images: batch.map((b, k) => ({ mimeType: 'image/jpeg', data: b.toString('base64'), label: `Frame ${i + k + 1}:` })),
       videoId,
       maxOutputTokens: 300,
     }).catch(() => undefined);
-    if (r && !r.data.ok) return r.data.reason || 'immodest frame';
+    if (r?.data.fail.length) { bad.push(...r.data.fail); reason ||= r.data.reason; }
   }
-  return undefined;
+  return bad.length ? { reason: reason || 'immodest frame', frames: [...new Set(bad)].sort((a, b) => a - b) } : undefined;
 }
