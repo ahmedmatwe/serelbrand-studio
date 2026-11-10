@@ -9,6 +9,7 @@ import type { PrePublicationReport } from '../reports/prepublication.ts';
 import { currentSlots, nextSlots } from './schedule.ts';
 import { buildReport } from './approval.ts';
 import { enqueue, platformCaptions, socialCaption, socialFromEnv } from './social.ts';
+import { chooseTitles } from '../agents/title-editor.ts';
 import { captionLessons } from '../analytics/analyst.ts';
 import { platformHours, platformTime, registerPost } from '../analytics/learner.ts';
 import { family, loadPhoneLibrary } from '../agents/niche/phone-library.ts';
@@ -79,6 +80,16 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
       const own = factCheck ? { ...factCheck, claims: factCheck.claims.filter((c) => c.sceneN === sc.n) } : undefined;
       return `${composeDescription({ description: lead, hashtags: seo.hashtags, chapters: [] }, own, render?.data.assets)}\n#Shorts`;
     };
+    // Title editor: 5 titles per Short, the strongest one goes out (learned from our own view counts).
+    if (pack && !env.DRY_RUN) {
+      const items = render!.data.shorts!.map((sh) => { const sc = script?.scenes.find((x) => sh.scenes?.includes(x.n)); return sc ? { n: sc.n, title: sh.title, narration: sc.voiceover, onScreen: sc.onScreenText } : undefined; }).filter((x): x is NonNullable<typeof x> => Boolean(x));
+      const picks = await chooseTitles(this.ctx, items, videoId);
+      for (const c of picks) { const sh = render!.data.shorts!.find((x) => x.scenes?.includes(c.n)); if (sh) sh.title = c.to; }
+      if (picks.length) {
+        this.ctx.repos.artifacts.save({ videoId, kind: 'title_choices', agent: 'title-editor', data: { picks } });
+        this.ctx.repos.artifacts.save({ videoId, kind: 'render', agent: 'title-editor', data: render!.data });
+      }
+    }
     let attempts = 0;
     const res = await withRetry(
       () => {
@@ -142,6 +153,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     }
     // Same Shorts as Reels on the Facebook Page + Instagram, at the same time they go public on YouTube.
     const social = !env.DRY_RUN && pack ? socialFromEnv(env) : undefined;
+    const tiktokCaptions: { title: string; caption: string; facebookAt?: string; instagramAt?: string }[] = [];
     if (social) {
       for (const [i, sh] of (render?.data.shorts ?? []).entries()) {
         const sc = script?.scenes.find((x) => sh.scenes?.includes(x.n));
@@ -151,12 +163,15 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
           const ytAt = times[i] ?? new Date().toISOString();
           const at = { facebook: platformTime(platformHours(this.ctx, 'facebook'), ytAt, i), instagram: platformTime(platformHours(this.ctx, 'instagram'), ytAt, i) };
           const captions = sc ? await platformCaptions(this.ctx, sh.title, sc.voiceover, seo.hashtags, videoId, { facebook: captionLessons(this.ctx, 'facebook'), instagram: captionLessons(this.ctx, 'instagram') }) : {};
-          await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), captions, publishAt: ytAt, at, platforms: ['facebook', 'instagram'], videoId, ...secretOf(sh) });
+          const { tiktok, ...metaCaptions } = captions as typeof captions & { tiktok?: string };
+          tiktokCaptions.push({ title: sh.title, caption: tiktok ?? socialCaption(sh.title, lead, seo.hashtags.slice(0, 5)), facebookAt: at.facebook, instagramAt: at.instagram });
+          await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), captions: metaCaptions, publishAt: ytAt, at, platforms: ['facebook', 'instagram'], videoId, ...secretOf(sh) });
         } catch (err) {
           this.ctx.logger.warn('social queue failed', { videoId, short: sh.title, error: (err as Error).message });
         }
       }
     }
+    if (tiktokCaptions.length) this.ctx.repos.artifacts.save({ videoId, kind: 'social_extras', agent: 'publisher', data: { shorts: tiktokCaptions } });
     for (const w of res.warnings ?? []) this.ctx.logger.warn(w, { videoId });
     if ((res.warnings ?? []).some((w) => w.startsWith('YOUTUBE_LOCKED_PRIVATE'))) {
       this.ctx.repos.videos.update(videoId, { status: 'uploaded', visibility: 'private', scheduled_at: null });

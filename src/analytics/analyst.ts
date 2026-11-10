@@ -44,6 +44,14 @@ export function buildPerformance(ctx: AgentContext, posts: Post[], now: Date): S
   return [...by.values()].map((s) => ({ ...s, results: s.results ?? [] }));
 }
 
+/** Everything the Short said (for answering comments only from what it really says). */
+export function postNarration(ctx: AgentContext, p: Post): string | undefined {
+  if (!p.video_id) return undefined;
+  const topics = ctx.repos.artifacts.latest<{ topics?: { title: string; subject: string }[] }>(p.video_id, 'calendar_entry')?.data.topics ?? [];
+  const i = topics.findIndex((t) => t.subject === p.secret_id || strip(t.title) === strip(p.title));
+  return ctx.repos.artifacts.latest<{ scenes: { n: number; voiceover: string }[] }>(p.video_id, 'script')?.data.scenes.find((s) => s.n === i + 1)?.voiceover;
+}
+
 /** The Short's opening sentence, length and duration, from the production that made it. */
 function whatItSaid(ctx: AgentContext, p: Post): Omit<ShortPerformance, 'title' | 'family' | 'secretId'> {
   const out: Omit<ShortPerformance, 'title' | 'family' | 'secretId'> = { results: [] };

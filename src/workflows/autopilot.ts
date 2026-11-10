@@ -24,6 +24,7 @@ import { qcBlockers, qualityChecklist } from '../reports/qc.ts';
 import { quotaResetSeconds } from '../providers/tts/gemini-tts.ts';
 import { writePackage } from '../reports/package.ts';
 import { steps } from './steps.ts';
+import { answerComments, repliesMessage } from '../publishing/comments.ts';
 import { analyzePerformance, isInfraProblem } from '../analytics/analyst.ts';
 import { dailyReport, learnedFamilyWeights, registerPost, runLearning } from '../analytics/learner.ts';
 import { cairoTime, telegramFromEnv, type Telegram } from '../publishing/telegram.ts';
@@ -43,6 +44,7 @@ export interface CycleReport {
   startedAt: string;
   published: string[];
   analyticsUpdated: string[];
+  commentReplies?: number;
   produced: { videoId: string; title: string; recommendation: string; claimsToVerify: number; autoApproved?: boolean; autoApproveBlockedBy?: string[]; publishAt?: string } | null;
   skippedProductionReason?: string;
   pendingApprovals: number;
@@ -246,6 +248,27 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   // The learning loop across YouTube + Facebook + Instagram: measure every post, learn hours/content/length,
   // turn problems into written lessons the writers read next time.
   try { rep.learning = await learnCycle(ctx, now); } catch (err) { rep.errors.push(`learning: ${(err as Error).message.slice(0, 160)}`); }
+  // Community manager: answer new comments on recent Shorts (engagement → the platforms show them to more people).
+  try {
+    const yt = ctx.providers.youtube;
+    const social = socialFromEnv(ctx.config.env);
+    if (!ctx.config.env.DRY_RUN && (yt.unansweredComments || social)) {
+      const r = await answerComments(ctx, {
+        unanswered: async (pl, id) => pl === 'youtube' ? (yt.unansweredComments ? yt.unansweredComments(id) : []) : social ? social.meta.unansweredComments(pl, id) : [],
+        reply: async (pl, cid, text) => { if (pl === 'youtube') return yt.replyToComment!(cid, text); if (!social) throw new Error('not connected'); return social.meta.replyToComment(pl, cid, text); },
+      }, now);
+      rep.commentReplies = r.replied.length;
+      if (tg) {
+        const msg = repliesMessage(r.replied);
+        if (msg) await tg.send(msg).catch(() => {});
+        // Facebook needs one extra permission to reply; tell the owner once how to add it.
+        if (r.notes.some((n) => n.startsWith('facebook') && /permission|#200|#10/i.test(n)) && !ctx.repos.artifacts.latest(null, 'fb_reply_hint')) {
+          await tg.send('ℹ️ فيسبوك محتاج صلاحية زيادة عشان أرد على التعليقات هناك (pages_manage_engagement). إنستجرام ويوتيوب شغالين. قولّي في الشات وأنا أقولك تعملها إزاي في دقيقة.').catch(() => {});
+          ctx.repos.artifacts.save({ videoId: null, kind: 'fb_reply_hint', agent: 'autopilot', data: { at: now.toISOString() } });
+        }
+      }
+    }
+  } catch (err) { rep.errors.push(`comments: ${(err as Error).message.slice(0, 160)}`); }
 
   // 3) Production, every day: a pack of 3 standalone Shorts (3 different topics), plus — on long-video days
   //    (2 a week) — one standalone long video (no Shorts cut from it). A blocked or crashed video doesn't use
@@ -514,11 +537,16 @@ async function sendShortsToTelegram(ctx: AgentContext, tg: Telegram, videoId: st
     return;
   }
   const ytTimes = pub ? [pub.publishAt, ...(pub.shorts ?? []).map((x) => x.publishAt)] : [];
+  const extras = ctx.repos.artifacts.latest<{ shorts: { title: string; caption: string; facebookAt?: string; instagramAt?: string }[] }>(videoId, 'social_extras')?.data;
   const blocked = produced.autoApproved ? undefined : (produced.autoApproveBlockedBy ?? ['سبب غير معروف'])[0]!.slice(0, 200);
   const sentVideos: { title: string; file_id?: string; publishAt?: string; blocked?: string }[] = [];
   for (const [i, sh] of render.shorts.entries()) {
-    const status = blocked ? `⛔ اتوقف ومش هيتنشر: ${blocked}` : `✅ هينزل ${cairoTime(ytTimes[i])} على يوتيوب وفيسبوك وإنستجرام`;
+    const x = extras?.shorts.find((e) => e.title === sh.title);
+    const status = blocked ? `⛔ اتوقف ومش هيتنشر: ${blocked}`
+      : `✅ هينزل:\n▶️ يوتيوب ${cairoTime(ytTimes[i])}${x?.facebookAt ? `\n📘 فيسبوك ${cairoTime(x.facebookAt)}` : ''}${x?.instagramAt ? `\n📸 إنستجرام ${cairoTime(x.instagramAt)}` : ''}`;
     const fileId = await tg.video(sh.path, `🎬 ${sh.title}\n${status}\nمدته ${Math.round(sh.durationSec)} ثانية`);
+    // TikTok can't be posted automatically yet: the video above + this ready caption = post it in 10 seconds.
+    if (!blocked && x?.caption) await tg.send(`🎵 جاهز لتيك توك — احفظ الفيديو اللي فوق وانسخ الكلام ده:\n\n${x.caption}`).catch(() => {});
     sentVideos.push({ title: sh.title, file_id: fileId, publishAt: blocked ? undefined : ytTimes[i] ?? undefined, blocked });
   }
   // The assistant bot re-sends these on request ("فيديو") by file_id, without uploading again.

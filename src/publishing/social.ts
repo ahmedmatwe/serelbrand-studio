@@ -18,6 +18,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // ---------------------------------------------------------------- Meta
 export class MetaClient {
   private igUser?: string;
+  private igName?: string;
   private readonly o: { pageId: string; token: string; igUserId?: string; version: string; fetchImpl?: typeof fetch; sleep?: (ms: number) => Promise<void> };
   constructor(o: MetaClient['o']) { this.o = o; this.igUser = o.igUserId; }
   private get f() { return this.o.fetchImpl ?? fetch; }
@@ -44,6 +45,28 @@ export class MetaClient {
     const dbg = await this.graph('debug_token', { input_token: this.o.token }, 'GET').catch(() => undefined);
     const status = await this.graph(this.o.pageId, { fields: 'is_published,followers_count,fan_count,verification_status,category' }, 'GET').catch((e: Error) => ({ error: e.message.slice(0, 200) }));
     return { page: p.name, instagram: p.instagram_business_account?.username, scopes: dbg?.data?.scopes, status };
+  }
+
+  /** Comments on a Reel/post with no reply from the Page / IG account yet. */
+  async unansweredComments(platform: 'facebook' | 'instagram', mediaId: string): Promise<{ id: string; text: string; author: string; at: string }[]> {
+    if (platform === 'instagram') {
+      this.igName ??= (await this.check()).instagram;
+      const mine = this.igName;
+      const j = await this.graph(`${mediaId}/comments`, { fields: 'id,text,username,timestamp,replies{username}', limit: '50' }, 'GET');
+      return ((j.data ?? []) as { id: string; text: string; username: string; timestamp: string; replies?: { data: { username: string }[] } }[])
+        .filter((c) => c.username !== mine && !(c.replies?.data ?? []).some((r) => r.username === mine))
+        .map((c) => ({ id: c.id, text: c.text, author: c.username, at: c.timestamp }));
+    }
+    const j = await this.graph(`${mediaId}/comments`, { fields: 'id,message,from,created_time,comments{from}', limit: '50' }, 'GET');
+    return ((j.data ?? []) as { id: string; message: string; from?: { id: string; name: string }; created_time: string; comments?: { data: { from?: { id: string } }[] } }[])
+      .filter((c) => c.from?.id !== this.o.pageId && !(c.comments?.data ?? []).some((r) => r.from?.id === this.o.pageId))
+      .map((c) => ({ id: c.id, text: c.message, author: c.from?.name ?? '', at: c.created_time }));
+  }
+
+  /** Public reply under a comment, as the Page (needs pages_manage_engagement) or the IG account. */
+  async replyToComment(platform: 'facebook' | 'instagram', commentId: string, text: string): Promise<string> {
+    const r = await this.graph(platform === 'instagram' ? `${commentId}/replies` : `${commentId}/comments`, { message: text });
+    return String(r.id);
   }
 
   /** Facebook Reel counters (plays from insights when allowed, else likes/comments only). */
@@ -232,7 +255,7 @@ export function socialFromEnv(env: { META_PAGE_ID?: string; META_PAGE_TOKEN?: st
  * Facebook: conversational question that invites comments, 2–3 hashtags.
  * Facts only from the Short's own narration. Falls back to the plain caption if the model is unavailable.
  */
-export async function platformCaptions(ctx: { providers: { llm: { generateJson: (r: any) => Promise<{ data: any }> } } }, title: string, narration: string, hashtags: string[], videoId?: string, rules: Partial<Record<'facebook' | 'instagram', string[]>> = {}): Promise<Partial<Record<'facebook' | 'instagram', string>>> {
+export async function platformCaptions(ctx: { providers: { llm: { generateJson: (r: any) => Promise<{ data: any }> } } }, title: string, narration: string, hashtags: string[], videoId?: string, rules: Partial<Record<'facebook' | 'instagram', string[]>> = {}): Promise<Partial<Record<'facebook' | 'instagram' | 'tiktok', string>>> {
   const { z } = await import('zod');
   const r = await ctx.providers.llm.generateJson({
     task: 'social.captions',
@@ -240,11 +263,12 @@ export async function platformCaptions(ctx: { providers: { llm: { generateJson: 
     system: 'You are the social media manager of an Egyptian Arabic channel about phone secrets ("سر الموبايل"). Write captions in natural Egyptian Arabic for the SAME Reel on two platforms, each in its native style. ' +
       'instagram: first line = a hook that makes people tap "more" (≤ 10 words, emoji ok); 2–3 short lines with the exact code/steps from the narration; a call to SAVE and SEND to a friend; then 8–12 relevant Arabic+English hashtags (#سر_الموبايل first). ' +
       'facebook: 2–4 conversational lines, end with a question that invites comments (e.g. "جربتها؟ قولنا في الكومنتات"), 2–3 hashtags. ' +
-      'Never add facts, codes or steps that are not in the narration. Apply analystRules (learned from our real view counts on each platform). JSON only: {"instagram":"…","facebook":"…"}.',
+      'tiktok: one punchy hook line + one line with the key step, then 4–6 hashtags that people search on TikTok (Arabic + #fyp-style English, #سر_الموبايل first), ≤ 220 characters. ' +
+      'Never add facts, codes or steps that are not in the narration. Apply analystRules (learned from our real view counts on each platform). JSON only: {"instagram":"…","facebook":"…","tiktok":"…"}.',
     prompt: JSON.stringify({ title, narration, hashtags, ...(rules.facebook?.length || rules.instagram?.length ? { analystRules: rules } : {}) }),
-    schema: z.object({ instagram: z.string().min(20), facebook: z.string().min(20) }),
+    schema: z.object({ instagram: z.string().min(20), facebook: z.string().min(20), tiktok: z.string().min(10).optional() }),
     videoId,
     maxOutputTokens: 1500,
   }).catch(() => undefined);
-  return r ? { instagram: String(r.data.instagram).slice(0, 2100), facebook: String(r.data.facebook).slice(0, 2100) } : {};
+  return r ? { instagram: String(r.data.instagram).slice(0, 2100), facebook: String(r.data.facebook).slice(0, 2100), ...(r.data.tiktok ? { tiktok: String(r.data.tiktok).slice(0, 2200) } : {}) } : {};
 }

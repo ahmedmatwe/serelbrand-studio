@@ -137,7 +137,12 @@ export interface YouTubeProvider {
   /** Real-time public counters for several videos (Data API, no lag). */
   statistics?(ids: string[]): Promise<Record<string, { views: number; likes: number; comments: number }>>;
   channelStats?(): Promise<{ subscribers: number; views: number }>;
+  /** Top-level comments on one video that the channel has not answered yet. */
+  unansweredComments?(videoId: string): Promise<IncomingComment[]>;
+  /** Public reply from the channel under a comment. */
+  replyToComment?(commentId: string, text: string): Promise<string>;
 }
+export interface IncomingComment { id: string; text: string; author: string; at: string }
 
 export class MockYouTube implements YouTubeProvider {
   readonly name = 'mock-youtube';

@@ -161,6 +161,26 @@ export class RealYouTube implements YouTubeProvider {
     return { subscribers: Number(st.subscriberCount ?? 0), views: Number(st.viewCount ?? 0) };
   }
 
+  private channelId?: string;
+  /** Top-level comments on a video with no reply from the channel yet (newest first, up to 50). */
+  async unansweredComments(videoId: string): Promise<{ id: string; text: string; author: string; at: string }[]> {
+    this.channelId ??= (await this.channel()).id;
+    const res = await this.o.fetchImpl(`${API}/youtube/v3/commentThreads?part=snippet,replies&videoId=${encodeURIComponent(videoId)}&maxResults=50&order=time&textFormat=plainText`, { headers: await this.auth() });
+    if (!res.ok) await this.fail(res, 'commentThreads.list');
+    type C = { id: string; snippet: { textDisplay: string; authorDisplayName: string; publishedAt: string; authorChannelId?: { value: string } } };
+    const j = (await res.json()) as { items?: { snippet: { topLevelComment: C }; replies?: { comments: C[] } }[] };
+    return (j.items ?? [])
+      .filter((t) => t.snippet.topLevelComment.snippet.authorChannelId?.value !== this.channelId && !(t.replies?.comments ?? []).some((r) => r.snippet.authorChannelId?.value === this.channelId))
+      .map((t) => { const c = t.snippet.topLevelComment; return { id: c.id, text: c.snippet.textDisplay, author: c.snippet.authorDisplayName, at: c.snippet.publishedAt }; });
+  }
+
+  /** Replies under a comment as the channel (comments.insert, 50 quota units). */
+  async replyToComment(commentId: string, text: string): Promise<string> {
+    const res = await this.o.fetchImpl(`${API}/youtube/v3/comments?part=snippet`, { method: 'POST', headers: await this.auth({ 'content-type': 'application/json' }), body: JSON.stringify({ snippet: { parentId: commentId, textOriginal: text } }) });
+    if (!res.ok) await this.fail(res, 'comments.insert');
+    return ((await res.json()) as { id: string }).id;
+  }
+
   /** Real-time view/like/comment counters (Data API videos.list, 1 quota unit per 50 videos). */
   async statistics(ids: string[]): Promise<Record<string, { views: number; likes: number; comments: number }>> {
     const out: Record<string, { views: number; likes: number; comments: number }> = {};
