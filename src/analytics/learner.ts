@@ -19,6 +19,12 @@ export interface Post { id: string; platform: Platform; external_id: string; vid
 /** Candidate publishing hours (UTC 05–20 = 07:00–22:00 Cairo). */
 export const CANDIDATE_HOURS = Array.from({ length: 16 }, (_, i) => i + 5);
 export const DEFAULT_SHORT_HOURS = [11, 15, 18];
+/**
+ * Starting hours per platform (UTC; Cairo = +2) before there is data: YouTube 1/5/8 pm, Facebook 12/5/9 pm
+ * (evening scroll after work), Instagram 11 am/4/8 pm. The learner replaces each with what that platform's
+ * own numbers prove.
+ */
+export const PLATFORM_DEFAULT_HOURS: Record<Platform, number[]> = { youtube: [11, 15, 18], facebook: [10, 15, 19], instagram: [9, 14, 18] };
 
 // ------------------------------------------------------------------ registry
 export function registerPost(ctx: AgentContext, p: Omit<Post, 'id' | 'metrics'>) {
@@ -57,9 +63,9 @@ export function scorePosts(posts: Post[]): { post: Post; score: number }[] {
  * Picks `count` daily hours (≥ minGap apart) by Upper Confidence Bound over hour scores. Untested hours get a
  * big bonus (they must be tried), the default hours start with a small prior so day one is sensible.
  */
-export function chooseHours(scored: { post: Post; score: number }[], count = 3, minGap = 3, c = 0.6): { hours: number[]; table: { h: number; n: number; mean: number; ucb: number }[] } {
+export function chooseHours(scored: { post: Post; score: number }[], count = 3, minGap = 3, c = 0.6, defaults = DEFAULT_SHORT_HOURS): { hours: number[]; table: { h: number; n: number; mean: number; ucb: number }[] } {
   const stats = new Map<number, { n: number; sum: number }>();
-  for (const h of CANDIDATE_HOURS) stats.set(h, DEFAULT_SHORT_HOURS.includes(h) ? { n: 2, sum: 0.2 } : { n: 0, sum: 0 });
+  for (const h of CANDIDATE_HOURS) stats.set(h, defaults.includes(h) ? { n: 2, sum: 0.2 } : { n: 0, sum: 0 });
   for (const { post, score } of scored) {
     const h = new Date(post.publish_at).getUTCHours();
     const s = stats.get(h);
@@ -71,7 +77,7 @@ export function chooseHours(scored: { post: Post; score: number }[], count = 3, 
     const mean = s.n ? s.sum / s.n : 0;
     return { h, n: s.n, mean, ucb: mean + c * Math.sqrt(Math.log(total) / (s.n + 1)) };
   }).sort((a, b) => b.ucb - a.ucb || a.h - b.h);
-  if (!scored.length) return { hours: [...DEFAULT_SHORT_HOURS], table };
+  if (!scored.length) return { hours: [...defaults], table };
   // Exploit: the best proven hours (by mean, defaults carry a small prior) for all slots but one;
   // explore: the last slot goes to the highest-UCB hour not yet chosen (an untested hour gets its trial).
   const hours: number[] = [];
@@ -136,6 +142,23 @@ function writeKnowledge(ctx: AgentContext, prefix: string, value: string, eviden
 export const learnedFamilyWeights = (ctx: AgentContext): Record<string, number> | undefined => { const v = readKnowledge(ctx, 'family_weights='); return v ? JSON.parse(v) : undefined; };
 export const learnedShortWords = (ctx: AgentContext): number | undefined => { const v = readKnowledge(ctx, 'short_target_words='); return v ? Number(v) : undefined; };
 export const learnedShortHours = (ctx: AgentContext): number[] | undefined => { const v = readKnowledge(ctx, 'short_utc_hours='); return v ? v.split(',').map(Number) : undefined; };
+/** Current best Shorts hours (UTC) for one platform: learned from its own posts, else its starting hours. */
+export function platformHours(ctx: AgentContext, pl: Platform): number[] {
+  const v = readKnowledge(ctx, pl === 'youtube' ? 'short_utc_hours=' : `short_utc_hours:${pl}=`);
+  const h = v?.split(',').map(Number).filter((x) => x >= 0 && x < 24);
+  return h?.length ? h : [...PLATFORM_DEFAULT_HOURS[pl]];
+}
+/**
+ * When Short number `i` of a day goes out on a platform: that platform's i-th best hour on the same day as its
+ * YouTube slot. Never in the past (then it follows YouTube's time).
+ */
+export function platformTime(hours: number[], youtubeAt: string, i: number, now = new Date()): string {
+  const sorted = [...new Set(hours)].sort((a, b) => a - b);
+  if (!sorted.length) return youtubeAt;
+  const d = new Date(youtubeAt);
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), sorted[i % sorted.length]!));
+  return t.getTime() - now.getTime() >= 10 * 60_000 ? t.toISOString() : youtubeAt;
+}
 
 // ------------------------------------------------------------------ the loop
 export interface MetricsSource {
@@ -173,10 +196,18 @@ export async function runLearning(ctx: AgentContext, src: MetricsSource, now = n
   // 2–5) Learn.
   const scored = scorePosts(posts);
   if (!scored.length) return log;
-  const { hours, table } = chooseHours(scored);
+  // Each platform gets its own best hours, learned from that platform's own numbers only (people scroll
+  // Facebook, Instagram and YouTube at different times). YouTube's plan keeps the old key the scheduler reads.
   const cairo = (h: number) => `${(h + 2) % 24}:00`;
-  if (writeKnowledge(ctx, 'short_utc_hours=', hours.join(','), table.slice(0, 6).map((r) => `${cairo(r.h)} n=${r.n} mean=${r.mean.toFixed(2)}`).join('; '), scored.length)) {
-    log.push(`🕒 مواعيد النشر الجاية (بتوقيت القاهرة): ${hours.map(cairo).join(' و ')} — مبنية على ${scored.length} منشور (بنجرّب مواعيد جديدة كمان عشان نلاقي الأحسن)`);
+  const NAME: Record<Platform, string> = { youtube: '▶️ يوتيوب', facebook: '📘 فيسبوك', instagram: '📸 إنستجرام' };
+  for (const pl of ['youtube', 'facebook', 'instagram'] as Platform[]) {
+    const own = scored.filter((x) => x.post.platform === pl);
+    if (!own.length) continue;
+    const { hours, table } = chooseHours(own, 3, 3, 0.6, PLATFORM_DEFAULT_HOURS[pl]);
+    const key = pl === 'youtube' ? 'short_utc_hours=' : `short_utc_hours:${pl}=`;
+    if (writeKnowledge(ctx, key, hours.join(','), table.slice(0, 6).map((r) => `${cairo(r.h)} n=${r.n} mean=${r.mean.toFixed(2)}`).join('; '), own.length)) {
+      log.push(`🕒 ${NAME[pl]} — مواعيد النشر الجاية (بتوقيت القاهرة): ${hours.map(cairo).join(' و ')} — من ${own.length} منشور عليه (وبنجرّب مواعيد جديدة كمان)`);
+    }
   }
   const w = familyWeights(scored);
   if (writeKnowledge(ctx, 'family_weights=', JSON.stringify(Object.fromEntries(Object.entries(w).map(([k, v]) => [k, Number(v.toFixed(2))]))), `${scored.length} scored posts`, scored.length)) {

@@ -11,7 +11,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 
-export interface SocialTicket { title: string; caption: string; /** Platform-specific caption (written by each platform's specialist). */ captions?: Partial<Record<'facebook' | 'instagram', string>>; publishAt: string; videoId?: string; secretId?: string; family?: string; platforms: ('facebook' | 'instagram')[]; done: string[]; tries: number; lastError?: string; video: string }
+export interface SocialTicket { title: string; caption: string; /** Platform-specific caption (written by each platform's specialist). */ captions?: Partial<Record<'facebook' | 'instagram', string>>; publishAt: string; /** Own best time per platform (else publishAt). */ at?: Partial<Record<'facebook' | 'instagram', string>>; videoId?: string; secretId?: string; family?: string; platforms: ('facebook' | 'instagram')[]; done: string[]; tries: number; lastError?: string; video: string }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -163,13 +163,16 @@ export async function processQueue(q: SocialQueue, meta: MetaClient, now = new D
   const assets = await q.assets();
   for (const tAsset of assets.filter((a) => a.name.endsWith('.json') && a.name !== POSTED)) {
     const t = JSON.parse((await q.download(tAsset.id)).toString('utf8')) as SocialTicket;
-    if (new Date(t.publishAt) > now) continue;
+    const due = (p: 'facebook' | 'instagram') => new Date(t.at?.[p] ?? t.publishAt) <= now;
+    const todo = t.platforms.filter((x) => !t.done.includes(x) && due(x));
+    if (!todo.length) continue;
     const vAsset = assets.find((a) => a.name === t.video);
     if (!vAsset) { log.push(`missing video for ${t.title} — ticket dropped`); await q.remove(tAsset.id); continue; }
     const { writeFileSync, rmSync } = await import('node:fs');
     const file = `${tmpDir}/${t.video}`;
     writeFileSync(file, await q.download(vAsset.id));
-    for (const p of t.platforms.filter((x) => !t.done.includes(x))) {
+    let failed = false;
+    for (const p of todo) {
       try {
         const cap = t.captions?.[p] || t.caption;
         const id = p === 'facebook' ? await meta.facebookReel(file, cap) : await meta.instagramReel(file, cap);
@@ -177,13 +180,14 @@ export async function processQueue(q: SocialQueue, meta: MetaClient, now = new D
         log.push(`${p}: posted "${t.title}" (${id})`);
         posted.push({ platform: p, id, at: new Date().toISOString(), title: t.title, videoId: t.videoId, secretId: t.secretId, family: t.family });
       } catch (err) {
+        failed = true;
         t.lastError = `${p}: ${(err as Error).message.slice(0, 200)}`;
         log.push(`${p}: FAILED "${t.title}" — ${t.lastError}`);
       }
     }
     rmSync(file, { force: true });
     const finished = t.platforms.every((x) => t.done.includes(x));
-    t.tries++;
+    if (failed) t.tries++; // waiting for another platform's later time is not a failed try
     await q.remove(tAsset.id);
     if (finished || t.tries >= 5) {
       await q.remove(vAsset.id);

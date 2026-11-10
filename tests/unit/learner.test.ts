@@ -64,3 +64,12 @@ test('daily report: every Short with its views per platform, totals and the best
   assert.match(r, /🏆 الأحسن: كود سري \(120 مشاهدة\)/);
   ctx.close();
 });
+
+test('learner: each platform learns its own hours; Short i goes at that platform\'s i-th hour, never in the past', async () => {
+  const { chooseHours, platformTime, PLATFORM_DEFAULT_HOURS } = await import('../../src/analytics/learner.ts');
+  assert.deepEqual(chooseHours([], 3, 3, 0.6, PLATFORM_DEFAULT_HOURS.instagram).hours, PLATFORM_DEFAULT_HOURS.instagram);
+  const now = new Date('2026-11-10T00:30:00Z');
+  assert.equal(platformTime([10, 15, 19], '2026-11-10T11:00:00.000Z', 0, now), '2026-11-10T10:00:00.000Z');
+  assert.equal(platformTime([19, 10, 15], '2026-11-10T18:00:00.000Z', 2, now), '2026-11-10T19:00:00.000Z');
+  assert.equal(platformTime([10, 15, 19], '2026-11-10T11:00:00.000Z', 0, new Date('2026-11-10T10:30:00Z')), '2026-11-10T11:00:00.000Z', 'past hour → follows YouTube');
+});

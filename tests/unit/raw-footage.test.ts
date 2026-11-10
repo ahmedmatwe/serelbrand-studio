@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isRawFootage } from '../src/media/shots.ts';
+import { isRawFootage } from '../../src/media/shots.ts';
 const a = (tags: string[]) => ({ tags } as never);
 test('raw footage: green screen / tracking markers / mockups are rejected, normal phone clips pass', () => {
   assert.equal(isRawFootage(a(['smartphone', 'green screen', 'chroma key'])), true);

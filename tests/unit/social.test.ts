@@ -66,3 +66,23 @@ test('social: a failed platform is retried next run without re-posting the other
     assert.deepEqual([...assets.values()].map((a) => a.name), ['posted-log.json']);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
+
+test('social: each platform goes out at its own time; waiting is not counted as a failed try', async () => {
+  const d = mkdtempSync(join(tmpdir(), 'soc-'));
+  try {
+    const file = join(d, 's.mp4'); writeFileSync(file, Buffer.from('v'));
+    const { f, assets, posted } = fakes();
+    const q = new SocialQueue({ repo: 'o/r', token: 't', fetchImpl: f });
+    const meta = new MetaClient({ pageId: 'p', token: 'pt', igUserId: 'ig', version: 'v23.0', fetchImpl: f, sleep: async () => {} });
+    await enqueue(q, file, { title: 'y', caption: 'y', publishAt: '2026-11-10T11:00:00.000Z', at: { facebook: '2026-11-10T10:00:00.000Z', instagram: '2026-11-10T14:00:00.000Z' }, platforms: ['facebook', 'instagram'] });
+    await processQueue(q, meta, new Date('2026-11-10T10:04:00Z'), d);
+    assert.deepEqual(posted, ['facebook:y'], 'facebook at its hour, before YouTube');
+    for (const h of [11, 12, 13]) await processQueue(q, meta, new Date(`2026-11-10T${h}:04:00Z`), d);
+    assert.deepEqual(posted, ['facebook:y'], 'instagram waits for its own hour');
+    const ticket = [...assets.values()].find((a) => a.name.endsWith('.json') && a.name !== 'posted-log.json')!;
+    assert.equal(JSON.parse(ticket.data.toString()).tries, 0);
+    await processQueue(q, meta, new Date('2026-11-10T14:04:00Z'), d);
+    assert.deepEqual(posted, ['facebook:y', 'instagram']);
+    assert.deepEqual([...assets.values()].map((a) => a.name), ['posted-log.json']);
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
