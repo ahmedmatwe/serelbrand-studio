@@ -10,8 +10,9 @@
  */
 import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
+import { TikTokClient } from './tiktok.ts';
 
-export interface SocialTicket { title: string; caption: string; /** Platform-specific caption (written by each platform's specialist). */ captions?: Partial<Record<'facebook' | 'instagram', string>>; publishAt: string; /** Own best time per platform (else publishAt). */ at?: Partial<Record<'facebook' | 'instagram', string>>; videoId?: string; secretId?: string; family?: string; platforms: ('facebook' | 'instagram')[]; done: string[]; tries: number; lastError?: string; video: string }
+export interface SocialTicket { title: string; caption: string; /** Platform-specific caption (written by each platform's specialist). */ captions?: Partial<Record<'facebook' | 'instagram' | 'tiktok', string>>; publishAt: string; /** Own best time per platform (else publishAt). */ at?: Partial<Record<'facebook' | 'instagram' | 'tiktok', string>>; videoId?: string; secretId?: string; family?: string; platforms: ('facebook' | 'instagram' | 'tiktok')[]; done: string[]; tries: number; lastError?: string; video: string }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -183,13 +184,13 @@ export async function enqueue(q: SocialQueue, file: string, t: Omit<SocialTicket
 }
 
 /** Posts every due ticket on the platforms it still lacks. Returns a log line per action. */
-export async function processQueue(q: SocialQueue, meta: MetaClient, now = new Date(), tmpDir = '/tmp'): Promise<string[]> {
+export async function processQueue(q: SocialQueue, meta: MetaClient, now = new Date(), tmpDir = '/tmp', tiktok?: TikTokClient): Promise<string[]> {
   const log: string[] = [];
   const posted: PostedEntry[] = [];
   const assets = await q.assets();
   for (const tAsset of assets.filter((a) => a.name.endsWith('.json') && a.name !== POSTED)) {
     const t = JSON.parse((await q.download(tAsset.id)).toString('utf8')) as SocialTicket;
-    const due = (p: 'facebook' | 'instagram') => new Date(t.at?.[p] ?? t.publishAt) <= now;
+    const due = (p: 'facebook' | 'instagram' | 'tiktok') => new Date(t.at?.[p] ?? t.publishAt) <= now;
     const todo = t.platforms.filter((x) => !t.done.includes(x) && due(x));
     if (!todo.length) continue;
     const vAsset = assets.find((a) => a.name === t.video);
@@ -201,7 +202,7 @@ export async function processQueue(q: SocialQueue, meta: MetaClient, now = new D
     for (const p of todo) {
       try {
         const cap = t.captions?.[p] || t.caption;
-        const id = p === 'facebook' ? await meta.facebookReel(file, cap) : await meta.instagramReel(file, cap);
+        const id = p === 'facebook' ? await meta.facebookReel(file, cap) : p === 'instagram' ? await meta.instagramReel(file, cap) : tiktok ? await tiktok.video(file, cap) : (() => { throw new Error('TikTok is not connected'); })();
         t.done.push(p);
         log.push(`${p}: posted "${t.title}" (${id})`);
         posted.push({ platform: p, id, at: new Date().toISOString(), title: t.title, videoId: t.videoId, secretId: t.secretId, family: t.family });
@@ -227,7 +228,7 @@ export async function processQueue(q: SocialQueue, meta: MetaClient, now = new D
 }
 
 /** What was posted where (read by the autopilot's learner to measure each Reel). */
-export interface PostedEntry { platform: 'facebook' | 'instagram'; id: string; at: string; title: string; videoId?: string; secretId?: string; family?: string }
+export interface PostedEntry { platform: 'facebook' | 'instagram' | 'tiktok'; id: string; at: string; title: string; videoId?: string; secretId?: string; family?: string }
 const POSTED = 'posted-log.json';
 export async function readPosted(q: SocialQueue): Promise<PostedEntry[]> {
   const a = (await q.assets()).find((x) => x.name === POSTED);
@@ -240,12 +241,13 @@ async function appendPosted(q: SocialQueue, entries: PostedEntry[]) {
   await q.upload(POSTED, Buffer.from(JSON.stringify(all)), 'application/json');
 }
 
-export function socialFromEnv(env: { META_PAGE_ID?: string; META_PAGE_TOKEN?: string; META_IG_USER_ID?: string; META_GRAPH_VERSION: string }) {
+export function socialFromEnv(env: { META_PAGE_ID?: string; META_PAGE_TOKEN?: string; META_IG_USER_ID?: string; META_GRAPH_VERSION: string; TIKTOK_ACCESS_TOKEN?: string; TIKTOK_PRIVACY_LEVEL?: string }) {
   const repo = process.env.GITHUB_REPOSITORY, token = process.env.GITHUB_TOKEN;
   if (!env.META_PAGE_ID || !env.META_PAGE_TOKEN || !repo || !token) return undefined;
   return {
     queue: new SocialQueue({ repo, token }),
     meta: new MetaClient({ pageId: env.META_PAGE_ID, token: env.META_PAGE_TOKEN, igUserId: env.META_IG_USER_ID, version: env.META_GRAPH_VERSION }),
+    tiktok: env.TIKTOK_ACCESS_TOKEN ? new TikTokClient({ accessToken: env.TIKTOK_ACCESS_TOKEN, privacyLevel: env.TIKTOK_PRIVACY_LEVEL }) : undefined,
   };
 }
 

@@ -142,7 +142,7 @@ async function main() {
           }
           return out(lines.join('\n'));
         }
-        const log = await processQueue(social.queue, social.meta, new Date(), resolve(ctx.config.rootDir, 'data'));
+        const log = await processQueue(social.queue, social.meta, new Date(), resolve(ctx.config.rootDir, 'data'), social.tiktok);
         // Tell the owner on Telegram what went out (or failed) on Facebook / Instagram.
         const tgc = telegramFromEnv();
         if (tgc && log.length) await tgc.send(log.map((l) => l.replace(/^facebook:/, '📘 فيسبوك:').replace(/^instagram:/, '📸 إنستجرام:').replace(/ posted /, ' اتنشر ').replace(/ FAILED /, ' فشل ')).join('\n')).catch(() => {});

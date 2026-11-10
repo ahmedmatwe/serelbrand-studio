@@ -153,7 +153,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     }
     // Same Shorts as Reels on the Facebook Page + Instagram, at the same time they go public on YouTube.
     const social = !env.DRY_RUN && pack ? socialFromEnv(env) : undefined;
-    const tiktokCaptions: { title: string; caption: string; facebookAt?: string; instagramAt?: string }[] = [];
+    const tiktokCaptions: { title: string; caption: string; facebookAt?: string; instagramAt?: string; tiktokAt?: string }[] = [];
     if (social) {
       for (const [i, sh] of (render?.data.shorts ?? []).entries()) {
         const sc = script?.scenes.find((x) => sh.scenes?.includes(x.n));
@@ -164,8 +164,8 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
           const at = { facebook: platformTime(platformHours(this.ctx, 'facebook'), ytAt, i), instagram: platformTime(platformHours(this.ctx, 'instagram'), ytAt, i) };
           const captions = sc ? await platformCaptions(this.ctx, sh.title, sc.voiceover, seo.hashtags, videoId, { facebook: captionLessons(this.ctx, 'facebook'), instagram: captionLessons(this.ctx, 'instagram') }) : {};
           const { tiktok, ...metaCaptions } = captions as typeof captions & { tiktok?: string };
-          tiktokCaptions.push({ title: sh.title, caption: tiktok ?? socialCaption(sh.title, lead, seo.hashtags.slice(0, 5)), facebookAt: at.facebook, instagramAt: at.instagram });
-          await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), captions: metaCaptions, publishAt: ytAt, at, platforms: ['facebook', 'instagram'], videoId, ...secretOf(sh) });
+          tiktokCaptions.push({ title: sh.title, caption: tiktok ?? socialCaption(sh.title, lead, seo.hashtags.slice(0, 5)), facebookAt: at.facebook, instagramAt: at.instagram, tiktokAt: ytAt });
+          await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), captions: { ...metaCaptions, ...(tiktok ? { tiktok } : {}) }, publishAt: ytAt, at, platforms: ['facebook', 'instagram', ...(social.tiktok ? ['tiktok' as const] : [])], videoId, ...secretOf(sh) });
         } catch (err) {
           this.ctx.logger.warn('social queue failed', { videoId, short: sh.title, error: (err as Error).message });
         }

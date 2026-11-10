@@ -475,6 +475,7 @@ async function learnCycle(ctx: AgentContext, now: Date): Promise<string[]> {
   // Reels posted by the social workflow → registered for measuring.
   if (social) {
     for (const e of await readPosted(social.queue).catch(() => [])) {
+      if (e.platform === 'tiktok') continue; // analytics support is added separately once TikTok insights are connected
       registerPost(ctx, { platform: e.platform, external_id: e.id, video_id: e.videoId ?? null, secret_id: e.secretId ?? null, family: e.family ?? null, title: e.title, publish_at: e.at });
     }
   }
