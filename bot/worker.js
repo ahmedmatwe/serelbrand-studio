@@ -61,15 +61,18 @@ async function sendVideos(env, which) {
 
 /**
  * The channel's clock. GitHub's own schedule drops most runs on a busy day (9 Nov: 2 of 8 autopilot runs,
- * 1 of 17 social runs → a Short reached Facebook 5 h late), Cloudflare's cron fires on time: it starts the
- * workflows itself. Crons are in wrangler.toml.
+ * 1 of 17 social runs → a Short reached Facebook 5 h late), Cloudflare's cron fires on time. The free plan allows
+ * only 5 crons per account (shared with other bots), so ONE hourly cron decides what to start:
+ * autopilot every 3 hours, Facebook/Instagram posting every hour 05–21 UTC (07:00–23:00 Cairo).
  */
-const CRON_WORKFLOW = { '20 */3 * * *': 'autopilot.yml', '4 5-21 * * *': 'social.yml' };
+export function dueWorkflows(date) {
+  const h = date.getUTCHours();
+  return [...(h % 3 === 0 ? ['autopilot.yml'] : []), ...(h >= 5 && h <= 21 ? ['social.yml'] : [])];
+}
 
 export default {
   async scheduled(event, env) {
-    const wf = CRON_WORKFLOW[event.cron];
-    if (wf) await dispatch(env, {}, wf);
+    for (const wf of dueWorkflows(new Date(event.scheduledTime))) await dispatch(env, {}, wf);
   },
 
   async fetch(req, env) {

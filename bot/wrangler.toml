@@ -7,6 +7,7 @@ compatibility_date = "2025-06-01"
 binding = "BOT"
 id = "a7508baf9d87468fbe2b9d6fcac38fb3"
 
-# Starts the GitHub workflows on time (GitHub's own cron skips runs). Must match CRON_WORKFLOW in worker.js.
+# Starts the GitHub workflows on time (GitHub's own cron skips runs). One hourly cron only: the free plan has
+# 5 per account, shared with other bots; dueWorkflows() in worker.js picks what runs each hour.
 [triggers]
-crons = ["20 */3 * * *", "4 5-21 * * *"]
+crons = ["4 * * * *"]
