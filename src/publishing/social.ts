@@ -37,10 +37,13 @@ export class MetaClient {
   }
 
   /** Read-only connection check: page name, token validity, linked Instagram account. Posts nothing. */
-  async check(): Promise<{ page: string; instagram?: string }> {
+  async check(): Promise<{ page: string; instagram?: string; scopes?: string[]; status?: Record<string, unknown> }> {
     const p = await this.graph(this.o.pageId, { fields: 'name,instagram_business_account{username}' }, 'GET');
     if (p.instagram_business_account?.id) this.igUser ??= p.instagram_business_account.id;
-    return { page: p.name, instagram: p.instagram_business_account?.username };
+    // What this token may do (a token can inspect itself) and whether the Page is public / restricted.
+    const dbg = await this.graph('debug_token', { input_token: this.o.token }, 'GET').catch(() => undefined);
+    const status = await this.graph(this.o.pageId, { fields: 'is_published,followers_count,fan_count,verification_status,category' }, 'GET').catch((e: Error) => ({ error: e.message.slice(0, 200) }));
+    return { page: p.name, instagram: p.instagram_business_account?.username, scopes: dbg?.data?.scopes, status };
   }
 
   /** Facebook Reel counters (plays from insights when allowed, else likes/comments only). */

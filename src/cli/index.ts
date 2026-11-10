@@ -131,7 +131,7 @@ async function main() {
         if (!social) return out('Facebook/Instagram not connected (META_PAGE_ID / META_PAGE_TOKEN / GITHUB_TOKEN missing) — nothing to do.');
         if (process.argv.includes('--check')) {
           const c = await social.meta.check();
-          const lines = [`✓ Facebook Page: ${c.page}`, c.instagram ? `✓ Instagram: @${c.instagram}` : '✗ No Instagram professional account linked to this Page'];
+          const lines = [`✓ Facebook Page: ${c.page}`, c.instagram ? `✓ Instagram: @${c.instagram}` : '✗ No Instagram professional account linked to this Page', `scopes: ${(c.scopes ?? ['?']).join(',')}`, `page status: ${JSON.stringify(c.status)}`];
           // Insights check on the latest posted Reels (proves the analytics permissions work).
           const posted = await readPosted(social.queue).catch(() => []);
           for (const plat of ['facebook', 'instagram'] as const) {
