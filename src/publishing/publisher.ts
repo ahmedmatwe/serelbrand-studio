@@ -9,6 +9,7 @@ import type { PrePublicationReport } from '../reports/prepublication.ts';
 import { currentSlots, nextSlots } from './schedule.ts';
 import { buildReport } from './approval.ts';
 import { enqueue, platformCaptions, socialCaption, socialFromEnv } from './social.ts';
+import { captionLessons } from '../analytics/analyst.ts';
 import { platformHours, platformTime, registerPost } from '../analytics/learner.ts';
 import { family, loadPhoneLibrary } from '../agents/niche/phone-library.ts';
 import { EXPERIMENTAL, packExclusions, qcBlockers, qualityChecklist } from '../reports/qc.ts';
@@ -149,7 +150,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
           // Each platform at its own best hour (learned from its own numbers), same day as the YouTube slot.
           const ytAt = times[i] ?? new Date().toISOString();
           const at = { facebook: platformTime(platformHours(this.ctx, 'facebook'), ytAt, i), instagram: platformTime(platformHours(this.ctx, 'instagram'), ytAt, i) };
-          const captions = sc ? await platformCaptions(this.ctx, sh.title, sc.voiceover, seo.hashtags, videoId) : {};
+          const captions = sc ? await platformCaptions(this.ctx, sh.title, sc.voiceover, seo.hashtags, videoId, { facebook: captionLessons(this.ctx, 'facebook'), instagram: captionLessons(this.ctx, 'instagram') }) : {};
           await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), captions, publishAt: ytAt, at, platforms: ['facebook', 'instagram'], videoId, ...secretOf(sh) });
         } catch (err) {
           this.ctx.logger.warn('social queue failed', { videoId, short: sh.title, error: (err as Error).message });

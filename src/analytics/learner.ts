@@ -63,7 +63,7 @@ export function scorePosts(posts: Post[]): { post: Post; score: number }[] {
  * Picks `count` daily hours (≥ minGap apart) by Upper Confidence Bound over hour scores. Untested hours get a
  * big bonus (they must be tried), the default hours start with a small prior so day one is sensible.
  */
-export function chooseHours(scored: { post: Post; score: number }[], count = 3, minGap = 3, c = 0.6, defaults = DEFAULT_SHORT_HOURS): { hours: number[]; table: { h: number; n: number; mean: number; ucb: number }[] } {
+export function chooseHours(scored: { post: Post; score: number }[], count = 3, minGap = 3, c = 0.6, defaults = DEFAULT_SHORT_HOURS, seed = 0): { hours: number[]; table: { h: number; n: number; mean: number; ucb: number }[] } {
   const stats = new Map<number, { n: number; sum: number }>();
   for (const h of CANDIDATE_HOURS) stats.set(h, defaults.includes(h) ? { n: 2, sum: 0.2 } : { n: 0, sum: 0 });
   for (const { post, score } of scored) {
@@ -86,7 +86,14 @@ export function chooseHours(scored: { post: Post; score: number }[], count = 3, 
     if (hours.length >= count - 1) break;
     if (fits(row.h)) hours.push(row.h);
   }
-  for (const row of table) { if (hours.length >= count) break; if (fits(row.h)) hours.push(row.h); }
+  // The trial slot: among equally promising hours, try ones near the known good hours first (not 7 am just
+  // because it is the earliest), rotating day by day so a different nearby hour gets its turn.
+  const near = (h: number) => Math.min(...defaults.map((d) => Math.abs(d - h)));
+  const rot = (h: number) => (h + seed) % CANDIDATE_HOURS.length;
+  const trial = [...table].sort((a, b) => b.ucb - a.ucb || near(a.h) - near(b.h) || rot(a.h) - rot(b.h));
+  const top = trial[0]?.ucb ?? 0;
+  const ties = trial.filter((r) => Math.abs(r.ucb - top) < 1e-9);
+  for (const row of [...ties.sort((a, b) => near(a.h) - near(b.h) || rot(a.h) - rot(b.h)), ...trial]) { if (hours.length >= count) break; if (fits(row.h) && !hours.includes(row.h)) hours.push(row.h); }
   return { hours: hours.sort((a, b) => a - b), table };
 }
 
@@ -203,7 +210,7 @@ export async function runLearning(ctx: AgentContext, src: MetricsSource, now = n
   for (const pl of ['youtube', 'facebook', 'instagram'] as Platform[]) {
     const own = scored.filter((x) => x.post.platform === pl);
     if (!own.length) continue;
-    const { hours, table } = chooseHours(own, 3, 3, 0.6, PLATFORM_DEFAULT_HOURS[pl]);
+    const { hours, table } = chooseHours(own, 3, 3, 0.6, PLATFORM_DEFAULT_HOURS[pl], Math.floor(now.getTime() / 86_400_000));
     const key = pl === 'youtube' ? 'short_utc_hours=' : `short_utc_hours:${pl}=`;
     if (writeKnowledge(ctx, key, hours.join(','), table.slice(0, 6).map((r) => `${cairo(r.h)} n=${r.n} mean=${r.mean.toFixed(2)}`).join('; '), own.length)) {
       log.push(`🕒 ${NAME[pl]} — مواعيد النشر الجاية (بتوقيت القاهرة): ${hours.map(cairo).join(' و ')} — من ${own.length} منشور عليه (وبنجرّب مواعيد جديدة كمان)`);

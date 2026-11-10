@@ -24,6 +24,7 @@ import { qcBlockers, qualityChecklist } from '../reports/qc.ts';
 import { quotaResetSeconds } from '../providers/tts/gemini-tts.ts';
 import { writePackage } from '../reports/package.ts';
 import { steps } from './steps.ts';
+import { analyzePerformance, isInfraProblem } from '../analytics/analyst.ts';
 import { dailyReport, learnedFamilyWeights, registerPost, runLearning } from '../analytics/learner.ts';
 import { cairoTime, telegramFromEnv, type Telegram } from '../publishing/telegram.ts';
 import { syncBot, type LiveStats } from '../publishing/bot-sync.ts';
@@ -397,6 +398,13 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   if (decisions.length) notify('سر الموبايل: الفريق اتعلّم حاجة جديدة', decisions.join(' · ').slice(0, 600));
 
   if (tg && sent.length) await tg.send(sent.join('\n\n')).catch(() => {});
+  // Whatever the team learned this cycle reaches the owner on Telegram right away — each finding once only.
+  if (tg) {
+    const fresh = newLearnings(ctx, rep.learning ?? []);
+    if (fresh.length) await tg.send(`🧠 الفريق اتعلّم حاجة جديدة:\n\n${fresh.join('\n\n')}`.slice(0, 4000))
+      .then(() => ctx.repos.artifacts.save({ videoId: null, kind: 'telegram_learned', agent: 'autopilot', data: { lines: fresh } }))
+      .catch(() => {});
+  }
   // Keep the Telegram assistant's report / video list / viral alerts fresh.
   await syncBot(ctx, liveStats(ctx)).catch((err) => log.warn('bot sync failed', { error: (err as Error).message }));
   // Daily stats report on Telegram, once a day from 21:00 Cairo (19:00 UTC).
@@ -467,15 +475,23 @@ async function learnCycle(ctx: AgentContext, now: Date): Promise<string[]> {
     facebook: social ? (id) => social.meta.facebookStats(id) : undefined,
     instagram: social ? (id) => social.meta.instagramStats(id) : undefined,
   }, now);
+  // The analyst: why did some Shorts get few views, and what changes next (once a day).
+  lines.push(...await analyzePerformance(ctx, now).catch((err) => [`⚠️ محلل الأداء ما اشتغلش: ${(err as Error).message.slice(0, 120)}`]));
   // Mistakes → lessons (what to avoid next time), wins → patterns (what to repeat).
   for (const l of lines.filter((x) => x.startsWith('⚠️') && x.includes('البداية'))) addLesson(ctx, 'Viewers left early on a recent Short: open with the surprising benefit in the first 5 words and show the code/setting immediately.', l);
   for (const b of ctx.repos.artifacts.listKind<{ blockers: string[] }>('auto_blocked').filter((a) => a.created_at > new Date(now.getTime() - 86_400_000).toISOString())) {
-    for (const reason of b.data.blockers.slice(0, 2)) addLesson(ctx, `A video was blocked before publishing because: ${reason.slice(0, 180)} — prevent this in the script.`, b.video_id ?? '');
+    for (const reason of b.data.blockers.filter((x) => !isInfraProblem(x)).slice(0, 2)) addLesson(ctx, `A video was blocked before publishing because: ${reason.slice(0, 180)} — prevent this in the script.`, b.video_id ?? '');
   }
   for (const r of ctx.repos.artifacts.listKind<{ log: string[] }>('pack_repair').filter((a) => a.created_at > new Date(now.getTime() - 86_400_000).toISOString())) {
     for (const x of r.data.log.slice(0, 2)) addLesson(ctx, `A Short needed repair (${x.slice(0, 160)}) — write each Short complete on the first try.`, r.video_id ?? '');
   }
   return lines;
+}
+
+/** Learning lines not sent to the owner before (problem alerts repeat every cycle; measuring hiccups are noise). */
+export function newLearnings(ctx: AgentContext, lines: string[]): string[] {
+  const seen = new Set(ctx.repos.artifacts.listKind<{ lines: string[] }>('telegram_learned').flatMap((a) => a.data.lines));
+  return [...new Set(lines)].filter((l) => /^(🕒|📈|✂️|⚠️|🔎)/.test(l) && !/قياس .* فشل|محلل الأداء ما اشتغلش/.test(l) && !seen.has(l));
 }
 
 /** Gemini free-tier daily quota (not a per-minute burst): retrying today only burns attempts and topics. */

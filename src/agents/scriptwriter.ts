@@ -1,3 +1,4 @@
+import { writerLessons } from '../analytics/analyst.ts';
 import { z } from 'zod';
 import { Agent, countWords, type AgentContext } from './base.ts';
 import { ScriptLLM, type Script } from './schemas.ts';
@@ -73,12 +74,12 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
    * (titles to learn the winning hook style from — never to copy), and the Short length viewers finish.
    */
   private experience(phone: boolean) {
-    const lessons = this.ctx.repos.knowledge.byCategory('lesson').slice(0, 8).map((k) => k.insight);
+    const lessons = writerLessons(this.ctx);
     const scored = scorePosts(allPosts(this.ctx)).sort((a, b) => b.score - a.score);
     const winners = scored.slice(0, 5).filter((x) => x.score > 0.2).map((x) => `${x.post.title} (${x.post.platform}, ×${Math.exp(x.score).toFixed(1)} the usual views)`);
     const words = learnedShortWords(this.ctx);
     return {
-      ...(lessons.length ? { lessonsFromPastMistakes: lessons, lessonsRule: 'Apply every lesson; never repeat these mistakes.' } : {}),
+      ...(lessons.length ? { lessonsFromPastMistakes: lessons, lessonsRule: 'Apply every lesson; never repeat these mistakes. Lessons starting with "Performance" come from the analyst who studied our real view counts — they matter most.' } : {}),
       ...(winners.length ? { bestPerformingShorts: winners, winnersRule: 'Learn the hook style and pacing of these winners; never copy their topic or wording.' } : {}),
       ...(phone && words ? { learnedShortLength: `about ${words} spoken words per Short (measured: this is the length viewers finish)` } : {}),
     };

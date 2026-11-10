@@ -229,7 +229,7 @@ export function socialFromEnv(env: { META_PAGE_ID?: string; META_PAGE_TOKEN?: st
  * Facebook: conversational question that invites comments, 2–3 hashtags.
  * Facts only from the Short's own narration. Falls back to the plain caption if the model is unavailable.
  */
-export async function platformCaptions(ctx: { providers: { llm: { generateJson: (r: any) => Promise<{ data: any }> } } }, title: string, narration: string, hashtags: string[], videoId?: string): Promise<Partial<Record<'facebook' | 'instagram', string>>> {
+export async function platformCaptions(ctx: { providers: { llm: { generateJson: (r: any) => Promise<{ data: any }> } } }, title: string, narration: string, hashtags: string[], videoId?: string, rules: Partial<Record<'facebook' | 'instagram', string[]>> = {}): Promise<Partial<Record<'facebook' | 'instagram', string>>> {
   const { z } = await import('zod');
   const r = await ctx.providers.llm.generateJson({
     task: 'social.captions',
@@ -237,8 +237,8 @@ export async function platformCaptions(ctx: { providers: { llm: { generateJson: 
     system: 'You are the social media manager of an Egyptian Arabic channel about phone secrets ("سر الموبايل"). Write captions in natural Egyptian Arabic for the SAME Reel on two platforms, each in its native style. ' +
       'instagram: first line = a hook that makes people tap "more" (≤ 10 words, emoji ok); 2–3 short lines with the exact code/steps from the narration; a call to SAVE and SEND to a friend; then 8–12 relevant Arabic+English hashtags (#سر_الموبايل first). ' +
       'facebook: 2–4 conversational lines, end with a question that invites comments (e.g. "جربتها؟ قولنا في الكومنتات"), 2–3 hashtags. ' +
-      'Never add facts, codes or steps that are not in the narration. JSON only: {"instagram":"…","facebook":"…"}.',
-    prompt: JSON.stringify({ title, narration, hashtags }),
+      'Never add facts, codes or steps that are not in the narration. Apply analystRules (learned from our real view counts on each platform). JSON only: {"instagram":"…","facebook":"…"}.',
+    prompt: JSON.stringify({ title, narration, hashtags, ...(rules.facebook?.length || rules.instagram?.length ? { analystRules: rules } : {}) }),
     schema: z.object({ instagram: z.string().min(20), facebook: z.string().min(20) }),
     videoId,
     maxOutputTokens: 1500,
