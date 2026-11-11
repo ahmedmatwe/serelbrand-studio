@@ -57,3 +57,42 @@ export async function hostVideo(file: string, name: string, env: { BOT_URL?: str
 }
 
 export const bufferFromEnv = (env: { BUFFER_API_KEY?: string }) => (env.BUFFER_API_KEY ? new BufferClient({ apiKey: env.BUFFER_API_KEY }) : undefined);
+
+/**
+ * Sends Shorts already waiting in the Facebook/Instagram queue to TikTok too (e.g. produced before Buffer was
+ * connected). Each ticket is marked with its Buffer post id, so it is never sent twice.
+ */
+export async function backfillTikTok(
+  queue: { assets(): Promise<{ id: number; name: string }[]>; download(id: number): Promise<Buffer>; upload(name: string, data: Buffer, type: string): Promise<unknown>; remove(id: number): Promise<unknown> },
+  buffer: BufferClient, hours: number[], env: { BOT_URL?: string; BOT_INGEST_SECRET?: string }, tmpDir: string, now = new Date(),
+): Promise<string[]> {
+  const { writeFileSync, rmSync } = await import('node:fs');
+  const { platformTime } = await import('../analytics/learner.ts');
+  const log: string[] = [];
+  const assets = await queue.assets();
+  const tickets = assets.filter((a) => a.name.endsWith('.mp4.json')).sort((a, b) => a.name.localeCompare(b.name));
+  const byDay = new Map<string, number>();
+  for (const a of tickets) {
+    const t = JSON.parse((await queue.download(a.id)).toString('utf8')) as { title: string; caption: string; captions?: Record<string, string>; publishAt: string; video: string; bufferId?: string; tiktokAt?: string };
+    const day = t.publishAt.slice(0, 10);
+    const i = byDay.get(day) ?? 0; byDay.set(day, i + 1);
+    if (t.bufferId || new Date(t.publishAt).getFullYear() > 2090) continue; // already sent / held back
+    const at = platformTime(hours, t.publishAt, i, now);
+    if (new Date(at).getTime() < now.getTime() + 10 * 60_000) { log.push(`skip (time passed): ${t.title}`); continue; }
+    const v = assets.find((x) => x.name === t.video);
+    if (!v) continue;
+    const file = `${tmpDir}/${t.video}`;
+    writeFileSync(file, await queue.download(v.id));
+    try {
+      const url = await hostVideo(file, t.video, env);
+      t.bufferId = await buffer.scheduleTikTok(url, t.captions?.tiktok || t.caption, at);
+      t.tiktokAt = at;
+      await queue.remove(a.id);
+      await queue.upload(a.name, Buffer.from(JSON.stringify(t)), 'application/json');
+      log.push(`tiktok: scheduled "${t.title}" at ${at} (buffer ${t.bufferId})`);
+    } catch (e) {
+      log.push(`tiktok: FAILED "${t.title}" — ${(e as Error).message.slice(0, 200)}`);
+    } finally { rmSync(file, { force: true }); }
+  }
+  return log;
+}

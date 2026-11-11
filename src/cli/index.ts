@@ -148,6 +148,16 @@ async function main() {
         if (tgc && log.length) await tgc.send(log.map((l) => l.replace(/^facebook:/, '📘 فيسبوك:').replace(/^instagram:/, '📸 إنستجرام:').replace(/ posted /, ' اتنشر ').replace(/ FAILED /, ' فشل ')).join('\n')).catch(() => {});
         return out(log.length ? log.join('\n') : 'Nothing due.');
       }
+      case 'tiktok:backfill': {
+        // Shorts already queued for Facebook/Instagram also go to TikTok through Buffer.
+        const { backfillTikTok, bufferFromEnv } = await import('../publishing/buffer.ts');
+        const { platformHours } = await import('../analytics/learner.ts');
+        const social = socialFromEnv(ctx.config.env);
+        const buffer = bufferFromEnv(ctx.config.env);
+        if (!social || !buffer) return out('Buffer or the social queue is not connected');
+        const dir = resolve(ctx.config.rootDir, 'data'); mkdirSync(dir, { recursive: true });
+        return out((await backfillTikTok(social.queue, buffer, platformHours(ctx, 'tiktok'), process.env, dir)).join('\n') || 'Nothing to send.');
+      }
       case 'bot:videos': {
         // The bot asked for Shorts it has no Telegram copy of: fetch them from the queue and send them.
         // Only plain queue file names (time__id__short-N.mp4) are accepted.
