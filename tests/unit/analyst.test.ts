@@ -73,3 +73,22 @@ test('telegram: each new learning is sent once; measuring hiccups are not', asyn
   const ctx = { repos: { artifacts: { listKind: () => sent.map((data) => ({ data })) } } } as any;
   assert.deepEqual(newLearnings(ctx, ['⚠️ "x" على facebook: أقل من ثلث المعتاد', '🕒 📘 فيسبوك — مواعيد', '⚠️ قياس instagram "y" فشل: 500', 'random']), ['🕒 📘 فيسبوك — مواعيد']);
 });
+
+test('retention: finds how many survive the opening and the steepest later drop', async () => {
+  const { dropOff } = await import('../../src/analytics/learner.ts');
+  const curve = [0, 0.05, 0.1, 0.3, 0.5, 0.6, 0.9].map((at, i) => ({ at, watching: [1, 0.7, 0.6, 0.55, 0.3, 0.28, 0.2][i]! }));
+  assert.deepEqual(dropOff(curve), { kept3s: 0.6, dropAt: 0.5, dropSize: 0.25 });
+  assert.deepEqual(dropOff([]), {});
+});
+
+test('analyst: tunes shot pacing one small step, and runs again only on new evidence', async () => {
+  const reply = { diagnoses: [], actions: [{ area: 'shots', platform: 'all', rule: 'Cut to a close-up of the screen within 3 seconds of each step.', why: 'drop at 12 s on a long nature shot' }], summaryArabic: 'الناس بتمشي عند لقطة طويلة — هنقصّر اللقطات.', settings: { maxShotSec: 3.5 } };
+  const { ctx, calls, knowledge } = fakeCtx([row('youtube', 50), row('instagram', 20)], reply);
+  const now = new Date('2026-11-10T12:00:00Z');
+  const out = await analyzePerformance(ctx, now);
+  assert.match(out[0]!, /أقصى مدة للقطة بقت 5 ثانية/);
+  assert.ok(knowledge.some((k) => k.insight === 'shot_max_sec=5'));
+  assert.deepEqual(writerLessons(ctx), [], 'shot rules go to the shot picker, not the writer');
+  assert.deepEqual(await analyzePerformance(ctx, new Date('2026-11-10T20:00:00Z')), [], 'same evidence → no new analysis');
+  assert.equal(calls.length, 1);
+});

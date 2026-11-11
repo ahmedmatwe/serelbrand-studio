@@ -502,6 +502,7 @@ async function learnCycle(ctx: AgentContext, now: Date): Promise<string[]> {
   const lines = await runLearning(ctx, {
     youtube: yt.statistics ? (ids) => yt.statistics!(ids) : undefined,
     youtubeRetention: yt.name.startsWith('mock') ? undefined : async (id) => (await yt.metrics(id, 72)).avgPercentViewed,
+    youtubeCurve: yt.retentionCurve ? (id) => yt.retentionCurve!(id) : undefined,
     facebook: social ? (id) => social.meta.facebookStats(id) : undefined,
     instagram: social ? (id) => social.meta.instagramStats(id) : undefined,
   }, now);

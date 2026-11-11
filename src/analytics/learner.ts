@@ -13,7 +13,21 @@
 import type { AgentContext } from '../agents/base.ts';
 
 export type Platform = 'youtube' | 'facebook' | 'instagram' | 'tiktok';
-export interface PostMetrics { views: number; likes?: number; comments?: number; shares?: number; avgPercentViewed?: number }
+export interface PostMetrics { views: number; likes?: number; comments?: number; shares?: number; avgPercentViewed?: number; /** Where viewers leave: share still watching after the first 3 s, and the steepest later drop (0–1 of the video). */ kept3s?: number; dropAt?: number; dropSize?: number }
+
+/** From a retention curve: how many survive the opening (~10%) and where the steepest later drop is. */
+export function dropOff(curve: { at: number; watching: number }[]): { kept3s?: number; dropAt?: number; dropSize?: number } {
+  if (curve.length < 5) return {};
+  const pts = [...curve].sort((a, b) => a.at - b.at);
+  const kept = pts.find((p) => p.at >= 0.1)?.watching;
+  let best = { at: 0, size: 0 };
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i]!.at < 0.1 || pts[i]!.at > 0.95) continue; // the swipe-away at the start and the natural end are not news
+    const size = pts[i - 1]!.watching - pts[i]!.watching;
+    if (size > best.size) best = { at: pts[i]!.at, size };
+  }
+  return { ...(kept !== undefined ? { kept3s: Number(kept.toFixed(2)) } : {}), ...(best.size > 0 ? { dropAt: Number(best.at.toFixed(2)), dropSize: Number(best.size.toFixed(3)) } : {}) };
+}
 export interface Post { id: string; platform: Platform; external_id: string; video_id?: string | null; secret_id?: string | null; family?: string | null; title?: string | null; publish_at: string; metrics: { h24?: PostMetrics; h72?: PostMetrics } }
 
 /** Candidate publishing hours (UTC 05–20 = 07:00–22:00 Cairo). */
@@ -148,6 +162,8 @@ function writeKnowledge(ctx: AgentContext, prefix: string, value: string, eviden
 }
 export const learnedFamilyWeights = (ctx: AgentContext): Record<string, number> | undefined => { const v = readKnowledge(ctx, 'family_weights='); return v ? JSON.parse(v) : undefined; };
 export const learnedShortWords = (ctx: AgentContext): number | undefined => { const v = readKnowledge(ctx, 'short_target_words='); return v ? Number(v) : undefined; };
+/** How long one shot may stay on screen (s), tuned by the analyst from where viewers leave (3–6 s, default 5.5). */
+export const learnedMaxShot = (ctx: AgentContext): number => { const v = Number(readKnowledge(ctx, 'shot_max_sec=')); return Number.isFinite(v) && v >= 3 && v <= 6 ? v : 5.5; };
 export const learnedShortHours = (ctx: AgentContext): number[] | undefined => { const v = readKnowledge(ctx, 'short_utc_hours='); return v ? v.split(',').map(Number) : undefined; };
 /** Current best Shorts hours (UTC) for one platform: learned from its own posts, else its starting hours. */
 export function platformHours(ctx: AgentContext, pl: Platform): number[] {
@@ -171,6 +187,7 @@ export function platformTime(hours: number[], youtubeAt: string, i: number, now 
 export interface MetricsSource {
   youtube?: (ids: string[]) => Promise<Record<string, PostMetrics>>;
   youtubeRetention?: (id: string) => Promise<number | undefined>;
+  youtubeCurve?: (id: string) => Promise<{ at: number; watching: number }[]>;
   facebook?: (id: string) => Promise<PostMetrics>;
   instagram?: (id: string) => Promise<PostMetrics>;
 }
@@ -191,6 +208,7 @@ export async function runLearning(ctx: AgentContext, src: MetricsSource, now = n
         const m = stats[p.external_id];
         if (!m) continue;
         if (cp === 'h72' && src.youtubeRetention) m.avgPercentViewed = await src.youtubeRetention(p.external_id).catch(() => undefined);
+        if (cp === 'h72' && src.youtubeCurve) Object.assign(m, dropOff(await src.youtubeCurve(p.external_id).catch(() => [])));
         p.metrics[cp] = m; saveMetrics(ctx, p);
       }
     }

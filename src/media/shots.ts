@@ -21,7 +21,7 @@ export function splitSentences(text: string): string[] {
  * Lays sentences over `duration` seconds proportionally to their word counts, merging very short
  * sentences into the next and splitting long ones into several shots (variant = which alternative clip).
  */
-export function layoutShots(sentences: { text: string; query: string; /** Measured start (s) of the sentence in the audio. */ start?: number }[], duration: number): Shot[] {
+export function layoutShots(sentences: { text: string; query: string; /** Measured start (s) of the sentence in the audio. */ start?: number }[], duration: number, maxShot = MAX_SHOT): Shot[] {
   if (!sentences.length || duration <= 0) return [];
   const total = sentences.reduce((a, s) => a + Math.max(1, countWords(s.text)), 0);
   // 1) durations: from the measured sentence starts when known (cuts land where the sentence is spoken),
@@ -42,7 +42,7 @@ export function layoutShots(sentences: { text: string; query: string; /** Measur
   const shots: Shot[] = [];
   let t = 0;
   for (const it of items) {
-    const parts = Math.max(1, Math.ceil(it.d / MAX_SHOT));
+    const parts = Math.max(1, Math.ceil(it.d / Math.max(MIN_SHOT, maxShot)));
     for (let p = 0; p < parts; p++) {
       shots.push({ text: it.text, query: it.query, start: t, duration: it.d / parts, variant: p });
       t += it.d / parts;
@@ -156,6 +156,12 @@ async function previewImage(url: string): Promise<{ mimeType: string; data: stri
  * Lets a vision model LOOK at the candidate previews and pick, for each shot, the one that literally shows
  * what the narrator says at that moment (or none). Returns shot index → candidate index (-1 = none fits).
  */
+/** The analyst's and the editing critic's lessons about visuals, for whoever picks shots. */
+export function visualLessons(ctx: AgentContext): string {
+  const l = ctx.repos?.knowledge?.byCategory?.('lesson')?.map((k) => k.insight).filter((x) => /^Performance \((visuals|shots|editing)/.test(x)).slice(0, 4) ?? [];
+  return l.length ? ` LESSONS FROM OUR REAL VIEW COUNTS (apply them when choosing): ${l.map((x) => x.replace(/^Performance \([^)]*\):\s*/, '')).join(' | ')}.` : '';
+}
+
 export async function pickByVision(ctx: AgentContext, items: { text: string; candidates: MediaAsset[] }[], videoId?: string): Promise<Map<number, number[]>> {
   const out = new Map<number, number[]>();
   if (ctx.providers.llm.name.startsWith('mock')) return out;
@@ -181,7 +187,7 @@ export async function pickByVision(ctx: AgentContext, items: { text: string; can
     const r = await ctx.providers.llm.generateJson({
       task: 'shots.pick',
       tier: 'light',
-      system: MODESTY_RULE + ' ' + LOOK_RULE + ' You are a strict documentary film editor. Each image is preceded by a label "Shot X — candidate N". For each shot list ALL candidates that fit (and pass the modesty rule), best first, i.e. that show what the narrator says at that moment: the concrete thing named (a price tag, a shirt, a cashier, a factory, the named product or person) or the exact place/action where it happens (a supermarket aisle fits "a price on a supermarket shelf"). Never list a scene unrelated to the sentence (fish, nature, music, random people) — return an empty list when none fits. JSON only.',
+      system: MODESTY_RULE + ' ' + LOOK_RULE + visualLessons(ctx) + ' You are a strict documentary film editor. Each image is preceded by a label "Shot X — candidate N". For each shot list ALL candidates that fit (and pass the modesty rule), best first, i.e. that show what the narrator says at that moment: the concrete thing named (a price tag, a shirt, a cashier, a factory, the named product or person) or the exact place/action where it happens (a supermarket aisle fits "a price on a supermarket shelf"). Never list a scene unrelated to the sentence (fish, nature, music, random people) — return an empty list when none fits. JSON only.',
       prompt: lines.join('\n') + '\nReturn {"picks":[{"shot":1,"ok":[<candidate numbers that fit, best first>],"why":"…"}]}',
       schema: PickLLM,
       images,
@@ -379,4 +385,31 @@ export async function auditFrames(ctx: AgentContext, framesJpeg: Buffer[], video
   }
   const uniq = (xs: number[]) => [...new Set(xs)].sort((a, b) => a - b);
   return bad.length || raw.length ? { reason: reason || (bad.length ? 'immodest frame' : 'raw stock footage'), frames: uniq(bad), raw: uniq(raw) } : undefined;
+}
+
+/**
+ * Editing critic: watches a rendered Short (a frame every 2 s, with what is said at that second) like a senior
+ * editor and scores the opening, how well each shot shows what is said, pacing and caption readability (0–10).
+ * `mismatchAt` = seconds whose shot does not show what is said — those shots get replaced at once.
+ */
+export const EditReview = z.object({
+  hook: z.number().min(0).max(10), visualMatch: z.number().min(0).max(10), pacing: z.number().min(0).max(10), captions: z.number().min(0).max(10),
+  mismatchAt: z.array(z.number()).default([]), notes: z.string().max(600).default(''),
+});
+export type EditReviewResult = z.infer<typeof EditReview>;
+export async function critiqueEdit(ctx: AgentContext, framesJpeg: Buffer[], said: { at: number; text: string }[], videoId?: string): Promise<EditReviewResult | undefined> {
+  if (!framesJpeg.length || ctx.providers.llm.name.startsWith('mock')) return undefined;
+  const r = await ctx.providers.llm.generateJson({
+    task: 'video.edit_review',
+    tier: 'light',
+    system: 'You are a senior short-form video editor reviewing a 30–45 s Egyptian Arabic phone-secret Short before it is published. Frame N is at second (N-1)*2. ' +
+      'Score 0–10: hook = do the first 2 frames make a scroller stop (clear subject, a phone/screen, motion, readable promise)? visualMatch = does each frame show what is said at that second? pacing = varied, not the same clip for long, no dead/blank frames? captions = readable, not covering the important part? ' +
+      'mismatchAt = the seconds whose picture clearly does NOT show what is being said (e.g. nature while talking about a code). notes = the 1–3 most useful fixes for next time, concrete. JSON only.' + visualLessons(ctx),
+    prompt: JSON.stringify({ saidAtSecond: said }),
+    schema: EditReview,
+    images: framesJpeg.slice(0, 24).map((b, k) => ({ mimeType: 'image/jpeg', data: b.toString('base64'), label: `Frame ${k + 1}:` })),
+    videoId,
+    maxOutputTokens: 600,
+  }).catch(() => undefined);
+  return r?.data as EditReviewResult | undefined;
 }

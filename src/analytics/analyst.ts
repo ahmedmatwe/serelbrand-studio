@@ -7,18 +7,25 @@
  */
 import { z } from 'zod';
 import type { AgentContext } from '../agents/base.ts';
-import { allPosts, readKnowledge, type Post } from './learner.ts';
+import { allPosts, learnedMaxShot, readKnowledge, type Post } from './learner.ts';
 
-const AREAS = ['hook', 'title', 'topic', 'length', 'retention', 'visuals', 'timing', 'caption', 'platform', 'experiment'] as const;
+const AREAS = ['hook', 'title', 'topic', 'length', 'retention', 'visuals', 'shots', 'editing', 'timing', 'caption', 'platform', 'experiment'] as const;
 const Analysis = z.object({
   diagnoses: z.array(z.object({ title: z.string(), platform: z.string(), cause: z.string(), evidence: z.string() })).max(8),
   actions: z.array(z.object({ area: z.enum(AREAS), platform: z.enum(['all', 'youtube', 'facebook', 'instagram']).default('all'), rule: z.string().min(10).max(300), why: z.string().max(300) })).max(5),
   summaryArabic: z.string().min(10).max(900),
+  /** Editing settings the analyst may tune (small steps): how long one shot may stay on screen. */
+  settings: z.object({ maxShotSec: z.number().min(3).max(6).optional() }).default({}),
 });
 export type AnalysisResult = z.infer<typeof Analysis>;
 
 export interface ShortPerformance {
   title: string; family?: string | null; secretId?: string | null; hook?: string; words?: number; durationSec?: number;
+  /** The editing critic's scores before publishing (0–10) and its notes. */
+  editReview?: { hook: number; visualMatch: number; pacing: number; captions: number; notes: string };
+  /** YouTube: share still watching after the opening, and the second most people left + what was on screen/said then. */
+  whereViewersLeft?: { keptAfterOpening?: number; second?: number; showing?: string; said?: string };
+  shotLog?: { start: number; duration: number; said: string; showing: string }[];
   results: { platform: string; cairoHour: number; views: number; likes: number; shares?: number; saves?: number; watchedPercent?: number; vsPlatformUsual: number }[];
 }
 
@@ -40,8 +47,15 @@ export function buildPerformance(ctx: AgentContext, posts: Post[], now: Date): S
       shares: m!.shares, saves: m!.saves, watchedPercent: p.metrics.h72?.avgPercentViewed !== undefined ? Math.round(p.metrics.h72.avgPercentViewed * 100) : undefined,
       vsPlatformUsual: Number(((m!.views + 1) / (usual[p.platform]! + 1)).toFixed(2)),
     });
+    const h72 = p.metrics.h72;
+    if (p.platform === 'youtube' && h72 && (h72.kept3s !== undefined || h72.dropAt !== undefined)) {
+      const s = by.get(key)!;
+      const sec = h72.dropAt !== undefined && s.durationSec ? Math.round(h72.dropAt * s.durationSec) : undefined;
+      const shot = sec !== undefined ? s.shotLog?.find((x) => sec >= x.start && sec < x.start + x.duration) : undefined;
+      s.whereViewersLeft = { keptAfterOpening: h72.kept3s, second: sec, showing: shot?.showing, said: shot?.said };
+    }
   }
-  return [...by.values()].map((s) => ({ ...s, results: s.results ?? [] }));
+  return [...by.values()].map(({ shotLog: _, ...s }) => ({ ...s, results: s.results ?? [] }));
 }
 
 /** Everything the Short said (for answering comments only from what it really says). */
@@ -63,8 +77,10 @@ function whatItSaid(ctx: AgentContext, p: Post): Omit<ShortPerformance, 'title' 
     out.hook = (scene.voiceover.match(/[^.!؟?…]+[.!؟?…]+/) ?? [scene.voiceover])[0]!.trim().slice(0, 200);
     out.words = scene.voiceover.split(/\s+/).filter(Boolean).length;
   }
-  const short = ctx.repos.artifacts.latest<{ shorts?: { scenes?: number[]; durationSec: number }[] }>(p.video_id, 'render')?.data.shorts?.find((s) => s.scenes?.includes(i + 1));
-  if (short) out.durationSec = Math.round(short.durationSec);
+  const short = ctx.repos.artifacts.latest<{ shorts?: { scenes?: number[]; durationSec: number; shotLog?: ShortPerformance['shotLog'] }[] }>(p.video_id, 'render')?.data.shorts?.find((s) => s.scenes?.includes(i + 1));
+  if (short) { out.durationSec = Math.round(short.durationSec); out.shotLog = short.shotLog; }
+  const rev = ctx.repos.artifacts.listKind<{ n: number; hook: number; visualMatch: number; pacing: number; captions: number; notes: string }>('edit_review').filter((a) => a.video_id === p.video_id && a.data.n === i + 1).at(-1)?.data;
+  if (rev) out.editReview = { hook: rev.hook, visualMatch: rev.visualMatch, pacing: rev.pacing, captions: rev.captions, notes: rev.notes };
   return out;
 }
 
@@ -73,12 +89,18 @@ export function isInfraProblem(text: string): boolean {
   return /HTTP (429|5\d\d)|quota|RESOURCE_EXHAUSTED|high demand|overloaded|timed? ?out|timeout|network error|ECONN|fetch failed|no approval request/i.test(text);
 }
 
-/** Runs at most once a day; returns Arabic lines for the owner's report. */
+/**
+ * Runs as soon as there is new evidence (new measurements, retention curves, viewer comments or editing reviews),
+ * at most every 3 hours; returns Arabic lines for the owner.
+ */
 export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<string[]> {
   const day = now.toISOString().slice(0, 10);
-  if (readKnowledge(ctx, 'analysis_day=') === day) return [];
   const shorts = buildPerformance(ctx, allPosts(ctx), now).filter((s) => s.results.length);
   if (shorts.length < 1) return [];
+  const evidence = JSON.stringify([shorts.map((s) => [s.title, s.results.map((r) => r.views), s.whereViewersLeft, s.editReview?.hook]), ctx.repos.artifacts.listKind('comment_replies').length]);
+  const fingerprint = String(evidence.length) + ':' + [...evidence].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const last = readKnowledge(ctx, 'analysis_state=')?.split('|');
+  if (last && (last[0] === fingerprint || now.getTime() - Date.parse(last[1] ?? '') < 3 * 3_600_000)) return [];
   // What viewers wrote in the last 7 days: their questions, confusion and requests are evidence too.
   const viewerComments = ctx.repos.artifacts.listKind<{ heard?: { platform: string; title: string; text: string }[] }>('comment_replies')
     .filter((a) => now.getTime() - new Date(a.created_at).getTime() < 7 * 86_400_000).flatMap((a) => a.data.heard ?? []).slice(-40);
@@ -90,6 +112,7 @@ export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<
       'Goal: much higher views. For every Short and platform you get views, likes, shares, saves, % watched, the Cairo hour, and "vsPlatformUsual" (1 = normal for that platform, 0.3 = a third). ' +
       'Find the Shorts that under-performed and explain WHY from the evidence, comparing them with the ones that did better: weak first sentence (does it promise a clear personal benefit within 2 seconds?), unclear/low-curiosity title, a topic few people search for, too long (people left: low % watched), wrong hour, platform mismatch (e.g. good on Instagram but dead on Facebook → Facebook needs a different caption/approach), weak caption. ' +
       'Then give at most 5 concrete, testable rules for the NEXT Shorts (English, imperative, specific — e.g. "Open with the result in ≤ 6 words: \'موبايلك هيقفل لوحده لو…\'", not "make better hooks"). Only rules the team can apply: hook, title, topic choice, length, retention, visuals, timing, caption (per platform), platform. ' +
+      'Each Short may carry editReview (the editing critic\'s scores before publishing) and whereViewersLeft (YouTube: share still watching after the opening, and the second most people left with what was on screen and being said then) — use them to find editing/shot problems (areas "shots", "editing", "visuals") and set settings.maxShotSec (3–6 s per shot; lower = faster cuts) only when the evidence points to pacing. ' +
       'Read viewerComments too: what people ask, what confused them, what they want next, complaints (too fast, wrong phone, didn\'t work) — turn real patterns into rules (e.g. say which phones/versions it works on, slow down the steps, cover the requested apps). ' +
       'If the numbers are too few to conclude, say so honestly and propose one small experiment (area "experiment") instead of a confident rule. Do not repeat rules already in previousRules unless the new data changes them. ' +
       'summaryArabic: 3–6 short lines in Egyptian Arabic for the owner: what is weak, the likely reason, and what the team will change. JSON only.',
@@ -106,14 +129,24 @@ export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<
       ctx.repos.knowledge.add({ category: 'lesson', insight, evidence: act.why, confidence: Date.now() / 1e13, sampleSize: n });
     }
   }
+  // Editing pace: one small step at a time (±0.5 s), only within 3–6 s.
+  const cur = learnedMaxShot(ctx);
+  const want = a.settings?.maxShotSec;
+  let paceLine = '';
+  if (want !== undefined && Math.abs(want - cur) >= 0.25) {
+    const next = Math.min(6, Math.max(3, cur + Math.sign(want - cur) * Math.min(0.5, Math.abs(want - cur))));
+    ctx.repos.knowledge.add({ category: 'learning', insight: `shot_max_sec=${next}`, evidence: 'analyst: where viewers leave / editing critic', confidence: Date.now() / 1e13, sampleSize: n });
+    paceLine = `\n✂️ المونتاج: أقصى مدة للقطة بقت ${next} ثانية (كانت ${cur})`;
+  }
+  ctx.repos.knowledge.add({ category: 'learning', insight: `analysis_state=${fingerprint}|${now.toISOString()}`, evidence: '', confidence: Date.now() / 1e13, sampleSize: n });
   ctx.repos.knowledge.add({ category: 'learning', insight: `analysis_day=${day}`, evidence: a.diagnoses.map((d) => `${d.title} (${d.platform}): ${d.cause}`).join(' | ').slice(0, 900), confidence: Date.now() / 1e13, sampleSize: n });
-  return [`🔎 محلل الأداء:\n${a.summaryArabic.trim()}`];
+  return [`🔎 محلل الأداء:\n${a.summaryArabic.trim()}${paceLine}`];
 }
 
 /** Rules for the writer: the analyst's newest findings first, then other lessons; never outage noise. */
 export function writerLessons(ctx: AgentContext, max = 8): string[] {
   const all = ctx.repos.knowledge.byCategory('lesson').map((k) => k.insight).filter((x) => !isInfraProblem(x));
-  const perf = all.filter((x) => x.startsWith('Performance') && !/^Performance \((caption|timing)/.test(x));
+  const perf = all.filter((x) => x.startsWith('Performance') && !/^Performance \((caption|timing|shots|editing|visuals)/.test(x));
   return [...perf.slice(0, 5), ...all.filter((x) => !x.startsWith('Performance')).slice(0, Math.max(0, max - Math.min(5, perf.length)))];
 }
 

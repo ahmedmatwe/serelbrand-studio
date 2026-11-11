@@ -194,6 +194,18 @@ export class RealYouTube implements YouTubeProvider {
   }
 
   /**
+   * Audience retention curve: share of viewers still watching at each point (elapsedVideoTimeRatio 0.01…1).
+   * Lags ~2–3 days and needs some views; returns [] when YouTube has no curve yet.
+   */
+  async retentionCurve(youtubeVideoId: string): Promise<{ at: number; watching: number }[]> {
+    const q = new URLSearchParams({ ids: 'channel==MINE', startDate: '2020-01-01', endDate: new Date().toISOString().slice(0, 10), metrics: 'audienceWatchRatio', dimensions: 'elapsedVideoTimeRatio', filters: `video==${youtubeVideoId}` });
+    const res = await this.o.fetchImpl(`https://youtubeanalytics.googleapis.com/v2/reports?${q}`, { headers: await this.auth() });
+    if (!res.ok) await this.fail(res, 'analytics.retention');
+    const j = (await res.json()) as { rows?: [number, number][] };
+    return (j.rows ?? []).map(([at, watching]) => ({ at, watching }));
+  }
+
+  /**
    * Lifetime metrics from YouTube Analytics (data lags ~1–3 days). Impressions/CTR are not exposed by this API;
    * they are omitted rather than guessed.
    */
