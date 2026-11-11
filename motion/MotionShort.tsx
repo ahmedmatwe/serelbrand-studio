@@ -7,7 +7,7 @@
 import React from 'react';
 import { AbsoluteFill, Audio, Easing, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { loadFont } from '@remotion/google-fonts/Cairo';
-import type { Hl, IconName, MotionPlan, MotionScene, MotionStyle, Tone } from './types';
+import type { Hl, IconName, MotionPlan, MotionScene, MotionStyle, Tone, Variants } from './types';
 
 const { fontFamily } = loadFont('normal', { weights: ['600', '800', '900'], subsets: ['arabic', 'latin'] });
 export const FPS = 30;
@@ -15,6 +15,7 @@ export const FPS = 30;
 const WHITE = '#FFFFFF', DIM = '#9AA6C8', CARD = '#141C36', LINE = '#26335E';
 const StyleCtx = React.createContext<MotionStyle>(null as unknown as MotionStyle);
 const useStyle = () => React.useContext(StyleCtx);
+const V = (s: MotionStyle): Variants => ({ hook: 'rings', headline: 'pop', phone: 'flat', ...(s.variants ?? {}) });
 const toneColor = (s: MotionStyle, t?: Tone | 'good' | 'bad' | 'neutral') => (t === 'green' || t === 'good' ? s.good : t === 'red' || t === 'bad' ? s.bad : t === 'neutral' ? DIM : s.accent);
 
 const f = (s: number) => Math.round(s * FPS);
@@ -109,6 +110,18 @@ const Headline: React.FC<{ hl: Hl; delay?: number; size?: number; top?: number; 
   const p = instant ? 1 : pop(frame, fps, delay);
   // one line when it can (≥ 58 px): a wrapped headline would cover what is drawn under it
   const fit = Math.max(58, Math.min(size, Math.floor(950 / (Math.max(1, hl.text.length) * 0.5))));
+  const st = useStyle();
+  if (!instant && V(st).headline === 'stagger') {
+    const accent = new Set((hl.accent ?? '').split(/\s+/).filter(Boolean));
+    return (
+      <div style={{ position: 'absolute', top, left: 50, right: 50, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: fit, lineHeight: 1.25, color: WHITE, textShadow: '0 8px 30px rgba(0,0,0,0.5)' }}>
+        {hl.text.split(/\s+/).map((w, i) => {
+          const q = pop(frame, fps, delay + i * 3);
+          return <span key={i} style={{ display: 'inline-block', margin: '0 10px', opacity: q, transform: `translateY(${(1 - q) * 60}px) rotate(${(1 - q) * -8}deg)`, color: accent.has(w) ? toneColor(st, hl.tone) : WHITE }}>{w}</span>;
+        })}
+      </div>
+    );
+  }
   return (
     <div style={{ position: 'absolute', top, left: 60, right: 60, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: fit, lineHeight: 1.25, color: WHITE, opacity: p, transform: `translateY(${(1 - p) * 40}px) scale(${0.85 + 0.15 * p})`, textShadow: '0 8px 30px rgba(0,0,0,0.5)' }}><Rich hl={hl} /></div>
   );
@@ -116,10 +129,16 @@ const Headline: React.FC<{ hl: Hl; delay?: number; size?: number; top?: number; 
 
 const Phone: React.FC<{ children: React.ReactNode; top?: number; glow?: string }> = ({ children, top = 470, glow }) => {
   const s = useStyle();
+  const t = useCurrentFrame() / FPS;
+  const tilt = V(s).phone === 'tilt';
+  const sweep = ((t * 0.45) % 1.4) - 0.2;
   return (
-    <div style={{ position: 'absolute', top, left: '50%', width: 520, height: 960, marginLeft: -260, borderRadius: 74, background: '#0A0F22', border: '12px solid #2B3760', boxShadow: `0 40px 120px rgba(0,0,0,0.6), 0 0 80px ${glow ?? s.accent}33`, overflow: 'hidden' }}>
+    <div style={{ position: 'absolute', inset: 0, perspective: 1800 }}>
+    <div style={{ position: 'absolute', top, left: '50%', width: 520, height: 960, marginLeft: -260, borderRadius: 74, transform: tilt ? `rotateY(${-10 + 4 * Math.sin(t * 0.8)}deg) rotateX(${5 + 2 * Math.cos(t * 0.6)}deg)` : undefined, transformStyle: 'preserve-3d', background: '#0A0F22', border: '12px solid #2B3760', boxShadow: `0 40px 120px rgba(0,0,0,0.6), 0 0 80px ${glow ?? s.accent}33`, overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: 18, left: '50%', width: 150, height: 34, marginLeft: -75, borderRadius: 20, background: '#000', zIndex: 5 }} />
       {children}
+      {tilt && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 20, background: `linear-gradient(115deg, transparent ${sweep * 100 - 12}%, rgba(255,255,255,0.13) ${sweep * 100}%, transparent ${sweep * 100 + 12}%)` }} />}
+    </div>
     </div>
   );
 };
@@ -138,8 +157,72 @@ type Of<T extends MotionScene['type']> = Extract<MotionScene, { type: T }>;
 
 const HookScene: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
   const s = useStyle();
+  const v = V(s).hook;
+  if (v === 'slam') return <HookSlam sc={sc} />;
+  if (v === 'phone3d') return <HookPhone3d sc={sc} />;
+  return <HookRings sc={sc} />;
+};
+
+/** The headline's words slam onto the screen one by one, big, with a shake — pure kinetic typography. */
+const HookSlam: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
+  const s = useStyle();
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const t = useAbsT(sc.start);
+  const words = sc.headline.text.split(/\s+/);
+  const accent = new Set((sc.headline.accent ?? '').split(/\s+/).filter(Boolean));
+  const per = Math.min(8, Math.max(4, Math.floor((f(sc.end - sc.start) * 0.5) / Math.max(1, words.length))));
+  const lastHit = Math.floor(frame / per);
+  const shake = frame % per < 3 && lastHit < words.length ? (3 - (frame % per)) * 4 : 0;
+  const size = Math.max(90, Math.min(150, Math.floor(1700 / Math.max(6, sc.headline.text.length))));
+  const reveal = sc.revealAt ?? 1e9;
+  return (
+    <>
+      <div style={{ position: 'absolute', top: 210, left: 0, right: 0, display: 'flex', justifyContent: 'center', opacity: pop(frame, fps, 0) }}>
+        <div style={{ width: 150, height: 150, borderRadius: 44, background: s.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 70px ${s.accent}`, transform: `rotate(${Math.sin(t * 3) * 6}deg)` }}><Icon name={sc.icon} size={96} color="#111" /></div>
+      </div>
+      <div style={{ position: 'absolute', top: 470, left: 50, right: 50, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: size, lineHeight: 1.15, transform: `translate(${shake * Math.sin(frame)}px, ${shake * Math.cos(frame)}px)` }}>
+        {words.map((w, i) => {
+          const q = frame >= i * per ? spring({ frame: frame - i * per, fps, config: { damping: 9, stiffness: 260, mass: 0.6 } }) : 0;
+          return <span key={i} style={{ display: 'inline-block', margin: '0 14px', opacity: Math.min(1, q * 2), transform: `scale(${2.2 - 1.2 * q})`, color: accent.has(w) ? toneColor(s, sc.headline.tone) : WHITE, textShadow: `0 10px 40px rgba(0,0,0,0.6)` }}>{w}</span>;
+        })}
+      </div>
+      {sc.teaserCode && (
+        <div style={{ position: 'absolute', top: 1080, left: 0, right: 0, textAlign: 'center', opacity: ease(t, sc.start + 0.6, sc.start + 1) }}>
+          <span style={{ display: 'inline-block', padding: '12px 46px', borderRadius: 30, background: '#1E2A55', border: `3px ${t < reveal ? 'dashed' : 'solid'} ${s.accent}` }}>
+            <Code style={{ fontSize: 80, color: s.accent, filter: `blur(${(1 - ease(t, reveal, reveal + 0.3)) * (10 - 3 * Math.abs(Math.sin(t * 3)))}px)` }}>{sc.teaserCode}</Code>
+          </span>
+        </div>
+      )}
+      {sc.question && <Headline hl={sc.question} delay={f((sc.questionAt ?? sc.start + 1.5) - sc.start)} top={1250} size={72} />}
+    </>
+  );
+};
+
+/** A phone flies in from deep space and lands facing the viewer, its screen glowing with the topic. */
+const HookPhone3d: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
+  const s = useStyle();
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const t = useAbsT(sc.start);
+  const p = spring({ frame, fps, config: { damping: 14, stiffness: 90 } });
+  const reveal = sc.revealAt ?? 1e9;
+  return (
+    <>
+      <Headline hl={sc.headline} instant />
+      <div style={{ position: 'absolute', inset: 0, perspective: 1400 }}>
+        <div style={{ position: 'absolute', top: 470, left: '50%', width: 460, height: 860, marginLeft: -230, borderRadius: 66, background: `linear-gradient(160deg, #18224A, #0A0F22)`, border: '12px solid #2B3760', boxShadow: `0 0 ${60 + 60 * Math.sin(t * 4) ** 2}px ${s.accent}88`, transform: `translateZ(${(1 - p) * -1600}px) rotateY(${(1 - p) * 70 + 6 * Math.sin(t * 1.2)}deg) rotateX(${(1 - p) * 25}deg)`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 50 }}>
+          <div style={{ width: 230, height: 230, borderRadius: '50%', background: s.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 90px ${s.accent}` }}><Icon name={sc.icon} size={140} color="#111" /></div>
+          {sc.teaserCode && <Code style={{ fontSize: 70, color: s.accent, filter: `blur(${(1 - ease(t, reveal, reveal + 0.3)) * 9}px)` }}>{sc.teaserCode}</Code>}
+        </div>
+      </div>
+      {sc.question && <Headline hl={sc.question} delay={f((sc.questionAt ?? sc.start + 1.5) - sc.start)} top={330} size={76} />}
+    </>
+  );
+};
+
+const HookRings: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
+  const s = useStyle();
   const t = useAbsT(sc.start);
   const ring = (k: number) => (t * 1.2 + k / 3) % 1;
   const reveal = sc.revealAt ?? 1e9;
@@ -180,7 +263,6 @@ const DialerScene: React.FC<{ sc: Of<'dialer'> }> = ({ sc }) => {
   const ti = target && target !== 'call' ? pad.indexOf(target) : -1;
   return (
     <>
-      <div style={{ position: 'absolute', top: 285, left: 0, right: 0, textAlign: 'center' }}><Code style={{ fontSize: 96, color: s.accent, textShadow: `0 0 40px ${s.accent}88` }}>{sc.code}</Code></div>
       <Camera t={t} a={k0 - 0.4} b={k1} origin="540px 900px">
         <Phone>
           <div style={{ position: 'absolute', top: 120, left: 0, right: 0, height: 120, textAlign: 'center' }}>

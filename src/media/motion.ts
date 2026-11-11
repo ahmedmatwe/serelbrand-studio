@@ -19,7 +19,8 @@ import type { PhoneSecret } from '../agents/niche/phone-library.ts';
 import { normWord, scriptWords, similarity, type WordTime } from './align.ts';
 import { splitSentences } from './shots.ts';
 import { readKnowledge } from '../analytics/learner.ts';
-import type { IconName, MotionPlan, MotionScene, MotionStyle } from '../../motion/types.ts';
+import { GENES } from '../../motion/types.ts';
+import type { IconName, MotionPlan, MotionScene, MotionStyle, Variants } from '../../motion/types.ts';
 
 export type { MotionPlan, MotionStyle };
 
@@ -33,6 +34,34 @@ const ICONS = ['call', 'shield', 'headset', 'warn', 'check', 'lock', 'antenna', 
 export function motionStyle(ctx: AgentContext): MotionStyle {
   try { return { ...DEFAULT_STYLE, ...(JSON.parse(readKnowledge(ctx, 'motion_style=') ?? '{}') as Partial<MotionStyle>) }; } catch { return DEFAULT_STYLE; }
 }
+const DEFAULT_VARIANTS: Variants = { hook: 'rings', headline: 'pop', phone: 'flat' };
+/** Critic quality of one review (0–10, opening and match weigh double). */
+export const reviewScore = (r: { hook: number; visualMatch: number; pacing: number; captions: number }) => (r.hook * 2 + r.visualMatch * 2 + r.pacing + r.captions) / 6;
+
+/**
+ * Evolution of the look: per gene, the version the analyst chose from view counts wins; otherwise the version
+ * with the best critic average (an untried version counts as 6.5, so new ones get a chance). With `explore`
+ * (≈30% of Shorts, or a re-plan after a low score) one gene is switched to a different version to test it.
+ */
+export function chooseVariants(ctx: AgentContext, explore: boolean, rnd: () => number = Math.random): Variants {
+  const pref = motionStyle(ctx).variants;
+  const reviews = ctx.repos.artifacts.listKind<{ look?: string; variants?: Variants; hook: number; visualMatch: number; pacing: number; captions: number }>('edit_review')
+    .filter((a) => a.data.look === 'motion' && a.data.variants).slice(-40).map((a) => a.data);
+  const out = { ...DEFAULT_VARIANTS } as Record<string, string>;
+  for (const [gene, values] of Object.entries(GENES) as [keyof Variants, readonly string[]][]) {
+    if (pref?.[gene] && values.includes(pref[gene])) { out[gene] = pref[gene]; continue; }
+    const mean = (v: string) => { const xs = reviews.filter((r) => r.variants![gene] === v).map(reviewScore); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 6.5; };
+    out[gene] = [...values].sort((a, b) => mean(b) - mean(a))[0]!;
+  }
+  if (explore) {
+    const genes = Object.keys(GENES) as (keyof Variants)[];
+    const g = genes[Math.floor(rnd() * genes.length)]!;
+    const others = GENES[g].filter((v) => v !== out[g]);
+    if (others.length) out[g] = others[Math.floor(rnd() * others.length)]!;
+  }
+  return out as Variants;
+}
+
 /** Share of Shorts drawn as motion graphics (the rest use stock footage), tuned by the analyst. Default 0.5. */
 export function motionShare(ctx: AgentContext): number {
   const v = Number(readKnowledge(ctx, 'motion_share='));
@@ -42,7 +71,7 @@ export function motionShare(ctx: AgentContext): number {
  * Applies the analyst's wished style in small steps (camera ±0.15, captions ±4 px, flash ±0.06) so one bad week
  * can't swing the look; returns the new style or undefined when nothing changed.
  */
-export function stepStyle(cur: MotionStyle, want: Partial<Pick<MotionStyle, 'camera' | 'transition' | 'particles' | 'captionSize' | 'flash'>>): MotionStyle | undefined {
+export function stepStyle(cur: MotionStyle, want: Partial<Pick<MotionStyle, 'camera' | 'transition' | 'particles' | 'captionSize' | 'flash'>> & { variants?: Partial<Variants> }): MotionStyle | undefined {
   const step = (a: number, b: number | undefined, max: number, lo: number, hi: number) => (b === undefined ? a : Math.min(hi, Math.max(lo, a + Math.sign(b - a) * Math.min(max, Math.abs(b - a)))));
   const next: MotionStyle = {
     ...cur,
@@ -51,6 +80,7 @@ export function stepStyle(cur: MotionStyle, want: Partial<Pick<MotionStyle, 'cam
     flash: Number(step(cur.flash, want.flash, 0.06, 0, 0.4).toFixed(2)),
     transition: want.transition ?? cur.transition,
     particles: want.particles ?? cur.particles,
+    ...(want.variants || cur.variants ? { variants: { ...DEFAULT_VARIANTS, ...(cur.variants ?? {}), ...(want.variants ?? {}) } as Variants } : {}),
   };
   return JSON.stringify(next) === JSON.stringify(cur) ? undefined : next;
 }
@@ -139,7 +169,7 @@ export function motionLessons(ctx: AgentContext): { criticNotes: string[]; rules
 }
 
 /** Plans + times a motion Short. Never throws: falls back to a simple plan built from the library entry. */
-export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: string, criticOnThis?: string): Promise<MotionPlan> {
+export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: string, criticOnThis?: string, explore = Math.random() < 0.3): Promise<MotionPlan> {
   const sentences = splitSentences(inp.narration);
   // measured start of each sentence
   let wi = 0;
@@ -232,7 +262,7 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
   for (let i = 1; i < scenes.length; i++) scenes[i - 1]!.end = scenes[i]!.start;
   if (scenes.length) { scenes[0]!.start = 0; scenes.at(-1)!.end = inp.duration; }
   return {
-    duration: Number(inp.duration.toFixed(2)), audio: 'narration.m4a', style: motionStyle(ctx), brand: inp.brand, endCard: inp.endCard,
+    duration: Number(inp.duration.toFixed(2)), audio: 'narration.m4a', style: { ...motionStyle(ctx), variants: chooseVariants(ctx, explore || Boolean(criticOnThis)) }, brand: inp.brand, endCard: inp.endCard,
     captions: captionsFromWords(inp.words, inp.duration), beats: [...new Set(beats.map((b) => Number(b.toFixed(2))))].sort((a, b) => a - b), scenes,
   };
 }

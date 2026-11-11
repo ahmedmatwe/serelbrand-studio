@@ -54,3 +54,17 @@ test('motion: without a model the fallback plan still covers the whole Short wit
   assert.equal(dial.keys[0]!.at, 2.8);
   assert.equal(fallbackPlan(1).length, 1);
 });
+
+test('motion evolution: the analyst’s winner is kept, the critic’s best is used, exploration tries one other version', async () => {
+  const { chooseVariants } = await import('../../src/media/motion.ts');
+  const rev = (hook: string, score: number) => ({ data: { look: 'motion', variants: { hook, headline: 'pop', phone: 'flat' }, hook: score, visualMatch: score, pacing: score, captions: score } });
+  const mk = (reviews: unknown[], style?: string) => ({ repos: { artifacts: { listKind: () => reviews }, knowledge: { byCategory: (c: string) => (c === 'learning' && style ? [{ insight: `motion_style=${style}` }] : []) } } }) as unknown as AgentContext;
+  // critic: slam scored 8, rings 5 → slam; untried phone3d counts 6.5 (< 8)
+  assert.equal(chooseVariants(mk([rev('rings', 5), rev('slam', 8)]), false).hook, 'slam');
+  // the analyst's choice (from views) beats the critic
+  assert.equal(chooseVariants(mk([rev('slam', 9)], JSON.stringify({ variants: { hook: 'phone3d' } })), false).hook, 'phone3d');
+  // exploration changes exactly one gene
+  const base = chooseVariants(mk([]), false);
+  const tried = chooseVariants(mk([]), true, () => 0);
+  assert.equal(Object.keys(base).filter((k) => (base as Record<string, string>)[k] !== (tried as Record<string, string>)[k]).length, 1);
+});

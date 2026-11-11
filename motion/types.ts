@@ -17,8 +17,20 @@ export type MotionScene = { start: number; end: number; headline: Hl } & (
   | { type: 'statement'; icon: IconName; lines: { text: string; at: number }[] }
 );
 
+/**
+ * Design genes: each has several versions. Every Short uses one version per gene — mostly the best known,
+ * sometimes a different one to try (exploration) — and the critic's scores + view counts decide which survive.
+ */
+export const GENES = {
+  hook: ['rings', 'slam', 'phone3d'],
+  headline: ['pop', 'stagger'],
+  phone: ['flat', 'tilt'],
+} as const;
+export type Variants = { [K in keyof typeof GENES]: (typeof GENES)[K][number] };
+
 /** The look the team tunes over time (small steps, from the editing critic and the numbers). */
 export interface MotionStyle {
+  variants?: Variants;
   /** 0–1: how strongly the camera pushes in on the action. */
   camera: number;
   transition: 'whip' | 'zoom' | 'fade';

@@ -346,10 +346,11 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
         const review2 = await this.editReview(alt, o.dir, `motion-${o.n}-b`, said(plan2), o.videoId);
         if (score(review2) > score(review)) { renameSync(alt, o.path); plan = plan2; review = review2; o.notes.push(`Short ${o.n}: motion re-planned after the critic's notes (${review?.hook}/10 hook)`); } else rmSync(alt, { force: true });
       }
-      if (review) this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'edit_review', agent: 'editing-critic', data: { n: o.n, look: 'motion', ...review } });
+      if (review) this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'edit_review', agent: 'editing-critic', data: { n: o.n, look: 'motion', variants: plan.style.variants, ...review } });
       this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'motion_plan', agent: 'motion-director', data: { n: o.n, plan } });
       o.notes.push(`Short ${o.n}: motion graphics (${plan.scenes.map((x) => x.type).join(' → ')})`);
-      return plan.scenes.map((x) => ({ start: x.start, duration: Number((x.end - x.start).toFixed(1)), said: plan.captions.filter((c) => c.a >= x.start && c.a < x.end).map((c) => c.text).join(' ').slice(0, 120), showing: `motion ${x.type}: ${x.headline.text}`.slice(0, 120) }));
+      o.notes.push(`Short ${o.n}: design genes ${JSON.stringify(plan.style.variants)}`);
+      return plan.scenes.map((x) => ({ start: x.start, duration: Number((x.end - x.start).toFixed(1)), said: plan.captions.filter((c) => c.a >= x.start && c.a < x.end).map((c) => c.text).join(' ').slice(0, 120), showing: `motion ${x.type}${x.type === 'hook' ? `/${plan.style.variants?.hook}` : ''} [${plan.style.variants?.headline}/${plan.style.variants?.phone}]: ${x.headline.text}`.slice(0, 120) }));
     } catch (e) {
       o.notes.push(`Short ${o.n}: motion graphics failed (${String((e as Error).message).slice(0, 160)}) — stock footage used`);
       return undefined;
