@@ -146,6 +146,18 @@ async function main() {
         // Tell the owner on Telegram what went out (or failed) on Facebook / Instagram.
         const tgc = telegramFromEnv();
         if (tgc && log.length) await tgc.send(log.map((l) => l.replace(/^facebook:/, '📘 فيسبوك:').replace(/^instagram:/, '📸 إنستجرام:').replace(/ posted /, ' اتنشر ').replace(/ FAILED /, ' فشل ')).join('\n')).catch(() => {});
+        // TikTok (through Buffer): failed or late posts → one Telegram alert each (the bot de-duplicates by id).
+        const { bufferFromEnv, tiktokAlerts } = await import('../publishing/buffer.ts');
+        const buf = bufferFromEnv(ctx.config.env);
+        if (buf) {
+          const posts = await buf.recentTikTokPosts().catch((e: Error) => { log.push(`tiktok status: ${e.message.slice(0, 160)}`); return []; });
+          const alerts = tiktokAlerts(posts);
+          const sent = posts.filter((p) => p.status === 'sent' && p.sentAt && Date.now() - Date.parse(p.sentAt) < 3_600_000);
+          for (const p of sent) log.push(`tiktok: posted "${p.text.split('\n')[0]!.slice(0, 60)}"${p.externalLink ? ` ${p.externalLink}` : ''}`);
+          if (alerts.length) log.push(...alerts.map((a) => `tiktok ALERT: ${a.text.split('\n')[0]}`));
+          const url = process.env.BOT_URL, secret = process.env.BOT_INGEST_SECRET;
+          if (alerts.length && url && secret) await fetch(`${url.replace(/\/$/, '')}/ingest`, { method: 'POST', headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' }, body: JSON.stringify({ alerts }) }).catch(() => undefined);
+        }
         return out(log.length ? log.join('\n') : 'Nothing due.');
       }
       case 'tiktok:delete': {

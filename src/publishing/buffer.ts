@@ -6,8 +6,11 @@
  */
 import { readFileSync } from 'node:fs';
 
+export interface BufferPost { id: string; text: string; status: 'draft' | 'error' | 'needs_approval' | 'scheduled' | 'sending' | 'sent'; dueAt?: string | null; sentAt?: string | null; externalLink?: string | null; error?: { message: string } | null }
+
 export class BufferClient {
   private channel?: string;
+  private org?: string;
   private readonly o: { apiKey: string; fetchImpl?: typeof fetch };
   constructor(o: BufferClient['o']) { this.o = o; }
 
@@ -29,9 +32,19 @@ export class BufferClient {
     for (const org of orgs.account.organizations) {
       const c = await this.gql<{ channels: { id: string; service: string; name: string }[] }>('query($org: OrganizationId!) { channels(input: { organizationId: $org }) { id name service } }', { org: org.id });
       const tt = c.channels.find((x) => /tiktok/i.test(x.service));
-      if (tt) return (this.channel = tt.id);
+      if (tt) { this.org = org.id; return (this.channel = tt.id); }
     }
     throw new Error('Buffer: no TikTok channel connected');
+  }
+
+  /** The TikTok channel's latest posts (scheduled, sending, sent, failed), newest due first. */
+  async recentTikTokPosts(n = 40): Promise<BufferPost[]> {
+    const channelId = await this.tiktokChannel();
+    const r = await this.gql<{ posts: { edges: { node: BufferPost }[] } }>(
+      `query($org: OrganizationId!, $ch: ChannelId!, $n: Int) { posts(first: $n, input: { organizationId: $org, filter: { channelIds: [$ch], status: [error, scheduled, sending, sent] }, sort: [{ field: dueAt, direction: desc }] }) { edges { node { id text status dueAt sentAt externalLink error { message } } } } }`,
+      { org: this.org, ch: channelId, n },
+    );
+    return r.posts.edges.map((e) => e.node);
   }
 
   /** Removes a scheduled post from Buffer (before it goes out). */
@@ -104,4 +117,21 @@ export async function backfillTikTok(
     } finally { rmSync(file, { force: true }); }
   }
   return log;
+}
+
+/**
+ * What the owner must hear about TikTok: a failed post (with Buffer's reason) or one still not out 45 min after
+ * its time. Each alert has a stable id, so the bot sends it once only.
+ */
+export function tiktokAlerts(posts: BufferPost[], now = new Date()): { id: string; text: string }[] {
+  const title = (t: string) => t.split('\n')[0]!.slice(0, 70);
+  const out: { id: string; text: string }[] = [];
+  for (const p of posts) {
+    const due = p.dueAt ? Date.parse(p.dueAt) : NaN;
+    if (p.status === 'sent' && p.sentAt && now.getTime() - Date.parse(p.sentAt) < 6 * 3_600_000) out.push({ id: `tt-sent-${p.id}`, text: `🎵 تيك توك: اتنشر «${title(p.text)}»${p.externalLink ? `\n${p.externalLink}` : ''}` });
+    else if (p.status === 'error') out.push({ id: `tt-error-${p.id}`, text: `❌ تيك توك: الفيديو «${title(p.text)}» فشل نشره.\nالسبب من Buffer: ${p.error?.message ?? 'غير معروف'}\nافتح Buffer ← تيك توك وجرّب «Retry»، أو قولّي وأنا أعيد جدولته.` });
+    else if ((p.status === 'scheduled' || p.status === 'sending') && Number.isFinite(due) && now.getTime() - due > 45 * 60_000 && now.getTime() - due < 2 * 86_400_000)
+      out.push({ id: `tt-late-${p.id}`, text: `⏰ تيك توك: الفيديو «${title(p.text)}» كان المفروض ينزل الساعة ${new Date(due + 2 * 3_600_000).toISOString().slice(11, 16)} بتوقيت القاهرة ولسه منزلش (الحالة: ${p.status}). ممكن قناة تيك توك تكون محتاجة تتربط تاني في Buffer.` });
+  }
+  return out;
 }

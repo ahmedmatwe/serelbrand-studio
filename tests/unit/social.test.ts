@@ -95,3 +95,18 @@ test('captions: phone codes are exactly the narration\'s (reversed ones fixed, u
   assert.equal(guardCodes('اكتب *#62# واعرف', n), undefined);
   assert.equal(guardCodes('#سر_الموبايل #fyp', n), '#سر_الموبايل #fyp', 'hashtags are not codes');
 });
+
+test('tiktok monitor: failed and late posts alert once (stable ids), recent ones that went out are announced', async () => {
+  const { tiktokAlerts } = await import('../../src/publishing/buffer.ts');
+  const now = new Date('2026-11-11T12:00:00Z');
+  const a = tiktokAlerts([
+    { id: 'p1', text: 'كود يكشف التحويل\n#fyp', status: 'error', dueAt: '2026-11-11T08:00:00Z', error: { message: 'Video could not be fetched' } },
+    { id: 'p2', text: 'اخفي إنك متصل', status: 'scheduled', dueAt: '2026-11-11T10:00:00Z' },
+    { id: 'p3', text: 'مستقبلي', status: 'scheduled', dueAt: '2026-11-11T14:00:00Z' },
+    { id: 'p4', text: 'سكرين شوت بحركة إيد', status: 'sent', dueAt: '2026-11-11T10:00:00Z', sentAt: '2026-11-11T10:00:20Z', externalLink: 'https://www.tiktok.com/@x/video/1' },
+    { id: 'p5', text: 'قديم', status: 'sent', sentAt: '2026-11-10T08:00:00Z' },
+  ], now);
+  assert.deepEqual(a.map((x) => x.id), ['tt-error-p1', 'tt-late-p2', 'tt-sent-p4']);
+  assert.match(a[0]!.text, /Video could not be fetched/);
+  assert.match(a[1]!.text, /12:00/);
+});
