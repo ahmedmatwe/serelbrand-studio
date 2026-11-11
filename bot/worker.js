@@ -2,7 +2,9 @@
  * "سر الموبايل" Telegram assistant — Cloudflare Worker (free, always on, replies instantly).
  *
  *  /telegram  ← Telegram webhook: the owner writes "تقرير" (report), "فيديو" (scheduled videos as buttons → the
- *               chosen one or all arrive as playable videos), anything else → help. Only CHAT_ID is answered.
+ *               chosen one or all arrive as playable videos), "موضوع: …" / "اعمل فيديو عن …" (a topic request: kept
+ *               until the autopilot researches + fact-checks it and replies), anything else → help. Only CHAT_ID.
+ *  /requests  ← (GET, autopilot) pending topic requests.
  *  /ingest    ← the autopilot (GitHub Actions) pushes the latest report, the video list (Telegram file_ids, so
  *               videos are re-sent without re-uploading) and alerts (e.g. a video going viral).
  *
@@ -19,6 +21,7 @@ const say = (env, text, extra = {}) => tg(env, 'sendMessage', { chat_id: env.CHA
 const HELP = 'أهلاً 👋 أنا مساعد قناة سر الموبايل.\n\n' +
   '📊 اكتب «تقرير» — المشاهدات واللايكات والمتابعين على يوتيوب وفيسبوك وإنستجرام\n' +
   '🎬 اكتب «فيديو» — الفيديوهات المجدولة والجديدة، تختار واحد أو الكل\n' +
+  '💡 اكتب «موضوع: …» أو «اعمل فيديو عن …» — أراجع المعلومة وأعمل عنها فيديو في الإنتاج الجاي\n' +
   '🔥 ولو فيديو ضرب مشاهدات عالية هبعتلك تنبيه لوحدي في أي وقت';
 
 const norm = (t) => (t || '').trim().replace(/[إأآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
@@ -93,6 +96,10 @@ export default {
         return new Response(req.method === 'HEAD' ? null : v, { headers: { 'content-type': 'video/mp4', 'content-length': String(v.byteLength), 'cache-control': 'public, max-age=86400' } });
       }
     }
+    if (url.pathname === '/requests' && req.method === 'GET') {
+      if (req.headers.get('authorization') !== `Bearer ${env.INGEST_SECRET}`) return new Response('forbidden', { status: 403 });
+      return json({ requests: JSON.parse((await env.BOT.get('requests')) || '[]') });
+    }
     if (req.method !== 'POST') return new Response('ok');
 
     // --- Telegram webhook -------------------------------------------------------------------------
@@ -108,6 +115,17 @@ export default {
         return json({ ok: true });
       }
       const t = norm(u.message?.text);
+      const topic = (u.message?.text || '').trim().match(/^(?:\/topic|موضوع|فكر[ةه]|اعمل(?:لي)? فيديو عن|ع[اa]?[وي]ز فيديو عن|عايز فيديو عن|عاوز فيديو عن)\s*[:：-]?\s*([\s\S]{3,400})$/i);
+      if (topic) {
+        const list = JSON.parse((await env.BOT.get('requests')) || '[]');
+        if (list.length >= 10) { await say(env, 'عندي 10 مواضيع مستنية مراجعة — استنى لما أخلّصهم وابعت تاني 🙏'); return json({ ok: true }); }
+        list.push({ id: String(Date.now()), text: topic[1].trim(), at: new Date().toISOString() });
+        await env.BOT.put('requests', JSON.stringify(list));
+        // Wake the autopilot now so the topic is researched + fact-checked within minutes.
+        const woke = await dispatch(env, {}, 'autopilot.yml');
+        await say(env, `📝 استلمت الموضوع:\n«${topic[1].trim().slice(0, 200)}»\n\n🔎 ${woke ? 'بتأكد من المعلومة دلوقتي وهرد عليك خلال دقايق' : 'هتأكد من المعلومة في الدورة الجاية وهرد عليك'} — لو صح هيتعمل أول فيديو في الإنتاج الجاي.`);
+        return json({ ok: true });
+      }
       if (/تقرير|احصا|مشاهد|متابع|لايك|report|stats/.test(t)) {
         const rep = await env.BOT.get('report');
         const at = await env.BOT.get('report_at');
@@ -144,6 +162,10 @@ export default {
         if (await env.BOT.get(`alert:${a.id}`)) continue;
         await env.BOT.put(`alert:${a.id}`, '1', { expirationTtl: 60 * 60 * 24 * 30 });
         await say(env, a.text);
+      }
+      if (Array.isArray(b.requestsDone) && b.requestsDone.length) {
+        const list = JSON.parse((await env.BOT.get('requests')) || '[]');
+        await env.BOT.put('requests', JSON.stringify(list.filter((r) => !b.requestsDone.includes(r.id))));
       }
       for (const m of b.messages || []) await say(env, m);
       return json({ ok: true });

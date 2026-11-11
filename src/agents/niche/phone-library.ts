@@ -19,7 +19,14 @@ interface Library { sources: Record<string, string>; secrets: PhoneSecret[] }
 
 export function loadPhoneLibrary(rootDir: string): Library | undefined {
   const p = resolve(rootDir, 'config/phone-secrets.json');
-  return existsSync(p) ? (JSON.parse(readFileSync(p, 'utf8')) as Library) : undefined;
+  if (!existsSync(p)) return undefined;
+  const lib = JSON.parse(readFileSync(p, 'utf8')) as Library;
+  // + topics the owner asked for on Telegram, after research + fact-check (written each cycle from the DB).
+  const req = resolve(rootDir, 'data/requested-secrets.json');
+  if (existsSync(req)) {
+    try { const extra = (JSON.parse(readFileSync(req, 'utf8')) as { secrets?: PhoneSecret[] }).secrets ?? []; lib.secrets = [...lib.secrets, ...extra.filter((e) => !lib.secrets.some((s) => s.id === e.id))]; } catch { /* ignore a broken file */ }
+  }
+  return lib;
 }
 
 /** The entry as a research source: everything the narrator may say, nothing else. */
@@ -44,10 +51,11 @@ export const family = (s: PhoneSecret) => (s.id.startsWith('app-') ? 'apps' : s.
  * Three unused secrets for today's pack, mixed for variety: a code, an iPhone secret and an Android/Samsung
  * secret when available (one of each family first, then whatever is left).
  */
-export function pickPhoneSecrets(lib: Library, usedIds: Set<string>, n = 3, weights?: Record<string, number>): PhoneSecret[] {
+export function pickPhoneSecrets(lib: Library, usedIds: Set<string>, n = 3, weights?: Record<string, number>, first: string[] = []): PhoneSecret[] {
   // Secrets we can SHOW on a drawn phone screen first (the viewer sees exactly what is being said).
   const fresh = lib.secrets.filter((s) => !usedIds.has(s.id)).sort((a, b) => Number(Boolean(b.ui)) - Number(Boolean(a.ui)));
-  const out: PhoneSecret[] = [];
+  // Topics the owner asked for come first.
+  const out: PhoneSecret[] = first.map((id) => fresh.find((s) => s.id === id)).filter((s): s is PhoneSecret => Boolean(s)).slice(0, n);
   // Learned appetite: the family audiences watch most gets a second slot (variety still kept: ≥ 2 families).
   // Families: big-app secrets, phone codes, iPhone, Android. Daily: the 3 best-performing families; on ties the
   // family used least so far goes first, so every kind keeps rotating in.

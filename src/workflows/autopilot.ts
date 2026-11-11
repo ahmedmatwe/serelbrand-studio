@@ -31,6 +31,7 @@ import { cairoTime, telegramFromEnv, type Telegram } from '../publishing/telegra
 import { syncBot, type LiveStats } from '../publishing/bot-sync.ts';
 import { readPosted, socialFromEnv } from '../publishing/social.ts';
 import { family, loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
+import { handleTopicRequests, priorityIds } from '../agents/niche/topic-requests.ts';
 
 export interface CycleOptions {
   now?: Date;
@@ -178,7 +179,7 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
     // give their secrets back to the library.
     const crashed = new Set(ctx.repos.artifacts.listKind<{ blockers: string[] }>('auto_blocked').filter((a) => a.data.blockers.some((b) => b.startsWith('production failed'))).map((a) => a.video_id));
     const used = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').filter((a) => !crashed.has(a.video_id)).flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
-    const picks = pickPhoneSecrets(lib, used, 3, learnedFamilyWeights(ctx));
+    const picks = pickPhoneSecrets(lib, used, 3, learnedFamilyWeights(ctx), priorityIds(ctx, used));
     if (picks.length === 3) return picks.map((x): PackTopic => ({ title: x.title, subject: x.id, angle: `${x.steps.join(' ← ')} → ${x.result}`, kind: x.kind, sourceUrl: lib.sources[x.source] ?? '' }));
     ctx.logger.child('autopilot').warn('phone-secrets library used up — add reviewed entries to config/phone-secrets.json', { left: picks.length });
     // Out of reviewed entries: fall through to AI-proposed topics (still need a real source and the full gates).
@@ -275,6 +276,13 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   //    up the day: another topic is tried right away in the same run (max 3 failed attempts per format a day,
   //    and a time budget, so the free API quotas are never burnt in a loop).
   const planned = new Set(ctx.repos.artifacts.listKind('calendar_entry').map((a) => a.video_id));
+  // Topics the owner sent to the Telegram bot: researched + fact-checked now, made first in the next pack.
+  if (o.produce !== false) {
+    try {
+      const usedIds = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
+      await handleTopicRequests(ctx, usedIds);
+    } catch (err) { rep.errors.push(`topic requests: ${(err as Error).message}`); }
+  }
   const t0 = Date.now();
   const budgetMs = o.productionBudgetMs ?? 100 * 60_000;
   let attempts = 0;
