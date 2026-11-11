@@ -252,6 +252,24 @@ export function socialFromEnv(env: { META_PAGE_ID?: string; META_PAGE_TOKEN?: st
 }
 
 /**
+ * Phone codes in a caption must be EXACTLY the narration's codes. Arabic/English mixing makes models write them
+ * backwards ("#21#*" for "*#21#"): a reversed/garbled code is replaced by the real one; an unknown code drops the
+ * caption (the caller then uses the plain one). Wrong codes on screen would mislead viewers.
+ */
+export function guardCodes(caption: string, narration: string): string | undefined {
+  const CODE = /[*#][\d*#]{2,}#?|\d+[*#][\d*#]*/g;
+  const real = [...new Set(narration.match(CODE) ?? [])];
+  let ok = true;
+  const out = caption.replace(CODE, (c) => {
+    if (real.includes(c)) return c;
+    const fix = real.find((r) => [...r].sort().join('') === [...c].sort().join(''));
+    if (fix) return fix;
+    ok = false; return c;
+  });
+  return ok ? out : undefined;
+}
+
+/**
  * Platform specialists: the same Short gets a caption written the way each platform works —
  * Instagram: strong first line (shown before "more"), save/share call, 8–12 niche hashtags;
  * Facebook: conversational question that invites comments, 2–3 hashtags.
@@ -272,5 +290,8 @@ export async function platformCaptions(ctx: { providers: { llm: { generateJson: 
     videoId,
     maxOutputTokens: 1500,
   }).catch(() => undefined);
-  return r ? { instagram: String(r.data.instagram).slice(0, 2100), facebook: String(r.data.facebook).slice(0, 2100), ...(r.data.tiktok ? { tiktok: String(r.data.tiktok).slice(0, 2200) } : {}) } : {};
+  if (!r) return {};
+  const g = (x?: string) => (x ? guardCodes(String(x), narration) : undefined);
+  const ig = g(r.data.instagram), fb = g(r.data.facebook), tt = g(r.data.tiktok);
+  return { ...(ig ? { instagram: ig.slice(0, 2100) } : {}), ...(fb ? { facebook: fb.slice(0, 2100) } : {}), ...(tt ? { tiktok: tt.slice(0, 2200) } : {}) };
 }

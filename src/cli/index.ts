@@ -148,6 +148,16 @@ async function main() {
         if (tgc && log.length) await tgc.send(log.map((l) => l.replace(/^facebook:/, '📘 فيسبوك:').replace(/^instagram:/, '📸 إنستجرام:').replace(/ posted /, ' اتنشر ').replace(/ FAILED /, ' فشل ')).join('\n')).catch(() => {});
         return out(log.length ? log.join('\n') : 'Nothing due.');
       }
+      case 'tiktok:delete': {
+        // Pull scheduled TikTok posts back out of Buffer (ids from the backfill log, via env TIKTOK_DELETE).
+        const { bufferFromEnv } = await import('../publishing/buffer.ts');
+        const buffer = bufferFromEnv(ctx.config.env);
+        if (!buffer) return out('Buffer not connected');
+        const ids = (process.env.TIKTOK_DELETE ?? '').split(',').map((x) => x.trim()).filter((x) => /^[a-f0-9]{24}$/.test(x)).slice(0, 10);
+        const log: string[] = [];
+        for (const id of ids) await buffer.deletePost(id).then(() => log.push(`deleted ${id}`), (e: Error) => log.push(`FAILED ${id}: ${e.message}`));
+        return out(log.join('\n') || 'No valid ids.');
+      }
       case 'tiktok:backfill': {
         // Shorts already queued for Facebook/Instagram also go to TikTok through Buffer.
         const { backfillTikTok, bufferFromEnv } = await import('../publishing/buffer.ts');

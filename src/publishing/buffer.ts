@@ -34,6 +34,12 @@ export class BufferClient {
     throw new Error('Buffer: no TikTok channel connected');
   }
 
+  /** Removes a scheduled post from Buffer (before it goes out). */
+  async deletePost(id: string): Promise<void> {
+    const r = await this.gql<{ deletePost: { id?: string; message?: string } }>('mutation($id: PostId!) { deletePost(input: { id: $id }) { ... on DeletePostSuccess { id } ... on MutationError { message } } }', { id });
+    if (!r.deletePost.id) throw new Error(`Buffer: ${r.deletePost.message ?? 'not deleted'}`);
+  }
+
   /** Schedules a TikTok video post at `dueAt` (UTC ISO). Returns Buffer's post id. */
   async scheduleTikTok(videoUrl: string, text: string, dueAt: string): Promise<string> {
     const channelId = await this.tiktokChannel();

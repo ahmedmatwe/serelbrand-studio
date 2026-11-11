@@ -86,3 +86,12 @@ test('social: each platform goes out at its own time; waiting is not counted as 
     assert.deepEqual([...assets.values()].map((a) => a.name), ['posted-log.json']);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
+
+test('captions: phone codes are exactly the narration\'s (reversed ones fixed, unknown ones rejected)', async () => {
+  const { guardCodes } = await import('../../src/publishing/social.ts');
+  const n = 'اكتب الكود *#21# ودوس اتصال';
+  assert.equal(guardCodes('اكتب #21#* واعرف', n), 'اكتب *#21# واعرف');
+  assert.equal(guardCodes('اكتب *#21# واعرف', n), 'اكتب *#21# واعرف');
+  assert.equal(guardCodes('اكتب *#62# واعرف', n), undefined);
+  assert.equal(guardCodes('#سر_الموبايل #fyp', n), '#سر_الموبايل #fyp', 'hashtags are not codes');
+});

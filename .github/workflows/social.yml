@@ -11,6 +11,10 @@ on:
         description: 'Only check the Facebook/Instagram connection (posts nothing)'
         type: boolean
         default: false
+      tiktok_delete:
+        description: 'Buffer post ids to remove (comma-separated)'
+        type: string
+        default: ''
       tiktok_backfill:
         description: 'Also send the Shorts already queued to TikTok (through Buffer)'
         type: boolean
@@ -67,6 +71,11 @@ jobs:
         run: |
           mkdir -p data
           git fetch -q origin state && git show origin/state:studio.db > data/studio.db || true
+      - name: Remove TikTok posts from Buffer
+        if: steps.gate.outputs.connected == 'true' && inputs.tiktok_delete != ''
+        env:
+          TIKTOK_DELETE: ${{ inputs.tiktok_delete }}
+        run: node --no-warnings src/cli/index.ts tiktok:delete
       - name: Send queued Shorts to TikTok (Buffer)
         if: steps.gate.outputs.connected == 'true' && inputs.tiktok_backfill
         run: node --no-warnings src/cli/index.ts tiktok:backfill
