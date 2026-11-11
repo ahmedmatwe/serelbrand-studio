@@ -357,7 +357,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'motion_plan', agent: 'motion-director', data: { n: o.n, plan } });
       o.notes.push(`Short ${o.n}: motion graphics (${plan.scenes.map((x) => x.type).join(' → ')})`);
       o.notes.push(`Short ${o.n}: design genes ${JSON.stringify(plan.style.variants)}`);
-      return plan.scenes.map((x) => ({ start: x.start, duration: Number((x.end - x.start).toFixed(1)), said: plan.captions.filter((c) => c.a >= x.start && c.a < x.end).map((c) => c.text).join(' ').slice(0, 120), showing: `motion ${x.type}${x.type === 'hook' ? `/${plan.style.variants?.hook}` : ''} [${plan.style.variants?.headline}/${plan.style.variants?.phone}]: ${x.headline.text}`.slice(0, 120) }));
+      return plan.scenes.map((x) => ({ start: x.start, duration: Number((x.end - x.start).toFixed(1)), said: plan.captions.filter((c) => c.a >= x.start && c.a < x.end).map((c) => c.text).join(' ').slice(0, 120), showing: `motion ${x.type} ${JSON.stringify(plan.style.variants ?? {}).replace(/"/g, '')}: ${x.headline.text}`.slice(0, 200) }));
     } catch (e) {
       o.notes.push(`Short ${o.n}: motion graphics failed (${String((e as Error).message).slice(0, 160)}) — stock footage used`);
       return undefined;

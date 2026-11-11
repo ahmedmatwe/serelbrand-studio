@@ -13,10 +13,23 @@ import type { Hl, IconName, MotionPlan, MotionScene, MotionStyle, Tone, Variants
 const { fontFamily } = loadFont('normal', { weights: ['600', '800', '900'], subsets: ['arabic', 'latin'] });
 export const FPS = 30;
 
-const WHITE = '#FFFFFF', DIM = '#9AA6C8', CARD = '#141C36', LINE = '#26335E';
+// Colours of text/cards come from the theme (CSS variables), so the same scenes work on dark and light looks.
+const WHITE = 'var(--text)', DIM = 'var(--dim)', CARD = 'var(--card)', LINE = 'var(--line)', CHIP = 'var(--chip)';
+interface Theme { bg1: string; bg2: string; text: string; dim: string; card: string; line: string; chip: string; dot: string; accent: string; good: string; bad: string }
+/** Colour themes (a design gene): every Short can look different. */
+const THEMES: Record<string, Theme> = {
+  night: { bg1: '#070B1A', bg2: '#12204A', text: '#FFFFFF', dim: '#9AA6C8', card: '#141C36', line: '#26335E', chip: '#1E2A55', dot: 'rgba(255,255,255,0.07)', accent: '#FFD23F', good: '#22C55E', bad: '#FF4D4D' },
+  light: { bg1: '#F4F6FB', bg2: '#D9E2F7', text: '#0E1430', dim: '#56607F', card: '#FFFFFF', line: '#D3DAEA', chip: '#E3E9F7', dot: 'rgba(14,20,48,0.08)', accent: '#EA580C', good: '#16A34A', bad: '#E11D48' },
+  pop: { bg1: '#1E0745', bg2: '#6D28D9', text: '#FFFFFF', dim: '#D8CCFF', card: '#33126B', line: '#5B2BA8', chip: '#45198F', dot: 'rgba(255,255,255,0.09)', accent: '#22E3FF', good: '#2EE59D', bad: '#FF4D6D' },
+  teal: { bg1: '#021716', bg2: '#0F766E', text: '#FFFFFF', dim: '#A7D7D2', card: '#0B2E2C', line: '#155E58', chip: '#134E4A', dot: 'rgba(255,255,255,0.08)', accent: '#FDE047', good: '#4ADE80', bad: '#FB7185' },
+  sunset: { bg1: '#180808', bg2: '#9A3412', text: '#FFFFFF', dim: '#F6CDB9', card: '#2A110E', line: '#5C2A1E', chip: '#3D1912', dot: 'rgba(255,255,255,0.08)', accent: '#FFD166', good: '#34D399', bad: '#FF5C5C' },
+};
+const vars = (t: Theme) => ({ '--text': t.text, '--dim': t.dim, '--card': t.card, '--line': t.line, '--chip': t.chip, '--dot': t.dot }) as React.CSSProperties;
+/** Inside a drawn phone the screen is always dark, whatever the theme. */
+const DARK = vars(THEMES.night!);
 const StyleCtx = React.createContext<MotionStyle>(null as unknown as MotionStyle);
 const useStyle = () => React.useContext(StyleCtx);
-const V = (s: MotionStyle): Variants => ({ hook: 'rings', headline: 'pop', phone: 'flat', ...(s.variants ?? {}) });
+const V = (s: MotionStyle): Variants => ({ theme: 'night', bg: 'dots', caption: 'highlight', transition: s.transition, hook: 'rings', headline: 'pop', phone: 'flat', ...(s.variants ?? {}) });
 const toneColor = (s: MotionStyle, t?: Tone | 'good' | 'bad' | 'neutral') => (t === 'green' || t === 'good' ? s.good : t === 'red' || t === 'bad' ? s.bad : t === 'neutral' ? DIM : s.accent);
 
 const f = (s: number) => Math.round(s * FPS);
@@ -69,9 +82,23 @@ const Background: React.FC<{ tint: string }> = ({ tint }) => {
   const s = useStyle();
   const t = useCurrentFrame() / FPS;
   const x = 50 + 18 * Math.sin(t * 0.5), y = 35 + 10 * Math.cos(t * 0.4);
+  const bg = V(s).bg;
   return (
     <AbsoluteFill style={{ background: `radial-gradient(circle at ${x}% ${y}%, ${tint}55 0%, transparent 45%), radial-gradient(circle at ${100 - x}% ${100 - y}%, ${s.bg2} 0%, ${s.bg1} 70%)` }}>
-      <AbsoluteFill style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 2px, transparent 2px)', backgroundSize: '48px 48px', transform: `translateY(${(t * 12) % 48}px)` }} />
+      {bg === 'dots' && <AbsoluteFill style={{ backgroundImage: 'radial-gradient(var(--dot) 2px, transparent 2px)', backgroundSize: '48px 48px', transform: `translateY(${(t * 12) % 48}px)` }} />}
+      {bg === 'grid' && <AbsoluteFill style={{ backgroundImage: 'linear-gradient(var(--dot) 2px, transparent 2px), linear-gradient(90deg, var(--dot) 2px, transparent 2px)', backgroundSize: '90px 90px', transform: `perspective(900px) rotateX(35deg) translateY(${(t * 40) % 90}px) scale(1.6)`, transformOrigin: '50% 100%' }} />}
+      {bg === 'waves' && (
+        <svg width={1080} height={1920} style={{ position: 'absolute', inset: 0 }}>
+          {[0, 1, 2, 3].map((k) => {
+            const y0 = 1250 + k * 160, amp = 40 + k * 12, ph = t * (0.8 + k * 0.25) + k;
+            const d = Array.from({ length: 28 }, (_, i) => `${i === 0 ? 'M' : 'L'}${i * 40} ${y0 + amp * Math.sin(i * 0.35 + ph)}`).join(' ') + ' L1080 1920 L0 1920 Z';
+            return <path key={k} d={d} fill={tint} opacity={0.07 + k * 0.025} />;
+          })}
+        </svg>
+      )}
+      {bg === 'blobs' && [0, 1, 2].map((k) => (
+        <div key={k} style={{ position: 'absolute', width: 700, height: 700, borderRadius: '50%', left: 190 + 360 * Math.sin(t * (0.3 + k * 0.15) + k * 2), top: 300 + k * 450 + 140 * Math.cos(t * (0.25 + k * 0.1) + k), background: k === 1 ? s.good : tint, opacity: 0.16, filter: 'blur(120px)' }} />
+      ))}
     </AbsoluteFill>
   );
 };
@@ -98,10 +125,12 @@ const Shell: React.FC<{ len: number; children: React.ReactNode; instant?: boolea
   const inn = instant ? 1 : spring({ frame, fps, config: { damping: 18, stiffness: 140 } });
   const out = interpolate(frame, [len - 7, len + 3], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.in(Easing.cubic) });
   const op = Math.min(1, inn * 1.5) * (1 - out);
-  const tr = s.transition === 'whip'
+  const kind = V(s).transition;
+  const tr = kind === 'whip'
     ? `translateX(${(1 - inn) * -420 + out * 420}px) scale(${0.94 + 0.06 * inn}) skewX(${(1 - inn) * 6 - out * 6}deg)`
-    : s.transition === 'zoom' ? `scale(${0.7 + 0.3 * inn + out * 0.4})` : `scale(${0.97 + 0.03 * inn})`;
-  const blur = s.transition === 'fade' ? 0 : (1 - inn) * 10 + out * 10;
+    : kind === 'zoom' ? `scale(${0.7 + 0.3 * inn + out * 0.4})`
+    : kind === 'rise' ? `translateY(${(1 - inn) * 160 - out * 160}px) rotate(${(1 - inn) * 2}deg)` : `scale(${0.97 + 0.03 * inn})`;
+  const blur = kind === 'fade' ? 0 : (1 - inn) * 10 + out * 10;
   return <AbsoluteFill style={{ opacity: op, transform: tr, filter: `blur(${blur}px)` }}>{children}</AbsoluteFill>;
 };
 
@@ -167,7 +196,7 @@ const Phone: React.FC<{ children: React.ReactNode; top?: number; glow?: string }
   const sweep = ((t * 0.45) % 1.4) - 0.2;
   return (
     <div style={{ position: 'absolute', inset: 0, perspective: 1800 }}>
-    <div style={{ position: 'absolute', top, left: '50%', width: 520, height: 900, marginLeft: -260, borderRadius: 74, transform: tilt ? `rotateY(${-10 + 4 * Math.sin(t * 0.8)}deg) rotateX(${5 + 2 * Math.cos(t * 0.6)}deg)` : undefined, transformStyle: 'preserve-3d', background: '#0A0F22', border: '12px solid #2B3760', boxShadow: `0 40px 120px rgba(0,0,0,0.6), 0 0 80px ${glow ?? s.accent}33`, overflow: 'hidden' }}>
+    <div style={{ ...DARK, position: 'absolute', top, left: '50%', width: 520, height: 900, marginLeft: -260, borderRadius: 74, transform: tilt ? `rotateY(${-10 + 4 * Math.sin(t * 0.8)}deg) rotateX(${5 + 2 * Math.cos(t * 0.6)}deg)` : undefined, transformStyle: 'preserve-3d', background: '#0A0F22', border: '12px solid #2B3760', boxShadow: `0 40px 120px rgba(0,0,0,0.6), 0 0 80px ${glow ?? s.accent}33`, overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: 18, left: '50%', width: 150, height: 34, marginLeft: -75, borderRadius: 20, background: '#000', zIndex: 5 }} />
       {children}
       {tilt && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 20, background: `linear-gradient(115deg, transparent ${sweep * 100 - 12}%, rgba(255,255,255,0.13) ${sweep * 100}%, transparent ${sweep * 100 + 12}%)` }} />}
@@ -222,7 +251,7 @@ const HookSlam: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
       </div>
       {sc.teaserCode && (
         <div style={{ position: 'absolute', top: 1080, left: 0, right: 0, textAlign: 'center', opacity: ease(t, sc.start + 0.6, sc.start + 1) }}>
-          <span data-qa="teaser" style={{ display: 'inline-block', padding: '12px 46px', borderRadius: 30, background: '#1E2A55', border: `3px ${t < reveal ? 'dashed' : 'solid'} ${s.accent}` }}>
+          <span data-qa="teaser" style={{ display: 'inline-block', padding: '12px 46px', borderRadius: 30, background: CHIP, border: `3px ${t < reveal ? 'dashed' : 'solid'} ${s.accent}` }}>
             <Code style={{ fontSize: 80, color: s.accent, filter: `blur(${(1 - ease(t, reveal, reveal + 0.3)) * (10 - 3 * Math.abs(Math.sin(t * 3)))}px)` }}>{sc.teaserCode}</Code>
           </span>
         </div>
@@ -264,7 +293,7 @@ const HookRings: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
       <Headline hl={sc.headline} instant />
       {sc.teaserCode && (
         <div style={{ position: 'absolute', top: 430, left: 0, right: 0, textAlign: 'center' }}>
-          <span data-qa="teaser" style={{ display: 'inline-block', padding: '10px 40px', borderRadius: 30, background: '#1E2A55', border: `3px ${t < reveal ? 'dashed' : 'solid'} ${s.accent}` }}>
+          <span data-qa="teaser" style={{ display: 'inline-block', padding: '10px 40px', borderRadius: 30, background: CHIP, border: `3px ${t < reveal ? 'dashed' : 'solid'} ${s.accent}` }}>
             <Code style={{ fontSize: 72, color: s.accent, filter: `blur(${(1 - ease(t, reveal, reveal + 0.3)) * (10 - 3 * Math.abs(Math.sin(t * 3)))}px)` }}>{sc.teaserCode}</Code>
           </span>
         </div>
@@ -447,7 +476,7 @@ const CompatScene: React.FC<{ sc: Of<'compat'> }> = ({ sc }) => {
         {items.map((label, i) => {
           const p = pop(frame, fps, 4 + i * 8);
           return (
-            <div key={i} style={{ width: w, height: 560, borderRadius: i % 2 ? 36 : 60, background: '#0A0F22', border: '10px solid #2B3760', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 30, transform: `translateY(${(1 - p) * 300}px)`, opacity: p }}>
+            <div key={i} style={{ ...DARK, width: w, height: 560, borderRadius: i % 2 ? 36 : 60, background: '#0A0F22', border: '10px solid #2B3760', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 30, transform: `translateY(${(1 - p) * 300}px)`, opacity: p }}>
               {sc.code && <Code style={{ fontSize: 44, color: s.accent, letterSpacing: 2 }}>{sc.code}</Code>}
               <div style={{ width: 120, height: 120, borderRadius: '50%', background: s.good, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: `scale(${pop(frame, fps, 14 + i * 8)})` }}><Icon name="check" size={84} color="#fff" /></div>
               <div style={{ fontFamily, fontWeight: 900, fontSize: 44, color: WHITE, textAlign: 'center', padding: '0 10px' }}>{label}</div>
@@ -457,7 +486,7 @@ const CompatScene: React.FC<{ sc: Of<'compat'> }> = ({ sc }) => {
       </div>
       {sc.badge && (
         <div style={{ position: 'absolute', top: 1140, left: 0, right: 0, textAlign: 'center', transform: `scale(${g})` }}>
-          <span data-qa="badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 16, padding: '14px 40px', borderRadius: 60, background: '#1E2A55', border: `3px solid ${s.accent}`, fontFamily, fontWeight: 900, fontSize: 44, color: WHITE, direction: 'rtl' }}>
+          <span data-qa="badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 16, padding: '14px 40px', borderRadius: 60, background: CHIP, border: `3px solid ${s.accent}`, fontFamily, fontWeight: 900, fontSize: 44, color: WHITE, direction: 'rtl' }}>
             <Icon name="antenna" size={50} color={s.accent} /> {sc.badge}
           </span>
         </div>
@@ -544,15 +573,22 @@ const Captions: React.FC<{ caps: MotionPlan['captions'] }> = ({ caps }) => {
   const p = pop(frame, fps, f(cur.a));
   return (
     <div style={{ position: 'absolute', top: 1480, left: 70, right: 70, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: s.captionSize, lineHeight: 1.35, transform: `scale(${0.8 + 0.2 * p})`, opacity: p }}>
-      <span data-qa="caption">{words.map((w, i) => (
-        <span key={i} style={{ display: 'inline-block', margin: '0 9px', padding: '0 10px', borderRadius: 14, color: i === idx ? '#111' : WHITE, background: i === idx ? s.accent : 'transparent', transform: `scale(${i === idx ? 1.08 : 1})`, WebkitTextStroke: i === idx ? '0' : '2px rgba(0,0,0,0.5)', textShadow: i === idx ? 'none' : '0 4px 18px rgba(0,0,0,0.8)' }}>{w}</span>
-      ))}</span>
+      <span data-qa="caption" style={V(s).caption === 'boxed' ? { display: 'inline-block', padding: '10px 26px', borderRadius: 28, background: CARD, border: `3px solid ${s.accent}`, boxShadow: '0 12px 40px rgba(0,0,0,0.35)' } : undefined}>{words.map((w, i) => {
+        const cur2 = i === idx, cs = V(s).caption;
+        const style: React.CSSProperties = cs === 'highlight'
+          ? { color: cur2 ? '#111' : WHITE, background: cur2 ? s.accent : 'transparent', transform: `scale(${cur2 ? 1.08 : 1})`, WebkitTextStroke: cur2 ? '0' : '2px rgba(0,0,0,0.35)', textShadow: cur2 ? 'none' : '0 4px 18px rgba(0,0,0,0.5)' }
+          : cs === 'underline'
+            ? { color: cur2 ? s.accent : WHITE, boxShadow: cur2 ? `inset 0 -10px 0 ${s.accent}66` : 'none', transform: `translateY(${cur2 ? -6 : 0}px)`, textShadow: '0 4px 18px rgba(0,0,0,0.45)' }
+            : { color: cur2 ? s.accent : WHITE, transform: `scale(${cur2 ? 1.1 : 1})` };
+        return <span key={i} style={{ display: 'inline-block', margin: '0 9px', padding: '0 10px', borderRadius: 14, ...style }}>{w}</span>;
+      })}</span>
     </div>
   );
 };
 
 export const MotionShort: React.FC<MotionPlan> = (plan) => {
-  const s = plan.style;
+  const th = THEMES[V(plan.style).theme] ?? THEMES.night!;
+  const s: MotionStyle = { ...plan.style, accent: th.accent, good: th.good, bad: th.bad, bg1: th.bg1, bg2: th.bg2 };
   const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
   const t = frame / FPS;
@@ -568,7 +604,7 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
   ];
   return (
     <StyleCtx.Provider value={s}>
-      <AbsoluteFill style={{ background: s.bg1 }}>
+      <AbsoluteFill style={{ ...vars(th), background: s.bg1 }}>
         <Background tint={tint} />
         {s.particles && <Particles color={tint} />}
         <AbsoluteFill style={{ transform: `scale(${1 + 0.03 * kick})` }}>

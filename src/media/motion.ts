@@ -34,32 +34,48 @@ const ICONS = ['call', 'shield', 'headset', 'warn', 'check', 'lock', 'antenna', 
 export function motionStyle(ctx: AgentContext): MotionStyle {
   try { return { ...DEFAULT_STYLE, ...(JSON.parse(readKnowledge(ctx, 'motion_style=') ?? '{}') as Partial<MotionStyle>) }; } catch { return DEFAULT_STYLE; }
 }
-const DEFAULT_VARIANTS: Variants = { hook: 'rings', headline: 'pop', phone: 'flat' };
+const DEFAULT_VARIANTS: Variants = { theme: 'night', bg: 'dots', caption: 'highlight', transition: 'whip', hook: 'rings', headline: 'pop', phone: 'flat' };
 /** Critic quality of one review (0–10, opening and match weigh double). */
 export const reviewScore = (r: { hook: number; visualMatch: number; pacing: number; captions: number }) => (r.hook * 2 + r.visualMatch * 2 + r.pacing + r.captions) / 6;
 
 /**
- * Evolution of the look: per gene, the version the analyst chose from view counts wins; otherwise the version
- * with the best critic average (an untried version counts as 6.5, so new ones get a chance). With `explore`
- * (≈30% of Shorts, or a re-plan after a low score) one gene is switched to a different version to test it.
+ * "The best, but varied." Per design gene:
+ *  - a version's score = its critic average (+1 if the analyst chose it from view counts); untried = 6.5;
+ *  - only STRONG versions are eligible (score ≥ best − 0.8); a version proven weak (≥ 3 reviews, ≥ 1.5 below the
+ *    best) is never used again;
+ *  - among the strong ones the pick is varied: never the previous Short's colour theme, and the whole look must
+ *    differ from each of the last 3 motion Shorts in ≥ 2 genes.
+ * With `explore` one gene may try a version that is still unproven (< 3 reviews), so new versions get measured.
  */
 export function chooseVariants(ctx: AgentContext, explore: boolean, rnd: () => number = Math.random): Variants {
   const pref = motionStyle(ctx).variants;
   const reviews = ctx.repos.artifacts.listKind<{ look?: string; variants?: Variants; hook: number; visualMatch: number; pacing: number; captions: number }>('edit_review')
-    .filter((a) => a.data.look === 'motion' && a.data.variants).slice(-40).map((a) => a.data);
-  const out = { ...DEFAULT_VARIANTS } as Record<string, string>;
-  for (const [gene, values] of Object.entries(GENES) as [keyof Variants, readonly string[]][]) {
-    if (pref?.[gene] && values.includes(pref[gene])) { out[gene] = pref[gene]; continue; }
-    const mean = (v: string) => { const xs = reviews.filter((r) => r.variants![gene] === v).map(reviewScore); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 6.5; };
-    out[gene] = [...values].sort((a, b) => mean(b) - mean(a))[0]!;
+    .filter((a) => a.data.look === 'motion' && a.data.variants).slice(-60).map((a) => a.data);
+  const recent = ctx.repos.artifacts.listKind<{ plan?: { style?: { variants?: Variants } } }>('motion_plan')
+    .map((a) => a.data.plan?.style?.variants).filter((v): v is Variants => Boolean(v)).slice(-3).reverse();
+  const genes = Object.keys(GENES) as (keyof Variants)[];
+  const stats = (g: keyof Variants, v: string) => {
+    const xs = reviews.filter((r) => r.variants![g] === v).map(reviewScore);
+    const mean = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 6.5;
+    return { n: xs.length, score: mean + (pref?.[g] === v ? 1 : 0) };
+  };
+  const pools = {} as Record<keyof Variants, { v: string; w: number }[]>;
+  for (const g of genes) {
+    const all = GENES[g].map((v) => ({ v, ...stats(g, v) }));
+    const best = Math.max(...all.map((x) => x.score));
+    // the analyst's pick comes from real view counts: always eligible
+    const ok = all.filter((x) => x.score >= best - 0.8 || pref?.[g] === x.v);
+    const unproven = all.filter((x) => x.n < 3 && x.score > best - 1.5 && !ok.includes(x));
+    pools[g] = (explore ? [...ok, ...unproven] : ok).map((x) => ({ v: x.v, w: Math.max(0.2, x.score - (best - 1)) }));
   }
-  if (explore) {
-    const genes = Object.keys(GENES) as (keyof Variants)[];
-    const g = genes[Math.floor(rnd() * genes.length)]!;
-    const others = GENES[g].filter((v) => v !== out[g]);
-    if (others.length) out[g] = others[Math.floor(rnd() * others.length)]!;
+  const pick = (pool: { v: string; w: number }[]) => { let r = rnd() * pool.reduce((a, x) => a + x.w, 0); for (const x of pool) { r -= x.w; if (r <= 0) return x.v; } return pool.at(-1)!.v; };
+  const varied = (c: Variants) => (!recent[0] || c.theme !== recent[0].theme || pools.theme.length < 2) && recent.every((p) => genes.filter((g) => p[g] !== c[g]).length >= 2);
+  let out: Variants | undefined;
+  for (let k = 0; k < 40 && !out; k++) {
+    const c = Object.fromEntries(genes.map((g) => [g, pick(pools[g])])) as Variants;
+    if (varied(c) || k === 39) out = c;
   }
-  return out as Variants;
+  return { ...DEFAULT_VARIANTS, ...out };
 }
 
 /** Share of Shorts drawn as motion graphics (the rest use stock footage), tuned by the analyst. Default 0.5. */

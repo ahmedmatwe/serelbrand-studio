@@ -22,6 +22,10 @@ export type MotionScene = { start: number; end: number; headline: Hl } & (
  * sometimes a different one to try (exploration) — and the critic's scores + view counts decide which survive.
  */
 export const GENES = {
+  theme: ['night', 'light', 'pop', 'teal', 'sunset'],
+  bg: ['dots', 'grid', 'waves', 'blobs'],
+  caption: ['highlight', 'underline', 'boxed'],
+  transition: ['whip', 'zoom', 'fade', 'rise'],
   hook: ['rings', 'slam', 'phone3d'],
   headline: ['pop', 'stagger'],
   phone: ['flat', 'tilt'],
@@ -33,7 +37,7 @@ export interface MotionStyle {
   variants?: Variants;
   /** 0–1: how strongly the camera pushes in on the action. */
   camera: number;
-  transition: 'whip' | 'zoom' | 'fade';
+  transition: 'whip' | 'zoom' | 'fade' | 'rise';
   particles: boolean;
   /** Caption font size (px on a 1080×1920 frame). */
   captionSize: number;

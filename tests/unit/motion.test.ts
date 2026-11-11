@@ -55,16 +55,25 @@ test('motion: without a model the fallback plan still covers the whole Short wit
   assert.equal(fallbackPlan(1).length, 1);
 });
 
-test('motion evolution: the analyst’s winner is kept, the critic’s best is used, exploration tries one other version', async () => {
+test('motion look: only strong versions are used, varied between videos, the analyst’s pick stays eligible', async () => {
   const { chooseVariants } = await import('../../src/media/motion.ts');
-  const rev = (hook: string, score: number) => ({ data: { look: 'motion', variants: { hook, headline: 'pop', phone: 'flat' }, hook: score, visualMatch: score, pacing: score, captions: score } });
-  const mk = (reviews: unknown[], style?: string) => ({ repos: { artifacts: { listKind: () => reviews }, knowledge: { byCategory: (c: string) => (c === 'learning' && style ? [{ insight: `motion_style=${style}` }] : []) } } }) as unknown as AgentContext;
-  // critic: slam scored 8, rings 5 → slam; untried phone3d counts 6.5 (< 8)
-  assert.equal(chooseVariants(mk([rev('rings', 5), rev('slam', 8)]), false).hook, 'slam');
-  // the analyst's choice (from views) beats the critic
-  assert.equal(chooseVariants(mk([rev('slam', 9)], JSON.stringify({ variants: { hook: 'phone3d' } })), false).hook, 'phone3d');
-  // exploration changes exactly one gene
-  const base = chooseVariants(mk([]), false);
-  const tried = chooseVariants(mk([]), true, () => 0);
-  assert.equal(Object.keys(base).filter((k) => (base as Record<string, string>)[k] !== (tried as Record<string, string>)[k]).length, 1);
+  const rev = (hook: string, score: number) => ({ data: { look: 'motion', variants: { hook, headline: 'pop', phone: 'flat', theme: 'night', bg: 'dots', caption: 'highlight', transition: 'whip' }, hook: score, visualMatch: score, pacing: score, captions: score } });
+  const mk = (reviews: unknown[], plans: unknown[] = [], style?: string) => ({ repos: { artifacts: { listKind: (k: string) => (k === 'edit_review' ? reviews : k === 'motion_plan' ? plans : []) }, knowledge: { byCategory: (c: string) => (c === 'learning' && style ? [{ insight: `motion_style=${style}` }] : []) } } }) as unknown as AgentContext;
+  const seq = (xs: number[]) => { let i = 0; return () => xs[i++ % xs.length]!; };
+  // rings proven weak (3 reviews at 5), slam strong (8), phone3d untried (6.5 < 8 − 0.8) → always slam
+  const weak = [rev('rings', 5), rev('rings', 5), rev('rings', 5), rev('slam', 8)];
+  for (const r of [0, 0.3, 0.6, 0.99]) assert.equal(chooseVariants(mk(weak), false, () => r).hook, 'slam');
+  // exploring may try the unproven phone3d, never the proven-weak rings
+  const tried = new Set([0, 0.2, 0.5, 0.8, 0.99].map((r) => chooseVariants(mk(weak), true, () => r).hook));
+  assert.ok(!tried.has('rings'));
+  // the analyst's pick (from views) is eligible even with fewer critic points
+  const withPref = new Set([0, 0.5, 0.99].map((r) => chooseVariants(mk([rev('slam', 9)], [], JSON.stringify({ variants: { hook: 'phone3d' } })), false, () => r).hook));
+  assert.ok(withPref.has('phone3d'));
+  // variety: the colour theme never repeats the previous Short's, and the look differs from the last ones
+  const prev = { plan: { style: { variants: { theme: 'night', bg: 'dots', caption: 'highlight', transition: 'whip', hook: 'rings', headline: 'pop', phone: 'flat' } } } };
+  for (const r of [0, 0.25, 0.5, 0.75]) {
+    const v = chooseVariants(mk([], [{ data: prev }]), false, seq([r, 0.1, 0.9, 0.4]));
+    assert.notEqual(v.theme, 'night');
+    assert.ok(Object.keys(v).filter((g) => (v as Record<string, string>)[g] !== (prev.plan.style.variants as Record<string, string>)[g]).length >= 2);
+  }
 });

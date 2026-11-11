@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { AgentContext } from '../agents/base.ts';
 import { allPosts, learnedMaxShot, readKnowledge, type Post } from './learner.ts';
 import { motionShare, motionStyle, stepStyle } from '../media/motion.ts';
+import { GENES } from '../../motion/types.ts';
 
 const AREAS = ['hook', 'title', 'topic', 'length', 'retention', 'visuals', 'shots', 'editing', 'motion', 'timing', 'caption', 'platform', 'experiment'] as const;
 const Analysis = z.object({
@@ -21,7 +22,7 @@ const Analysis = z.object({
     /** Share of Shorts drawn as motion graphics (rest = stock footage). */
     motionShare: z.number().min(0).max(1).optional(),
     /** Motion-graphics look. */
-    motion: z.object({ variants: z.object({ hook: z.enum(['rings', 'slam', 'phone3d']), headline: z.enum(['pop', 'stagger']), phone: z.enum(['flat', 'tilt']) }).partial().optional(), camera: z.number().min(0).max(1).optional(), transition: z.enum(['whip', 'zoom', 'fade']).optional(), particles: z.boolean().optional(), captionSize: z.number().min(52).max(80).optional(), flash: z.number().min(0).max(0.4).optional() }).optional(),
+    motion: z.object({ variants: z.object({ theme: z.enum(GENES.theme), bg: z.enum(GENES.bg), caption: z.enum(GENES.caption), transition: z.enum(GENES.transition), hook: z.enum(GENES.hook), headline: z.enum(GENES.headline), phone: z.enum(GENES.phone) }).partial().optional(), camera: z.number().min(0).max(1).optional(), transition: z.enum(GENES.transition).optional(), particles: z.boolean().optional(), captionSize: z.number().min(52).max(80).optional(), flash: z.number().min(0).max(0.4).optional() }).optional(),
   }).default({}),
 });
 export type AnalysisResult = z.infer<typeof Analysis>;
@@ -89,7 +90,7 @@ function whatItSaid(ctx: AgentContext, p: Post): Omit<ShortPerformance, 'title' 
     out.words = scene.voiceover.split(/\s+/).filter(Boolean).length;
   }
   const short = ctx.repos.artifacts.latest<{ shorts?: { scenes?: number[]; durationSec: number; shotLog?: ShortPerformance['shotLog']; look?: 'motion' | 'stock' }[] }>(p.video_id, 'render')?.data.shorts?.find((s) => s.scenes?.includes(i + 1));
-  if (short) { out.durationSec = Math.round(short.durationSec); out.shotLog = short.shotLog; out.look = short.look ?? 'stock'; if (out.look === 'motion') out.design = short.shotLog?.[0]?.showing.split(':')[0]; }
+  if (short) { out.durationSec = Math.round(short.durationSec); out.shotLog = short.shotLog; out.look = short.look ?? 'stock'; if (out.look === 'motion') out.design = short.shotLog?.[0]?.showing.match(/\{[^}]*\}/)?.[0]; }
   const rev = ctx.repos.artifacts.listKind<{ n: number; hook: number; visualMatch: number; pacing: number; captions: number; notes: string }>('edit_review').filter((a) => a.video_id === p.video_id && a.data.n === i + 1).at(-1)?.data;
   if (rev) out.editReview = { hook: rev.hook, visualMatch: rev.visualMatch, pacing: rev.pacing, captions: rev.captions, notes: rev.notes };
   return out;
@@ -126,7 +127,7 @@ export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<
       'Each Short may carry editReview (the editing critic\'s scores before publishing) and whereViewersLeft (YouTube: share still watching after the opening, and the second most people left with what was on screen and being said then) — use them to find editing/shot problems (areas "shots", "editing", "visuals") and set settings.maxShotSec (3–6 s per shot; lower = faster cuts) only when the evidence points to pacing. ' +
       'Each Short has look = "motion" (drawn motion graphics) or "stock" (stock footage). Compare them on vsPlatformUsual, watchedPercent and whereViewersLeft; set settings.motionShare (0–1, share of Shorts in motion) toward the better look only when the difference is clear; ' +
       'for motion Shorts, use editReview + whereViewersLeft (showing = "motion <scene>: <headline>") to improve the drawn look: rules in area "motion" (e.g. which scene types hold viewers, shorter headlines, faster opening) and settings.motion (camera 0–1, transition whip|zoom|fade, particles, captionSize 52–80, flash 0–0.4) in small steps. ' +
-      'Motion Shorts carry design genes in shotLog/whereViewersLeft.showing ("hook/<rings|slam|phone3d> [<pop|stagger>/<flat|tilt>]"): when one version clearly keeps more viewers or gets more views, set settings.motion.variants to it (evolution: the winning version becomes the default, others keep being tested on some Shorts). ' +
+      'Motion Shorts carry their design genes in "design" (theme, background, caption style, transition, hook, headline, phone). The team uses only strong versions and varies them so videos never look alike; when one version clearly keeps more viewers or gets more views, set settings.motion.variants to it (it gets a bonus, it is not forced on every video). ' +
       'Read viewerComments too: what people ask, what confused them, what they want next, complaints (too fast, wrong phone, didn\'t work) — turn real patterns into rules (e.g. say which phones/versions it works on, slow down the steps, cover the requested apps). ' +
       'If the numbers are too few to conclude, say so honestly and propose one small experiment (area "experiment") instead of a confident rule. Do not repeat rules already in previousRules unless the new data changes them. ' +
       'summaryArabic: 3–6 short lines in Egyptian Arabic for the owner: what is weak, the likely reason, and what the team will change. JSON only.',
