@@ -133,7 +133,7 @@ export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<
       'summaryArabic: 3–6 short lines in Egyptian Arabic for the owner: what is weak, the likely reason, and what the team will change. JSON only.',
     prompt: JSON.stringify({ shorts, viewerComments, previousRules: previous }),
     schema: Analysis,
-    maxOutputTokens: 3000,
+    maxOutputTokens: 7000,
   }).catch((err: Error) => { if (isInfraProblem(err.message)) return undefined; throw err; });
   if (!r) return [];
   const a = r.data as AnalysisResult;
@@ -144,9 +144,14 @@ export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<
       ctx.repos.knowledge.add({ category: 'lesson', insight, evidence: act.why, confidence: Date.now() / 1e13, sampleSize: n });
     }
   }
+  // Settings move at most once a day each: the numbers of a few hours are mostly noise.
+  const changedToday = (prefix: string) => {
+    const k = ctx.repos.knowledge.byCategory('learning').find((x) => x.insight.startsWith(prefix));
+    return Boolean(k && now.getTime() - k.confidence * 1e13 < 22 * 3_600_000);
+  };
   // Editing pace: one small step at a time (±0.5 s), only within 3–6 s.
   const cur = learnedMaxShot(ctx);
-  const want = a.settings?.maxShotSec;
+  const want = changedToday('shot_max_sec=') ? undefined : a.settings?.maxShotSec;
   let paceLine = '';
   if (want !== undefined && Math.abs(want - cur) >= 0.25) {
     const next = Math.min(6, Math.max(3, cur + Math.sign(want - cur) * Math.min(0.5, Math.abs(want - cur))));
@@ -154,12 +159,12 @@ export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<
     paceLine = `\n✂️ المونتاج: أقصى مدة للقطة بقت ${next} ثانية (كانت ${cur})`;
   }
   // Motion graphics: share (±0.2 per analysis) and look (small steps).
-  if (a.settings?.motionShare !== undefined) {
+  if (a.settings?.motionShare !== undefined && !changedToday('motion_share=')) {
     const cur2 = motionShare(ctx);
     const next2 = Number(Math.min(1, Math.max(0, cur2 + Math.sign(a.settings.motionShare - cur2) * Math.min(0.2, Math.abs(a.settings.motionShare - cur2)))).toFixed(2));
     if (next2 !== cur2) { ctx.repos.knowledge.add({ category: 'learning', insight: `motion_share=${next2}`, evidence: 'analyst: motion vs stock', confidence: Date.now() / 1e13, sampleSize: n }); paceLine += `\n🎨 الموشن جرافيك: ${Math.round(next2 * 100)}% من الفيديوهات (كانت ${Math.round(cur2 * 100)}%)`; }
   }
-  if (a.settings?.motion) {
+  if (a.settings?.motion && !changedToday('motion_style=')) {
     const next3 = stepStyle(motionStyle(ctx), a.settings.motion);
     if (next3) { ctx.repos.knowledge.add({ category: 'learning', insight: `motion_style=${JSON.stringify(next3)}`, evidence: 'analyst: motion look', confidence: Date.now() / 1e13, sampleSize: n }); paceLine += '\n🎨 شكل الموشن اتظبط حسب الأرقام وملاحظات الناقد'; }
   }

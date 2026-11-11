@@ -414,8 +414,10 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   }
 
   // 4) What needs the human.
-  rep.pendingApprovals = ctx.repos.approvals.pending().length;
-  for (const v of ctx.repos.videos.list('reviewed')) {
+  // Packs the autopilot itself blocked (a replacement was made) are not waiting for the owner.
+  const autoBlocked = (id: string) => Boolean(ctx.repos.artifacts.latest(id, 'auto_blocked'));
+  rep.pendingApprovals = ctx.repos.approvals.pending().filter((a) => !autoBlocked(a.video_id)).length;
+  for (const v of ctx.repos.videos.list('reviewed').filter((x) => !autoBlocked(x.id))) {
     const fc = ctx.repos.artifacts.latest<FactCheckReport>(v.id, 'fact_check')?.data;
     const n = fc?.claims.filter((c) => c.humanReviewRequired).length ?? 0;
     if (n) rep.needsFactReview.push({ videoId: v.id, title: v.title, claims: n });

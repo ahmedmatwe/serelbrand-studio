@@ -37,6 +37,11 @@ export function scriptProblems(s: Pick<Script, 'hooks' | 'opening' | 'scenes' | 
     // A couple of borderline words are fine; a pattern means mixed register.
     if (wrong.length >= 3) p.push(`Mixed Arabic register: the channel uses "${dialect}" but these words don't fit it: ${[...new Set(wrong)].slice(0, 8).join('، ')}. Rewrite them in the channel register everywhere.`);
   }
+  // Same measure as the final quality gate (clarity): catching it here costs one rewrite, not a whole production.
+  const sents = text.split(/[.!؟?\n]+/).map((x) => x.trim()).filter(Boolean);
+  const avg = sents.reduce((a, x) => a + countWords(x), 0) / Math.max(1, sents.length);
+  const longest = Math.max(0, ...sents.map(countWords));
+  if (avg > 18 || longest > 30) p.push(`Sentences are too long (average ${avg.toFixed(0)} words, longest ${longest}): end every idea with a period or "!" — short spoken sentences of 6–15 words, one step per sentence (a settings path may stay in one sentence).`);
   for (const h of policyHits(text)) p.push(`Policy risk: "${h.word}" (${h.kind}) — rephrase neutrally or remove.`);
   if (target) {
     const w = countWords(text);
