@@ -404,6 +404,7 @@ export async function critiqueEdit(ctx: AgentContext, framesJpeg: Buffer[], said
     tier: 'light',
     system: 'You are a senior short-form video editor reviewing a 30–45 s Egyptian Arabic phone-secret Short before it is published. Frame N is at second (N-1)*2. ' +
       'Score 0–10: hook = do the first 2 frames make a scroller stop (clear subject, a phone/screen, motion, readable promise)? visualMatch = does each frame show what is said at that second? pacing = varied, not the same clip for long, no dead/blank frames? captions = readable, not covering the important part? ' +
+      'If the frames are drawn motion graphics (no camera footage), judge them as a top motion designer: is each scene clear in 1 second, headline short and readable, no clutter or overlap, the action (key pressed, item tapped) visible and in sync, strong colour contrast — and say concretely what to change next time. ' +
       'mismatchAt = the seconds whose picture clearly does NOT show what is being said (e.g. nature while talking about a code). notes = the 1–3 most useful fixes for next time, concrete. JSON only.' + visualLessons(ctx),
     prompt: JSON.stringify({ saidAtSecond: said }),
     schema: EditReview,

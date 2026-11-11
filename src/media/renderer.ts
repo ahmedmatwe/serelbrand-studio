@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Agent } from '../agents/base.ts';
 import type { Blueprint, Script } from '../agents/schemas.ts';
@@ -8,7 +8,7 @@ import type { MediaAsset, TTSProvider, TTSResult } from '../providers/media.ts';
 import { batchScenes, splitBatch } from './voice-batch.ts';
 import { lastAlignError, scriptWords, timedChunks, type WordTime } from './align.ts';
 import { phoneUiEvents } from './phone-ui.ts';
-import { loadPhoneLibrary, type PhoneUi } from '../agents/niche/phone-library.ts';
+import { loadPhoneLibrary, type PhoneSecret, type PhoneUi } from '../agents/niche/phone-library.ts';
 import { FallbackTTS } from '../providers/tts/gemini-tts.ts';
 import { buildAss, chunkSubtitles, type AssEvent, type AssStyle } from './ass.ts';
 import { ffmpeg, filterPath, probeDuration, volumeStats, type VolumeStats } from './ffmpeg.ts';
@@ -17,6 +17,7 @@ import { renderThumbnail } from './thumbnail.ts';
 import { cuesFor, mixSoundtrackSafe, pickMusic } from './sound.ts';
 import { z } from 'zod';
 import { learnedMaxShot } from '../analytics/learner.ts';
+import { motionAvailable, motionShare, planMotion, renderMotion, type MotionPlan } from './motion.ts';
 
 export type RenderSize = 'full' | 'preview';
 export interface RenderInput { videoId: string; size?: RenderSize; shorts?: boolean; /** Shorts to cut per long video (default 3). */ shortsPerLong?: number }
@@ -26,7 +27,7 @@ interface TimedScene { /** Phone screen to draw while the steps are said (phone-
 /** One background segment of the timeline (a shot, or a whole scene when it has no shots). */
 interface Segment { n: number; duration: number; visual?: SceneVisual }
 
-export interface RenderedShort { path: string; durationSec: number; scenes: number[]; title: string; /** What was on screen when (for the analyst: where viewers left and what was showing). */ shotLog?: { start: number; duration: number; said: string; showing: string }[]; /** Set when the frame audit found an immodest shot: never published. */ heldReason?: string }
+export interface RenderedShort { /** Drawn motion graphics or stock footage (the analyst compares them). */ look?: 'motion' | 'stock'; path: string; durationSec: number; scenes: number[]; title: string; /** What was on screen when (for the analyst: where viewers left and what was showing). */ shotLog?: { start: number; duration: number; said: string; showing: string }[]; /** Set when the frame audit found an immodest shot: never published. */ heldReason?: string }
 
 export interface RenderOutput {
   videoPath: string;
@@ -313,6 +314,48 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     } catch { return undefined; } finally { rmSync(fdir, { recursive: true, force: true }); }
   }
 
+  /** motion vs stock for the next Short: keeps the recent mix at the learned share (STUDIO_LOOK overrides). */
+  private pickLook(thisPack: RenderedShort[]): 'motion' | 'stock' {
+    const forced = process.env.STUDIO_LOOK;
+    if (forced === 'motion' || forced === 'stock') return forced === 'motion' && motionAvailable(this.ctx.config.rootDir) ? 'motion' : 'stock';
+    if (this.ctx.providers.llm.name.startsWith('mock') || !motionAvailable(this.ctx.config.rootDir)) return 'stock';
+    const share = motionShare(this.ctx);
+    const recent = [...this.ctx.repos.artifacts.listKind<{ shorts?: RenderedShort[] }>('render').slice(-10).flatMap((a) => a.data.shorts ?? []), ...thisPack].map((x) => x.look).filter(Boolean);
+    const m = recent.filter((x) => x === 'motion').length;
+    return m < share * (recent.length + 1) ? 'motion' : 'stock';
+  }
+
+  /**
+   * Plans, draws and reviews one motion Short. A Short the editing critic scores low (hook or match < 7) is
+   * re-planned once with the critic's own notes and the better of the two kept. Returns its shot log, or
+   * undefined (→ stock footage) if anything fails.
+   */
+  private async motionShort(o: { videoId: string; dir: string; n: number; audio: string; path: string; d: number; title: string; narration: string; words: WordTime[]; entry?: PhoneSecret; notes: string[] }) {
+    const root = this.ctx.config.rootDir;
+    const input = { narration: o.narration, words: o.words, duration: o.d, title: o.title, entry: o.entry, brand: this.ctx.config.channel.channelName || 'سر الموبايل', endCard: 'تابع القناة لسر جديد كل يوم' };
+    const said = (p: MotionPlan) => p.captions.map((c) => ({ at: c.a, text: c.text }));
+    const score = (r?: { hook: number; visualMatch: number; pacing: number; captions: number }) => (r ? r.hook * 2 + r.visualMatch * 2 + r.pacing + r.captions : -1);
+    try {
+      let plan = await planMotion(this.ctx, input, o.videoId);
+      await renderMotion(root, plan, o.audio, o.path);
+      let review = await this.editReview(o.path, o.dir, `motion-${o.n}`, said(plan), o.videoId);
+      if (review && (review.hook < 7 || review.visualMatch < 7) && review.notes) {
+        const plan2 = await planMotion(this.ctx, input, o.videoId, review.notes);
+        const alt = o.path.replace(/\.mp4$/, '-b.mp4');
+        await renderMotion(root, plan2, o.audio, alt);
+        const review2 = await this.editReview(alt, o.dir, `motion-${o.n}-b`, said(plan2), o.videoId);
+        if (score(review2) > score(review)) { renameSync(alt, o.path); plan = plan2; review = review2; o.notes.push(`Short ${o.n}: motion re-planned after the critic's notes (${review?.hook}/10 hook)`); } else rmSync(alt, { force: true });
+      }
+      if (review) this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'edit_review', agent: 'editing-critic', data: { n: o.n, look: 'motion', ...review } });
+      this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'motion_plan', agent: 'motion-director', data: { n: o.n, plan } });
+      o.notes.push(`Short ${o.n}: motion graphics (${plan.scenes.map((x) => x.type).join(' → ')})`);
+      return plan.scenes.map((x) => ({ start: x.start, duration: Number((x.end - x.start).toFixed(1)), said: plan.captions.filter((c) => c.a >= x.start && c.a < x.end).map((c) => c.text).join(' ').slice(0, 120), showing: `motion ${x.type}: ${x.headline.text}`.slice(0, 120) }));
+    } catch (e) {
+      o.notes.push(`Short ${o.n}: motion graphics failed (${String((e as Error).message).slice(0, 160)}) — stock footage used`);
+      return undefined;
+    }
+  }
+
   private async renderPack(o: { videoId: string; dir: string; timed: TimedScene[]; t: number; size: RenderSize; palette: string[]; preset: string; notes: string[]; tts: TTSProvider; voiceName: string; th: ThumbnailOutput }): Promise<RenderOutput> {
     const bp = this.ctx.repos.artifacts.latest<Blueprint>(o.videoId, 'blueprint')!.data;
     const script = this.ctx.repos.artifacts.latest<Script>(o.videoId, 'script')!.data;
@@ -340,8 +383,14 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
         words: s.words?.map((w) => ({ ...w, start: w.start / tempo, end: w.end / tempo })),
         shots: trimShots(s.shots?.map((x) => ({ ...x, start: x.start / tempo, duration: x.duration / tempo })), d),
       };
-      await this.renderTimeline([scaled], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
       const sc = script.scenes.find((x) => x.n === s.n);
+      const title = packTopics?.[i]?.title || sc?.curiosityGap || sc?.onScreenText || script.mainTitle;
+      // Motion graphics (drawn, timed to the words) for a share of the Shorts; stock footage for the rest or on failure.
+      if (this.pickLook(shorts) === 'motion' && (scaled.words?.length ?? 0) > 5) {
+        const done = await this.motionShort({ videoId: o.videoId, dir: o.dir, n: s.n, audio, path, d, title, narration: s.voiceover, words: scaled.words!, entry: lib?.secrets.find((x) => x.id === packTopics?.[i]?.subject), notes: o.notes });
+        if (done) { shorts.push({ look: 'motion', shotLog: done, path, durationSec: Number(d.toFixed(2)), scenes: [s.n], title }); continue; }
+      }
+      await this.renderTimeline([scaled], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
       // Final safety net: the finished Short is looked at frame by frame (every 2 s) for modesty. A failing shot
       // is banned, replaced by another modest clip and the Short re-rendered (up to 2 times) before giving up.
       let held: string | undefined;
@@ -371,10 +420,10 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
           await this.renderTimeline([scaled], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });
           review = (await this.editReview(path, o.dir, `short-${s.n}-b`, said, o.videoId)) ?? review;
         }
-        if (review) this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'edit_review', agent: 'editing-critic', data: { n: s.n, ...review } });
+        if (review) this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'edit_review', agent: 'editing-critic', data: { n: s.n, look: 'stock', ...review } });
       }
       const shotLog = (scaled.shots ?? []).map((x) => ({ start: Number(x.start.toFixed(1)), duration: Number(x.duration.toFixed(1)), said: x.text.slice(0, 120), showing: (x.visual ? `${x.visual.asset.kind ?? 'clip'}: ${(x.visual.asset.tags ?? []).slice(0, 6).join(' ') || x.query.split('||')[0]!.trim()}` : 'drawn phone screen / text card').slice(0, 120) }));
-      shorts.push({ shotLog, path, durationSec: Number(d.toFixed(2)), scenes: [s.n], title: packTopics?.[i]?.title || sc?.curiosityGap || sc?.onScreenText || script.mainTitle, ...(held ? { heldReason: held } : {}) });
+      shorts.push({ look: 'stock', shotLog, path, durationSec: Number(d.toFixed(2)), scenes: [s.n], title, ...(held ? { heldReason: held } : {}) });
     }
     const first = shorts[0]!;
     const audio = await volumeStats(resolve(o.dir, `short-${o.timed[0]!.n}.m4a`));
