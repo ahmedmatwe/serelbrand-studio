@@ -353,23 +353,30 @@ export async function modestOnly(ctx: AgentContext, list: MediaAsset[], videoId?
  * Final safety net on the RENDERED video: frames every 2 s are shown to the vision model; any immodest frame
  * returns a reason (the Short is then held back from publishing). Undefined = clean (or vision unavailable).
  */
-export async function auditFrames(ctx: AgentContext, framesJpeg: Buffer[], videoId?: string): Promise<{ reason: string; frames: number[] } | undefined> {
+/**
+ * Frame audit of a rendered video. `frames` = immodest frames (the Short is held back if they can't be replaced);
+ * `raw` = unfinished stock footage (green/blue screen, tracking markers, mockup, watermark): replaced, never held.
+ */
+export async function auditFrames(ctx: AgentContext, framesJpeg: Buffer[], videoId?: string): Promise<{ reason: string; frames: number[]; raw?: number[] } | undefined> {
   if (!framesJpeg.length || ctx.providers.llm.name.startsWith('mock')) return undefined;
   const bad: number[] = [];
+  const raw: number[] = [];
   let reason = '';
   for (let i = 0; i < framesJpeg.length; i += 12) {
     const batch = framesJpeg.slice(i, i + 12);
     const r = await ctx.providers.llm.generateJson({
       task: 'video.modesty_audit',
       tier: 'light',
-      system: `${MODESTY_RULE} These are frames of one short video, numbered. JSON only: {"fail":[numbers of frames that fail],"reason":"what is wrong"}`,
-      prompt: 'List every frame that fails the modesty rule (empty list if all pass).',
-      schema: z.object({ fail: z.array(z.number().int()).default([]), reason: z.string().default('') }),
+      system: `${MODESTY_RULE} These are frames of one short video, numbered. Separately list in "raw" the frames that show unfinished stock footage: a flat green or blue chroma-key screen, tracking markers/crosses on a screen, a mockup template, or a watermark (a drawn phone screen with settings or a dialer is NOT raw — it is ours). JSON only: {"fail":[numbers of frames that fail modesty],"raw":[numbers],"reason":"what is wrong"}`,
+      prompt: 'List every frame that fails the modesty rule, and every raw-footage frame (empty lists if all pass).',
+      schema: z.object({ fail: z.array(z.number().int()).default([]), raw: z.array(z.number().int()).default([]), reason: z.string().default('') }),
       images: batch.map((b, k) => ({ mimeType: 'image/jpeg', data: b.toString('base64'), label: `Frame ${i + k + 1}:` })),
       videoId,
       maxOutputTokens: 300,
     }).catch(() => undefined);
     if (r?.data.fail.length) { bad.push(...r.data.fail); reason ||= r.data.reason; }
+    if (r?.data.raw.length) { raw.push(...r.data.raw); reason ||= r.data.reason; }
   }
-  return bad.length ? { reason: reason || 'immodest frame', frames: [...new Set(bad)].sort((a, b) => a - b) } : undefined;
+  const uniq = (xs: number[]) => [...new Set(xs)].sort((a, b) => a - b);
+  return bad.length || raw.length ? { reason: reason || (bad.length ? 'immodest frame' : 'raw stock footage'), frames: uniq(bad), raw: uniq(raw) } : undefined;
 }

@@ -81,10 +81,12 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
       const own = factCheck ? { ...factCheck, claims: factCheck.claims.filter((c) => c.sceneN === sc.n) } : undefined;
       return `${composeDescription({ description: lead, hashtags: seo.hashtags, chapters: [] }, own, render?.data.assets)}\n#Shorts`;
     };
+    const headlinesByScene = new Map<number, Partial<Record<'tiktok' | 'instagram' | 'facebook', string>>>();
     // Title editor: 5 titles per Short, the strongest one goes out (learned from our own view counts).
     if (pack && !env.DRY_RUN) {
       const items = render!.data.shorts!.map((sh) => { const sc = script?.scenes.find((x) => sh.scenes?.includes(x.n)); return sc ? { n: sc.n, title: sh.title, narration: sc.voiceover, onScreen: sc.onScreenText } : undefined; }).filter((x): x is NonNullable<typeof x> => Boolean(x));
       const picks = await chooseTitles(this.ctx, items, videoId);
+      for (const c of picks) headlinesByScene.set(c.n, c.platforms ?? {});
       for (const c of picks) { const sh = render!.data.shorts!.find((x) => x.scenes?.includes(c.n)); if (sh) sh.title = c.to; }
       if (picks.length) {
         this.ctx.repos.artifacts.save({ videoId, kind: 'title_choices', agent: 'title-editor', data: { picks } });
@@ -165,7 +167,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
           // Each platform at its own best hour (learned from its own numbers), same day as the YouTube slot.
           const ytAt = times[i] ?? new Date().toISOString();
           const at = { facebook: platformTime(platformHours(this.ctx, 'facebook'), ytAt, i), instagram: platformTime(platformHours(this.ctx, 'instagram'), ytAt, i) };
-          const captions = sc ? await platformCaptions(this.ctx, sh.title, sc.voiceover, seo.hashtags, videoId, { facebook: captionLessons(this.ctx, 'facebook'), instagram: captionLessons(this.ctx, 'instagram') }) : {};
+          const captions = sc ? await platformCaptions(this.ctx, sh.title, sc.voiceover, seo.hashtags, videoId, { facebook: captionLessons(this.ctx, 'facebook'), instagram: captionLessons(this.ctx, 'instagram') }, headlinesByScene.get(sc.n) ?? {}) : {};
           const { tiktok, ...metaCaptions } = captions as typeof captions & { tiktok?: string };
           tiktokCaptions.push({ title: sh.title, caption: tiktok ?? socialCaption(sh.title, lead, seo.hashtags.slice(0, 5)), facebookAt: at.facebook, instagramAt: at.instagram, ...(social.tiktok && !viaBuffer ? { tiktokAt: ytAt } : {}) });
           await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), captions: { ...metaCaptions, ...(tiktok ? { tiktok } : {}) }, publishAt: ytAt, at, platforms: ['facebook', 'instagram', ...(social.tiktok && !viaBuffer ? ['tiktok' as const] : [])], videoId, ...secretOf(sh) });

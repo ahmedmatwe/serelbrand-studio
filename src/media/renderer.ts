@@ -290,7 +290,7 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
   }
 
   /** Frames every 2 s of a rendered video → vision modesty audit. Returns the reason if any frame fails. */
-  private async modestyAudit(video: string, dir: string, tag: string, videoId: string): Promise<{ reason: string; frames: number[] } | undefined> {
+  private async modestyAudit(video: string, dir: string, tag: string, videoId: string): Promise<{ reason: string; frames: number[]; raw?: number[] } | undefined> {
     const fdir = resolve(dir, `audit-${tag}`);
     mkdirSync(fdir, { recursive: true });
     try {
@@ -336,11 +336,12 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       for (let attempt = 0; ; attempt++) {
         const audit = await this.modestyAudit(path, o.dir, `short-${s.n}`, o.videoId);
         if (!audit) { held = undefined; break; }
-        held = audit.reason;
-        const times = audit.frames.map((f) => (f - 1) * 2);
+        // Only immodesty holds a Short back; raw footage (green screen…) is replaced but never blocks it.
+        held = audit.frames.length ? audit.reason : undefined;
+        const times = [...audit.frames, ...(audit.raw ?? [])].map((f) => (f - 1) * 2);
         const badShots = (scaled.shots ?? []).filter((x) => x.visual && times.some((t) => t >= x.start - 0.5 && t <= x.start + x.duration + 0.5));
         if (attempt >= 2 || !badShots.length) break;
-        o.notes.push(`Short ${s.n}: replaced ${badShots.length} shot(s) that failed the modesty audit (${audit.reason.slice(0, 120)})`);
+        o.notes.push(`Short ${s.n}: replaced ${badShots.length} shot(s) that failed the frame audit (${audit.reason.slice(0, 120)})`);
         for (const b of badShots) { banned.add(b.visual!.asset.id); b.visual = undefined; }
         await fetchShotVisuals(this.ctx, badShots, { targetWidth: o.size === 'full' ? 1280 : 960, orientation: 'landscape', cacheDir: resolve(this.ctx.config.rootDir, 'data/stock-cache'), used: banned, notes: o.notes, videoId: o.videoId, fallbackQueries: [...(lib?.secrets.find((x) => x.id === packTopics?.[i]?.subject)?.footage ?? []), ...this.ctx.config.channel.fallbackFootage] });
         await this.renderTimeline([scaled], audio, path, { ...dims(o.size, true), palette: o.palette, preset: o.preset, endCard: 'تابع القناة لسر جديد كل يوم', assPath: resolve(o.dir, `short-${s.n}.ass`) });

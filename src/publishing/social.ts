@@ -275,7 +275,7 @@ export function guardCodes(caption: string, narration: string): string | undefin
  * Facebook: conversational question that invites comments, 2–3 hashtags.
  * Facts only from the Short's own narration. Falls back to the plain caption if the model is unavailable.
  */
-export async function platformCaptions(ctx: { providers: { llm: { generateJson: (r: any) => Promise<{ data: any }> } } }, title: string, narration: string, hashtags: string[], videoId?: string, rules: Partial<Record<'facebook' | 'instagram', string[]>> = {}): Promise<Partial<Record<'facebook' | 'instagram' | 'tiktok', string>>> {
+export async function platformCaptions(ctx: { providers: { llm: { generateJson: (r: any) => Promise<{ data: any }> } } }, title: string, narration: string, hashtags: string[], videoId?: string, rules: Partial<Record<'facebook' | 'instagram', string[]>> = {}, headlines: Partial<Record<'facebook' | 'instagram' | 'tiktok', string>> = {}): Promise<Partial<Record<'facebook' | 'instagram' | 'tiktok', string>>> {
   const { z } = await import('zod');
   const r = await ctx.providers.llm.generateJson({
     task: 'social.captions',
@@ -285,13 +285,15 @@ export async function platformCaptions(ctx: { providers: { llm: { generateJson: 
       'facebook: 2–4 conversational lines, end with a question that invites comments (e.g. "جربتها؟ قولنا في الكومنتات"), 2–3 hashtags. ' +
       'tiktok: one punchy hook line + one line with the key step, then 4–6 hashtags that people search on TikTok (Arabic + #fyp-style English, #سر_الموبايل first), ≤ 220 characters. ' +
       'Never add facts, codes or steps that are not in the narration. Apply analystRules (learned from our real view counts on each platform). JSON only: {"instagram":"…","facebook":"…","tiktok":"…"}.',
-    prompt: JSON.stringify({ title, narration, hashtags, ...(rules.facebook?.length || rules.instagram?.length ? { analystRules: rules } : {}) }),
+    prompt: JSON.stringify({ title, narration, hashtags, ...(rules.facebook?.length || rules.instagram?.length ? { analystRules: rules } : {}), ...(Object.keys(headlines).length ? { headlines, headlinesRule: 'Each platform caption starts with exactly its headline as the first line.' } : {}) }),
     schema: z.object({ instagram: z.string().min(20), facebook: z.string().min(20), tiktok: z.string().min(10).optional() }),
     videoId,
     maxOutputTokens: 1500,
   }).catch(() => undefined);
   if (!r) return {};
   const g = (x?: string) => (x ? guardCodes(String(x), narration) : undefined);
-  const ig = g(r.data.instagram), fb = g(r.data.facebook), tt = g(r.data.tiktok);
+  // The title editor's headline is the first line on each platform, whatever the model wrote.
+  const lead = (x: string | undefined, h?: string) => (x && h && !x.trimStart().startsWith(h) ? `${h}\n${x}` : x);
+  const ig = lead(g(r.data.instagram), headlines.instagram), fb = lead(g(r.data.facebook), headlines.facebook), tt = lead(g(r.data.tiktok), headlines.tiktok);
   return { ...(ig ? { instagram: ig.slice(0, 2100) } : {}), ...(fb ? { facebook: fb.slice(0, 2100) } : {}), ...(tt ? { tiktok: tt.slice(0, 2200) } : {}) };
 }

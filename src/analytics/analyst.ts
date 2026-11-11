@@ -79,6 +79,9 @@ export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<
   if (readKnowledge(ctx, 'analysis_day=') === day) return [];
   const shorts = buildPerformance(ctx, allPosts(ctx), now).filter((s) => s.results.length);
   if (shorts.length < 1) return [];
+  // What viewers wrote in the last 7 days: their questions, confusion and requests are evidence too.
+  const viewerComments = ctx.repos.artifacts.listKind<{ heard?: { platform: string; title: string; text: string }[] }>('comment_replies')
+    .filter((a) => now.getTime() - new Date(a.created_at).getTime() < 7 * 86_400_000).flatMap((a) => a.data.heard ?? []).slice(-40);
   const previous = ctx.repos.knowledge.byCategory('lesson').filter((k) => k.insight.startsWith('Performance')).slice(0, 6).map((k) => k.insight);
   const r = await ctx.providers.llm.generateJson({
     task: 'analytics.diagnose',
@@ -87,9 +90,10 @@ export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<
       'Goal: much higher views. For every Short and platform you get views, likes, shares, saves, % watched, the Cairo hour, and "vsPlatformUsual" (1 = normal for that platform, 0.3 = a third). ' +
       'Find the Shorts that under-performed and explain WHY from the evidence, comparing them with the ones that did better: weak first sentence (does it promise a clear personal benefit within 2 seconds?), unclear/low-curiosity title, a topic few people search for, too long (people left: low % watched), wrong hour, platform mismatch (e.g. good on Instagram but dead on Facebook → Facebook needs a different caption/approach), weak caption. ' +
       'Then give at most 5 concrete, testable rules for the NEXT Shorts (English, imperative, specific — e.g. "Open with the result in ≤ 6 words: \'موبايلك هيقفل لوحده لو…\'", not "make better hooks"). Only rules the team can apply: hook, title, topic choice, length, retention, visuals, timing, caption (per platform), platform. ' +
+      'Read viewerComments too: what people ask, what confused them, what they want next, complaints (too fast, wrong phone, didn\'t work) — turn real patterns into rules (e.g. say which phones/versions it works on, slow down the steps, cover the requested apps). ' +
       'If the numbers are too few to conclude, say so honestly and propose one small experiment (area "experiment") instead of a confident rule. Do not repeat rules already in previousRules unless the new data changes them. ' +
       'summaryArabic: 3–6 short lines in Egyptian Arabic for the owner: what is weak, the likely reason, and what the team will change. JSON only.',
-    prompt: JSON.stringify({ shorts, previousRules: previous }),
+    prompt: JSON.stringify({ shorts, viewerComments, previousRules: previous }),
     schema: Analysis,
     maxOutputTokens: 3000,
   }).catch((err: Error) => { if (isInfraProblem(err.message)) return undefined; throw err; });

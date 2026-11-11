@@ -55,3 +55,11 @@ test('titles: picks the best of several titles; falls back to the old title when
   const bad = ctxWith(() => { throw new Error('HTTP 503'); });
   assert.deepEqual(await chooseTitles(bad.ctx, [{ n: 1, title: 'x title', narration: '...' }]), []);
 });
+
+test('titles: each platform gets its own headline; codes survive (never stripped as hashtags, reversed ones fixed)', async () => {
+  const { ctx } = ctxWith(() => ({ shorts: [{ n: 1, candidates: [{ title: 'كود *#06# يكشف موبايلك', style: 'code', score: 9 }, { title: 'سر في موبايلك', style: 'vague', score: 3 }, { title: 'اعرف موبايلك أصلي؟', style: 'q', score: 7 }], best: 'كود *#06# يكشف موبايلك #اندرويد', platforms: { tiktok: 'محدش قالك على #06#* ده؟ #fyp', instagram: 'احفظ الكود ده قبل ما تشتري موبايل', facebook: 'جربت الكود ده قبل كده؟' } }] }));
+  const [p] = await chooseTitles(ctx, [{ n: 1, title: 'old', narration: 'اكتب *#06# في الاتصال' }]);
+  assert.equal(p!.to, 'كود *#06# يكشف موبايلك');
+  assert.equal(p!.platforms!.tiktok, 'محدش قالك على *#06# ده؟');
+  assert.equal(p!.platforms!.facebook, 'جربت الكود ده قبل كده؟');
+});

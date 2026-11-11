@@ -33,12 +33,15 @@ export async function answerComments(ctx: AgentContext, src: CommentSources, now
   const replied: Replied[] = [];
   const notes: string[] = [];
   const ids: string[] = [];
+  const heard: { platform: string; title: string; text: string }[] = [];
   const blocked = new Set<string>();
   for (const p of recent) {
     if (replied.length >= max || blocked.has(p.platform)) continue;
     const fresh = (await src.unanswered(p.platform, p.external_id).catch((e: Error) => { notes.push(`${p.platform}: ${e.message.slice(0, 120)}`); return []; }))
       .filter((c) => !handled.has(c.id) && c.text?.trim()).slice(0, max - replied.length);
     if (!fresh.length) continue;
+    // What viewers say (questions, confusion, requests) feeds the analyst, replied or not.
+    heard.push(...fresh.map((c) => ({ platform: p.platform, title: p.title ?? '', text: c.text.slice(0, 300) })));
     const r = await ctx.providers.llm.generateJson({
       task: 'comments.reply',
       tier: 'light',
@@ -69,7 +72,7 @@ export async function answerComments(ctx: AgentContext, src: CommentSources, now
       }
     }
   }
-  if (ids.length) ctx.repos.artifacts.save({ videoId: null, kind: 'comment_replies', agent: 'community', data: { ids, replied } });
+  if (ids.length) ctx.repos.artifacts.save({ videoId: null, kind: 'comment_replies', agent: 'community', data: { ids, replied, heard } });
   return { replied, notes };
 }
 

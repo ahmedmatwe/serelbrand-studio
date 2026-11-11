@@ -12,7 +12,7 @@ function fakeCtx(rows: unknown[], reply: unknown) {
       db: { all: () => rows, run: () => {} },
       repos: {
         knowledge: { byCategory: (c: string) => knowledge.filter((k) => k.category === c).sort((a, b) => b.confidence - a.confidence), add: (k: any) => { knowledge.push({ ...k }); } },
-        artifacts: { latest: (_v: string, kind: string) => kind === 'calendar_entry' ? { data: { topics: [{ title: 'كود الإشعاع', subject: 's1' }] } } : kind === 'script' ? { data: { scenes: [{ n: 1, voiceover: 'موبايلك بيطلع إشعاع قد إيه؟ اكتب الكود ده. وبعدين شوف الرقم.' }] } } : kind === 'render' ? { data: { shorts: [{ scenes: [1], durationSec: 38.4 }] } } : undefined },
+        artifacts: { listKind: (k: string) => k === 'comment_replies' ? [{ created_at: '2026-11-10T08:00:00Z', data: { heard: [{ platform: 'youtube', title: 'كود الإشعاع', text: 'بيشتغل على سامسونج؟' }] } }] : [], latest: (_v: string, kind: string) => kind === 'calendar_entry' ? { data: { topics: [{ title: 'كود الإشعاع', subject: 's1' }] } } : kind === 'script' ? { data: { scenes: [{ n: 1, voiceover: 'موبايلك بيطلع إشعاع قد إيه؟ اكتب الكود ده. وبعدين شوف الرقم.' }] } } : kind === 'render' ? { data: { shorts: [{ scenes: [1], durationSec: 38.4 }] } } : undefined },
       },
       providers: { llm: { generateJson: async (r: any) => { calls.push(r); return { data: reply }; } } },
     } as any,
@@ -51,6 +51,7 @@ test('analyst: diagnosis becomes rules for the writer and captions, once a day',
   const out = await analyzePerformance(ctx, now);
   assert.match(out[0]!, /محلل الأداء/);
   assert.equal(calls.length, 1);
+  assert.equal(JSON.parse(calls[0].prompt).viewerComments[0].text, 'بيشتغل على سامسونج؟', 'viewer comments reach the analyst');
   assert.deepEqual(writerLessons(ctx), ['Performance (hook): Open with the personal result in 6 words or fewer.'], 'outage lesson filtered, caption rule not for the writer');
   assert.deepEqual(captionLessons(ctx, 'facebook'), ['Performance (caption/facebook): Start the Facebook caption with a question the viewer answers yes to.']);
   assert.deepEqual(captionLessons(ctx, 'instagram'), []);
