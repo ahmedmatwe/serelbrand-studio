@@ -12,7 +12,7 @@
  */
 import type { AgentContext } from '../agents/base.ts';
 
-export type Platform = 'youtube' | 'facebook' | 'instagram';
+export type Platform = 'youtube' | 'facebook' | 'instagram' | 'tiktok';
 export interface PostMetrics { views: number; likes?: number; comments?: number; shares?: number; avgPercentViewed?: number }
 export interface Post { id: string; platform: Platform; external_id: string; video_id?: string | null; secret_id?: string | null; family?: string | null; title?: string | null; publish_at: string; metrics: { h24?: PostMetrics; h72?: PostMetrics } }
 
@@ -24,7 +24,7 @@ export const DEFAULT_SHORT_HOURS = [11, 15, 18];
  * (evening scroll after work), Instagram 11 am/4/8 pm. The learner replaces each with what that platform's
  * own numbers prove.
  */
-export const PLATFORM_DEFAULT_HOURS: Record<Platform, number[]> = { youtube: [11, 15, 18], facebook: [10, 15, 19], instagram: [9, 14, 18] };
+export const PLATFORM_DEFAULT_HOURS: Record<Platform, number[]> = { youtube: [11, 15, 18], facebook: [10, 15, 19], instagram: [9, 14, 18], tiktok: [12, 16, 19] };
 
 // ------------------------------------------------------------------ registry
 export function registerPost(ctx: AgentContext, p: Omit<Post, 'id' | 'metrics'>) {
@@ -206,7 +206,7 @@ export async function runLearning(ctx: AgentContext, src: MetricsSource, now = n
   // Each platform gets its own best hours, learned from that platform's own numbers only (people scroll
   // Facebook, Instagram and YouTube at different times). YouTube's plan keeps the old key the scheduler reads.
   const cairo = (h: number) => `${(h + 2) % 24}:00`;
-  const NAME: Record<Platform, string> = { youtube: '▶️ يوتيوب', facebook: '📘 فيسبوك', instagram: '📸 إنستجرام' };
+  const NAME: Record<Platform, string> = { youtube: '▶️ يوتيوب', facebook: '📘 فيسبوك', instagram: '📸 إنستجرام', tiktok: '🎵 تيك توك' };
   for (const pl of ['youtube', 'facebook', 'instagram'] as Platform[]) {
     const own = scored.filter((x) => x.post.platform === pl);
     if (!own.length) continue;

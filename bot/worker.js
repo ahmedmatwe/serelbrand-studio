@@ -77,6 +77,22 @@ export default {
 
   async fetch(req, env) {
     const url = new URL(req.url);
+    // --- Short-lived public video links (Buffer fetches the TikTok video from here at posting time) -------
+    const media = url.pathname.match(/^\/media\/([\w.-]{1,120}\.mp4)$/);
+    if (media) {
+      if (req.method === 'PUT') {
+        if (req.headers.get('authorization') !== `Bearer ${env.INGEST_SECRET}`) return new Response('forbidden', { status: 403 });
+        const buf = await req.arrayBuffer();
+        if (buf.byteLength > 25 * 1024 * 1024) return new Response('too large', { status: 413 });
+        await env.BOT.put(`media:${media[1]}`, buf, { expirationTtl: 60 * 60 * 24 * 4 });
+        return json({ ok: true, url: `${url.origin}/media/${media[1]}` });
+      }
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        const v = await env.BOT.get(`media:${media[1]}`, 'arrayBuffer');
+        if (!v) return new Response('not found', { status: 404 });
+        return new Response(req.method === 'HEAD' ? null : v, { headers: { 'content-type': 'video/mp4', 'content-length': String(v.byteLength), 'cache-control': 'public, max-age=86400' } });
+      }
+    }
     if (req.method !== 'POST') return new Response('ok');
 
     // --- Telegram webhook -------------------------------------------------------------------------

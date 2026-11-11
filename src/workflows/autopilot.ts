@@ -254,8 +254,8 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     const social = socialFromEnv(ctx.config.env);
     if (!ctx.config.env.DRY_RUN && (yt.unansweredComments || social)) {
       const r = await answerComments(ctx, {
-        unanswered: async (pl, id) => pl === 'youtube' ? (yt.unansweredComments ? yt.unansweredComments(id) : []) : social ? social.meta.unansweredComments(pl, id) : [],
-        reply: async (pl, cid, text) => { if (pl === 'youtube') return yt.replyToComment!(cid, text); if (!social) throw new Error('not connected'); return social.meta.replyToComment(pl, cid, text); },
+        unanswered: async (pl, id) => pl === 'youtube' ? (yt.unansweredComments ? yt.unansweredComments(id) : []) : social && pl !== 'tiktok' ? social.meta.unansweredComments(pl, id) : [],
+        reply: async (pl, cid, text) => { if (pl === 'youtube') return yt.replyToComment!(cid, text); if (!social || pl === 'tiktok') throw new Error('not connected'); return social.meta.replyToComment(pl, cid, text); },
       }, now);
       rep.commentReplies = r.replied.length;
       if (tg) {
@@ -538,16 +538,16 @@ async function sendShortsToTelegram(ctx: AgentContext, tg: Telegram, videoId: st
     return;
   }
   const ytTimes = pub ? [pub.publishAt, ...(pub.shorts ?? []).map((x) => x.publishAt)] : [];
-  const extras = ctx.repos.artifacts.latest<{ shorts: { title: string; caption: string; facebookAt?: string; instagramAt?: string }[] }>(videoId, 'social_extras')?.data;
+  const extras = ctx.repos.artifacts.latest<{ shorts: { title: string; caption: string; tiktokError?: string; facebookAt?: string; instagramAt?: string; tiktokAt?: string }[] }>(videoId, 'social_extras')?.data;
   const blocked = produced.autoApproved ? undefined : (produced.autoApproveBlockedBy ?? ['سبب غير معروف'])[0]!.slice(0, 200);
   const sentVideos: { title: string; file_id?: string; publishAt?: string; blocked?: string }[] = [];
   for (const [i, sh] of render.shorts.entries()) {
     const x = extras?.shorts.find((e) => e.title === sh.title);
     const status = blocked ? `⛔ اتوقف ومش هيتنشر: ${blocked}`
-      : `✅ هينزل:\n▶️ يوتيوب ${cairoTime(ytTimes[i])}${x?.facebookAt ? `\n📘 فيسبوك ${cairoTime(x.facebookAt)}` : ''}${x?.instagramAt ? `\n📸 إنستجرام ${cairoTime(x.instagramAt)}` : ''}`;
+      : `✅ هينزل:\n▶️ يوتيوب ${cairoTime(ytTimes[i])}${x?.facebookAt ? `\n📘 فيسبوك ${cairoTime(x.facebookAt)}` : ''}${x?.instagramAt ? `\n📸 إنستجرام ${cairoTime(x.instagramAt)}` : ''}${x?.tiktokAt ? `\n🎵 تيك توك ${cairoTime(x.tiktokAt)}` : ''}`;
     const fileId = await tg.video(sh.path, `🎬 ${sh.title}\n${status}\nمدته ${Math.round(sh.durationSec)} ثانية`);
     // TikTok can't be posted automatically yet: the video above + this ready caption = post it in 10 seconds.
-    if (!blocked && x?.caption) await tg.send(`🎵 جاهز لتيك توك — احفظ الفيديو اللي فوق وانسخ الكلام ده:\n\n${x.caption}`).catch(() => {});
+    if (!blocked && x?.caption && !x.tiktokAt) await tg.send(`🎵 جاهز لتيك توك — احفظ الفيديو اللي فوق وانسخ الكلام ده:\n\n${x.caption}`).catch(() => {});
     sentVideos.push({ title: sh.title, file_id: fileId, publishAt: blocked ? undefined : ytTimes[i] ?? undefined, blocked });
   }
   // The assistant bot re-sends these on request ("فيديو") by file_id, without uploading again.

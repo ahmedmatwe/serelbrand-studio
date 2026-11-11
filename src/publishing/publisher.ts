@@ -9,6 +9,7 @@ import type { PrePublicationReport } from '../reports/prepublication.ts';
 import { currentSlots, nextSlots } from './schedule.ts';
 import { buildReport } from './approval.ts';
 import { enqueue, platformCaptions, socialCaption, socialFromEnv } from './social.ts';
+import { bufferFromEnv, hostVideo } from './buffer.ts';
 import { chooseTitles } from '../agents/title-editor.ts';
 import { captionLessons } from '../analytics/analyst.ts';
 import { platformHours, platformTime, registerPost } from '../analytics/learner.ts';
@@ -153,7 +154,9 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     }
     // Same Shorts as Reels on the Facebook Page + Instagram, at the same time they go public on YouTube.
     const social = !env.DRY_RUN && pack ? socialFromEnv(env) : undefined;
-    const tiktokCaptions: { title: string; caption: string; facebookAt?: string; instagramAt?: string; tiktokAt?: string }[] = [];
+    const tiktokCaptions: { title: string; caption: string; facebookAt?: string; instagramAt?: string; tiktokAt?: string; bufferId?: string; tiktokError?: string }[] = [];
+    // TikTok goes through Buffer when its key is set (public posts); else directly when a TikTok token is set.
+    const viaBuffer = Boolean(env.BUFFER_API_KEY);
     if (social) {
       for (const [i, sh] of (render?.data.shorts ?? []).entries()) {
         const sc = script?.scenes.find((x) => sh.scenes?.includes(x.n));
@@ -164,10 +167,28 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
           const at = { facebook: platformTime(platformHours(this.ctx, 'facebook'), ytAt, i), instagram: platformTime(platformHours(this.ctx, 'instagram'), ytAt, i) };
           const captions = sc ? await platformCaptions(this.ctx, sh.title, sc.voiceover, seo.hashtags, videoId, { facebook: captionLessons(this.ctx, 'facebook'), instagram: captionLessons(this.ctx, 'instagram') }) : {};
           const { tiktok, ...metaCaptions } = captions as typeof captions & { tiktok?: string };
-          tiktokCaptions.push({ title: sh.title, caption: tiktok ?? socialCaption(sh.title, lead, seo.hashtags.slice(0, 5)), facebookAt: at.facebook, instagramAt: at.instagram, tiktokAt: ytAt });
-          await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), captions: { ...metaCaptions, ...(tiktok ? { tiktok } : {}) }, publishAt: ytAt, at, platforms: ['facebook', 'instagram', ...(social.tiktok ? ['tiktok' as const] : [])], videoId, ...secretOf(sh) });
+          tiktokCaptions.push({ title: sh.title, caption: tiktok ?? socialCaption(sh.title, lead, seo.hashtags.slice(0, 5)), facebookAt: at.facebook, instagramAt: at.instagram, ...(social.tiktok && !viaBuffer ? { tiktokAt: ytAt } : {}) });
+          await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), captions: { ...metaCaptions, ...(tiktok ? { tiktok } : {}) }, publishAt: ytAt, at, platforms: ['facebook', 'instagram', ...(social.tiktok && !viaBuffer ? ['tiktok' as const] : [])], videoId, ...secretOf(sh) });
         } catch (err) {
           this.ctx.logger.warn('social queue failed', { videoId, short: sh.title, error: (err as Error).message });
+        }
+      }
+    }
+    // TikTok through Buffer: the video goes on a public link for Buffer, scheduled at TikTok's own best hour.
+    const buffer = !env.DRY_RUN && pack ? bufferFromEnv(env) : undefined;
+    if (buffer) {
+      for (const [i, sh] of (render?.data.shorts ?? []).entries()) {
+        const t = tiktokCaptions.find((x) => x.title === sh.title);
+        if (!t) continue;
+        try {
+          const ytAt = times[i] ?? new Date().toISOString();
+          const at = platformTime(platformHours(this.ctx, 'tiktok'), ytAt, i);
+          const url = await hostVideo(sh.path, `${videoId}-${i + 1}.mp4`, process.env);
+          t.bufferId = await buffer.scheduleTikTok(url, t.caption, at);
+          t.tiktokAt = at;
+        } catch (err) {
+          t.tiktokError = (err as Error).message.slice(0, 200);
+          this.ctx.logger.warn('tiktok via buffer failed', { videoId, short: sh.title, error: t.tiktokError });
         }
       }
     }
