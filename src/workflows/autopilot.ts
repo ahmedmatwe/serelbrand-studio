@@ -421,6 +421,12 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   if (decisions.length) notify('سر الموبايل: الفريق اتعلّم حاجة جديدة', decisions.join(' · ').slice(0, 600));
 
   if (tg && sent.length) await tg.send(sent.join('\n\n')).catch(() => {});
+  // The Buffer key (TikTok) expires: remind the owner a week before, once a day.
+  const exp = process.env.BUFFER_KEY_EXPIRES;
+  if (tg && exp && /^\d{4}-\d{2}-\d{2}$/.test(exp) && new Date(`${exp}T00:00:00Z`).getTime() - now.getTime() < 7 * 86_400_000 && ctx.repos.artifacts.latest<{ date: string }>(null, 'buffer_key_reminder')?.data.date !== now.toISOString().slice(0, 10)) {
+    await tg.send(`⏰ مفتاح Buffer (النشر على تيك توك) بينتهي يوم ${exp}. اعمل مفتاح جديد من Buffer ← الإعدادات ← API، وشغّل: bash ~/Desktop/youtube-ai-studio/scripts/connect-buffer.sh`).catch(() => {});
+    ctx.repos.artifacts.save({ videoId: null, kind: 'buffer_key_reminder', agent: 'autopilot', data: { date: now.toISOString().slice(0, 10) } });
+  }
   // Whatever the team learned this cycle reaches the owner on Telegram right away — each finding once only.
   if (tg) {
     const fresh = newLearnings(ctx, rep.learning ?? []);

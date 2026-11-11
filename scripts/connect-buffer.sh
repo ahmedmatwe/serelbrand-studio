@@ -16,6 +16,8 @@ CH=$(curl -s https://api.buffer.com -H 'content-type: application/json' -H "auth
   | python3 -c 'import json,sys; d=json.load(sys.stdin); c=[x for x in (d.get("data") or {}).get("channels",[]) if "tiktok" in x["service"].lower()]; print(c[0]["name"] if c else "")')
 [ -n "$CH" ] || { echo "✗ المفتاح شغال بس مفيش حساب تيك توك متربط في Buffer"; exit 1; }
 printf %s "$KEY" | gh secret set BUFFER_API_KEY -R "$REPO"
+# Keys made with "1 year": the bot reminds you a week before this date.
+gh variable set BUFFER_KEY_EXPIRES -R "$REPO" -b "$(date -v+1y +%Y-%m-%d)"
 printf '' | pbcopy
 echo "✓ تيك توك اتربط عن طريق Buffer — الحساب: $CH"
 echo "  من النهارده كل شورت هينزل على تيك توك لوحده في ميعاده المثالي"

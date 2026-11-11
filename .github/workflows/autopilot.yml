@@ -62,6 +62,7 @@ jobs:
       TIKTOK_PRIVACY_LEVEL: ${{ secrets.TIKTOK_PRIVACY_LEVEL }}
       # TikTok through Buffer (empty = off); videos are served to Buffer from the bot's /media link.
       BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+      BUFFER_KEY_EXPIRES: ${{ vars.BUFFER_KEY_EXPIRES }}
       GITHUB_TOKEN: ${{ github.token }}
       # Telegram reporting bot (videos + notifications); empty = off
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
