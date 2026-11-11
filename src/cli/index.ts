@@ -152,11 +152,13 @@ async function main() {
         if (buf) {
           const posts = await buf.recentTikTokPosts().catch((e: Error) => { log.push(`tiktok status: ${e.message.slice(0, 160)}`); return []; });
           const alerts = tiktokAlerts(posts);
-          const sent = posts.filter((p) => p.status === 'sent' && p.sentAt && Date.now() - Date.parse(p.sentAt) < 3_600_000);
-          for (const p of sent) log.push(`tiktok: posted "${p.text.split('\n')[0]!.slice(0, 60)}"${p.externalLink ? ` ${p.externalLink}` : ''}`);
-          if (alerts.length) log.push(...alerts.map((a) => `tiktok ALERT: ${a.text.split('\n')[0]}`));
+          log.push(`tiktok status: ${posts.length} recent posts (${['scheduled', 'sending', 'sent', 'error'].map((st) => `${posts.filter((p) => p.status === st).length} ${st}`).join(', ')})`);
+          log.push(...alerts.map((a) => `tiktok ${a.id.startsWith('tt-sent') ? 'posted' : 'ALERT'}: ${a.text.split('\n')[0]}`));
           const url = process.env.BOT_URL, secret = process.env.BOT_INGEST_SECRET;
-          if (alerts.length && url && secret) await fetch(`${url.replace(/\/$/, '')}/ingest`, { method: 'POST', headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' }, body: JSON.stringify({ alerts }) }).catch(() => undefined);
+          if (alerts.length && url && secret) {
+            const r = await fetch(`${url.replace(/\/$/, '')}/ingest`, { method: 'POST', headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' }, body: JSON.stringify({ alerts }) }).catch((e: Error) => ({ status: e.message }));
+            log.push(`tiktok alerts → bot: HTTP ${r.status} (${alerts.length}, the bot sends each once)`);
+          }
         }
         return out(log.length ? log.join('\n') : 'Nothing due.');
       }
