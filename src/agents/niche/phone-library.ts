@@ -13,6 +13,8 @@ export interface PhoneSecret {
   ui?: PhoneUi;
   /** Stock searches that literally show this secret's topic (tried for every sentence, best match picked by vision). */
   footage?: string[];
+  /** Too well known to be worth a Short (most viewers already use it) — never picked. */
+  skip?: string;
 }
 export type PhoneUi = { type: 'dialer'; code: string; call?: boolean } | { type: 'settings'; os: 'ios' | 'android'; path: string[] };
 interface Library { sources: Record<string, string>; secrets: PhoneSecret[] }
@@ -54,7 +56,7 @@ export const family = (s: PhoneSecret) => (s.id.startsWith('app-') || APP_SOURCE
  */
 export function pickPhoneSecrets(lib: Library, usedIds: Set<string>, n = 3, weights?: Record<string, number>, first: string[] = []): PhoneSecret[] {
   // Secrets we can SHOW on a drawn phone screen first (the viewer sees exactly what is being said).
-  const fresh = lib.secrets.filter((s) => !usedIds.has(s.id)).sort((a, b) => Number(Boolean(b.ui)) - Number(Boolean(a.ui)));
+  const fresh = lib.secrets.filter((s) => !usedIds.has(s.id) && !s.skip).sort((a, b) => Number(Boolean(b.ui)) - Number(Boolean(a.ui)));
   // Topics the owner asked for come first.
   const out: PhoneSecret[] = first.map((id) => fresh.find((s) => s.id === id)).filter((s): s is PhoneSecret => Boolean(s)).slice(0, n);
   // Learned appetite: the family audiences watch most gets a second slot (variety still kept: ≥ 2 families).

@@ -18,7 +18,7 @@ import { guardCodes } from '../../publishing/social.ts';
 export const REQUESTED_FILE = 'data/requested-secrets.json';
 
 export interface TopicRequest { id: string; text: string; at: string }
-interface Requested { /** Proposed by the library researcher (not the owner). */ auto?: boolean; request: TopicRequest; status: 'approved' | 'rejected' | 'duplicate' | 'produced'; entry?: PhoneSecret; reason?: string; duplicateOf?: string }
+interface Requested { /** Proposed by the library researcher (not the owner). */ auto?: boolean; request: TopicRequest; status: 'approved' | 'rejected' | 'duplicate' | 'produced'; entry?: PhoneSecret; reason?: string; duplicateOf?: string; knownBy?: number; wow?: number }
 
 const Ui = z.union([
   z.object({ type: z.literal('dialer'), code: z.string().regex(/^[0-9*#+]{2,20}$/), call: z.boolean().default(true) }),
@@ -37,8 +37,13 @@ const Entry = z.object({
   ui: Ui.optional(),
   footage: z.array(z.string().min(3).max(40)).min(2).max(6),
 });
+/** A topic most people already use is not worth a Short (owner feedback: "تافهة والناس كلها عارفها"). */
+export const NOVELTY = { maxKnownBy: 30, minWow: 6 };
 const Draft = z.object({
   verdict: z.enum(['ok', 'duplicate', 'reject']),
+  /** % of average Egyptian smartphone users who already know AND use it; how surprised/useful a viewer feels (0–10). */
+  knownBy: z.number().min(0).max(100).default(50),
+  wow: z.number().min(0).max(10).default(5),
   reasonArabic: z.string().max(300).default(''),
   duplicateOf: z.string().default(''),
   confidence: z.number().min(0).max(1),
@@ -64,7 +69,7 @@ export async function fetchRequests(env: { BOT_URL?: string; BOT_INGEST_SECRET?:
 }
 
 /** Drafts + fact-checks one request. Never throws. */
-export async function vetRequest(ctx: AgentContext, req: TopicRequest): Promise<Requested> {
+export async function vetRequest(ctx: AgentContext, req: TopicRequest, strictNovelty = false): Promise<Requested> {
   const lib = loadPhoneLibrary(ctx.config.rootDir);
   const known = (lib?.secrets ?? []).map((s) => ({ id: s.id, title: s.title }));
   const example = lib?.secrets.find((s) => s.ui?.type === 'settings') ?? lib?.secrets[0];
@@ -74,7 +79,8 @@ export async function vetRequest(ctx: AgentContext, req: TopicRequest): Promise<
     system: 'You research a Short topic for "سر الموبايل" (Egyptian Arabic Shorts about phones and social media: hidden secrets, useful features, everyday tips, new updates of iPhone/Android/Samsung and apps like WhatsApp, Instagram, TikTok, Facebook, YouTube, Telegram, Google). ' +
       'Turn the request into ONE library entry in exactly the format of `example` (Egyptian Arabic fields; facts = the precise English facts + Arabic summary; source = one key of `sources`; ui = a dialer code or the settings path to draw, when it applies; footage = English stock searches that literally show the topic). ' +
       'verdict "duplicate" with duplicateOf = the id when `known` already has the same secret; "reject" with reasonArabic (short, polite Egyptian Arabic) when it is not about phones/apps, unsafe, not real, or you are not sure the steps are exactly right. ' +
-      SAFETY + ' confidence = how sure you are every step and code is exactly correct (0–1). JSON only.',
+      SAFETY + ' confidence = how sure you are every step and code is exactly correct (0–1). ' +
+      'knownBy = realistic % of average Egyptian smartphone users (18–45) who already know AND use it (screen recording, hiding online status, view-once photos/voice notes, dark mode, YouTube 2x speed are 60–90%); wow = 0–10 how surprised and helped a typical viewer feels. JSON only.',
     prompt: JSON.stringify({ request: req.text, example, sources: Object.keys(lib?.sources ?? {}), known }),
     schema: Draft,
     maxOutputTokens: 2500,
@@ -83,6 +89,8 @@ export async function vetRequest(ctx: AgentContext, req: TopicRequest): Promise<
   if (!d) return { request: req, status: 'rejected', reason: 'مقدرتش أراجع الموضوع دلوقتي (الذكاء الاصطناعي مش متاح) — ابعته تاني بعد شوية.' };
   if (d.verdict === 'duplicate' && known.some((k) => k.id === d.duplicateOf)) return { request: req, status: 'duplicate', duplicateOf: d.duplicateOf };
   if (d.verdict !== 'ok' || !d.entry || d.confidence < 0.75) return { request: req, status: 'rejected', reason: d.reasonArabic || 'مش متأكد إن المعلومة دي صح 100%، فمش هعمل عنها فيديو.' };
+  // The researcher's own ideas must be genuinely new to most viewers (the owner's requests are only warned about).
+  if (strictNovelty && (d.knownBy > NOVELTY.maxKnownBy || d.wow < NOVELTY.minWow)) return { request: req, status: 'rejected', reason: `معروف لمعظم الناس (حوالي ${Math.round(d.knownBy)}%) — مش هيضيف جديد`, knownBy: d.knownBy, wow: d.wow };
   const check = await ctx.providers.llm.generateJson({
     task: 'topic.request.factcheck',
     tier: 'writing',
@@ -103,7 +111,7 @@ export async function vetRequest(ctx: AgentContext, req: TopicRequest): Promise<
     e.steps = e.steps.map((s) => guardCodes(s, code) ?? s);
   }
   const entry: PhoneSecret = { id: `req-${req.id}`, ...e, source: lib?.sources[e.source] ? e.source : 'android' };
-  return { request: req, status: 'approved', entry };
+  return { request: req, status: 'approved', entry, knownBy: d.knownBy, wow: d.wow };
 }
 
 /** Approved requested entries, oldest first, for the library loader (file) and the pack picker (ids). */
@@ -139,6 +147,7 @@ export async function handleTopicRequests(ctx: AgentContext, used: Set<string>, 
     const r = await vetRequest(ctx, req);
     ctx.repos.artifacts.save({ videoId: null, kind: 'topic_request', agent: 'topic-requests', data: r });
     const lib = loadPhoneLibrary(ctx.config.rootDir);
+    if (r.status === 'approved' && (r.knownBy ?? 0) > NOVELTY.maxKnownBy) msgs.push(`ℹ️ ملحوظة: «${r.entry!.title}» معروف لحوالي ${Math.round(r.knownBy!)}% من الناس — هعمله لأنك طلبته، بس غالبًا مش هيجيب مشاهدات كتير.`);
     if (r.status === 'approved') msgs.push(`✅ موضوعك اتراجع واتقبل:\n«${r.entry!.title}»\n\n📱 ${r.entry!.platforms}\n🪜 ${r.entry!.steps.join(' ← ')}\n✨ ${r.entry!.result}\n\n🎬 هيتعمل أول واحد في الإنتاج الجاي، وهبلّغك أول ما يجهز.`);
     else if (r.status === 'duplicate') {
       const dup = lib?.secrets.find((s) => s.id === r.duplicateOf);
@@ -173,7 +182,7 @@ const Ideas = z.object({ ideas: z.array(z.object({ topic: z.string().min(8).max(
 export async function growLibrary(ctx: AgentContext, used: Set<string>, now = new Date(), max = 6): Promise<string[]> {
   const lib = loadPhoneLibrary(ctx.config.rootDir);
   if (!lib || ctx.providers.llm.name.startsWith('mock')) return [];
-  const left = lib.secrets.filter((s) => !used.has(s.id)).length;
+  const left = lib.secrets.filter((s) => !used.has(s.id) && !s.skip).length;
   const day = now.toISOString().slice(0, 10);
   if (left >= LIBRARY_STOCK || ctx.repos.artifacts.listKind<{ day: string }>('library_growth').some((a) => a.data.day === day)) return [];
   const counts: Record<string, number> = {};
@@ -185,6 +194,7 @@ export async function growLibrary(ctx: AgentContext, used: Set<string>, now = ne
       'Propose 12 DIFFERENT, specific, useful topics in a healthy mix: hidden features and settings (iPhone, Android, Samsung), everyday tips (battery, storage, camera, privacy, security, keyboard, sharing), ' +
       'social media features and tricks (WhatsApp, Instagram, TikTok, Facebook, YouTube, Telegram, Google, Chrome), and recent official updates that are already rolled out. ' +
       'Each must be real, documented, safe, and something a normal Egyptian user would love to try right away. Prefer under-covered areas (fewer entries in `coverage`). Never repeat or near-repeat anything in `existing`. ' +
+      'NO widely known basics (screen recording, hiding online/last seen, view-once photos or voice notes, dark mode, YouTube 2x speed, blocking someone, deleting a message): only things fewer than 30% of users know — the viewer must think "إزاي معرفتش ده قبل كده؟". ' +
       'topic = one Arabic line describing exactly the feature/tip (what it does + where). JSON only.',
     prompt: JSON.stringify({ existing: lib.secrets.map((s) => s.title), coverage: counts }),
     schema: Ideas,
@@ -197,7 +207,7 @@ export async function growLibrary(ctx: AgentContext, used: Set<string>, now = ne
   let i = 0;
   for (const idea of list) {
     if (added.length >= max) break;
-    const r = await vetRequest(ctx, { id: `auto-${day}-${i++}`, text: idea.topic, at: now.toISOString() });
+    const r = await vetRequest(ctx, { id: `auto-${day}-${i++}`, text: idea.topic, at: now.toISOString() }, true);
     ctx.repos.artifacts.save({ videoId: null, kind: 'topic_request', agent: 'library-researcher', data: { ...r, auto: true } });
     if (r.status === 'approved') added.push(r);
   }

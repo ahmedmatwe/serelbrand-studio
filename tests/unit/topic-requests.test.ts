@@ -73,7 +73,7 @@ test('library researcher: when stock is low, ideas are vetted and only approved 
   const { growLibrary } = await import('../../src/agents/niche/topic-requests.ts');
   const ideas = { ideas: [{ topic: 'ابعت رسالة في تيليجرام من غير صوت', category: 'telegram' }, { topic: 'كود يفتح أي موبايل', category: 'code' }] };
   // idea list, then: idea 1 draft ok + check ok, idea 2 rejected by the drafter
-  const { ctx, root } = setup([ideas, { verdict: 'ok', confidence: 0.9, entry: { ...ENTRY, source: 'telegram' } }, { verdict: 'ok', confidence: 0.9 }, { verdict: 'reject', confidence: 0.9, reasonArabic: 'مش آمن' }]);
+  const { ctx, root } = setup([ideas, { verdict: 'ok', confidence: 0.9, knownBy: 12, wow: 8, entry: { ...ENTRY, source: 'telegram' } }, { verdict: 'ok', confidence: 0.9 }, { verdict: 'reject', confidence: 0.9, reasonArabic: 'مش آمن' }]);
   const used = new Set(loadPhoneLibrary(root)!.secrets.map((s) => s.id));
   const msgs = await growLibrary(ctx, used, new Date('2026-11-12T08:00:00Z'));
   assert.match(msgs[0]!, /ضاف 1/);
@@ -83,4 +83,15 @@ test('library researcher: when stock is low, ideas are vetted and only approved 
   const failing = setup([]);
   assert.deepEqual(await growLibrary(failing.ctx, new Set(loadPhoneLibrary(failing.root)!.secrets.map((s) => s.id)), new Date('2026-11-12T08:00:00Z')), []);
   assert.equal(failing.arts.filter((a) => a.kind === 'library_growth').length, 0, 'failure does not block the day');
+});
+
+test('library researcher: a topic most people already know is rejected; the owner’s own request is made anyway with a note', async () => {
+  const { growLibrary } = await import('../../src/agents/niche/topic-requests.ts');
+  const ideas = { ideas: [{ topic: 'سجل فويس واتساب يتسمع مرة واحدة', category: 'whatsapp' }] };
+  const { ctx, root } = setup([ideas, { verdict: 'ok', confidence: 0.95, knownBy: 75, wow: 3, entry: ENTRY }]);
+  const used = new Set(loadPhoneLibrary(root)!.secrets.map((s) => s.id));
+  assert.deepEqual(await growLibrary(ctx, used, new Date('2026-11-13T08:00:00Z')), []);
+  const owner = setup([{ verdict: 'ok', confidence: 0.95, knownBy: 75, wow: 3, entry: ENTRY }, { verdict: 'ok', confidence: 0.9 }]);
+  const r = await vetRequest(owner.ctx, { id: '9', text: 'فويس مرة واحدة', at: '' });
+  assert.equal(r.status, 'approved');
 });
