@@ -73,11 +73,12 @@ export async function backfillTikTok(
   const tickets = assets.filter((a) => a.name.endsWith('.mp4.json')).sort((a, b) => a.name.localeCompare(b.name));
   const byDay = new Map<string, number>();
   for (const a of tickets) {
-    const t = JSON.parse((await queue.download(a.id)).toString('utf8')) as { title: string; caption: string; captions?: Record<string, string>; publishAt: string; video: string; bufferId?: string; tiktokAt?: string };
+    const t = JSON.parse((await queue.download(a.id)).toString('utf8')) as { title: string; caption: string; captions?: Record<string, string>; publishAt: string; video: string; bufferId?: string; tiktokAt?: string; at?: Record<string, string>; platforms?: string[] };
     const day = t.publishAt.slice(0, 10);
     const i = byDay.get(day) ?? 0; byDay.set(day, i + 1);
     if (t.bufferId || new Date(t.publishAt).getFullYear() > 2090) continue; // already sent / held back
-    const at = platformTime(hours, t.publishAt, i, now);
+    // A ticket may carry its own TikTok time (catching up the back catalogue); else TikTok's i-th best hour.
+    const at = t.at?.tiktok ?? platformTime(hours, t.publishAt, i, now);
     if (new Date(at).getTime() < now.getTime() + 10 * 60_000) { log.push(`skip (time passed): ${t.title}`); continue; }
     const v = assets.find((x) => x.name === t.video);
     if (!v) continue;
@@ -88,7 +89,9 @@ export async function backfillTikTok(
       t.bufferId = await buffer.scheduleTikTok(url, t.captions?.tiktok || t.caption, at);
       t.tiktokAt = at;
       await queue.remove(a.id);
-      await queue.upload(a.name, Buffer.from(JSON.stringify(t)), 'application/json');
+      // TikTok-only tickets are done once Buffer has them (the video is served from the bot's link).
+      if (t.platforms && !t.platforms.length) await queue.remove(v.id);
+      else await queue.upload(a.name, Buffer.from(JSON.stringify(t)), 'application/json');
       log.push(`tiktok: scheduled "${t.title}" at ${at} (buffer ${t.bufferId})`);
     } catch (e) {
       log.push(`tiktok: FAILED "${t.title}" — ${(e as Error).message.slice(0, 200)}`);
