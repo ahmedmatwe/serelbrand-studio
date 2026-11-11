@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs';
 
-export interface BufferPost { id: string; text: string; status: 'draft' | 'error' | 'needs_approval' | 'scheduled' | 'sending' | 'sent'; dueAt?: string | null; sentAt?: string | null; externalLink?: string | null; error?: { message: string } | null }
+export interface BufferPost { id: string; text: string; status: 'draft' | 'error' | 'needs_approval' | 'scheduled' | 'sending' | 'sent'; dueAt?: string | null; sentAt?: string | null; externalLink?: string | null; error?: { message: string } | null; assets?: { source: string; type?: string }[] }
 
 export class BufferClient {
   private channel?: string;
@@ -41,7 +41,7 @@ export class BufferClient {
   async recentTikTokPosts(n = 40): Promise<BufferPost[]> {
     const channelId = await this.tiktokChannel();
     const r = await this.gql<{ posts: { edges: { node: BufferPost }[] } }>(
-      `query($org: OrganizationId!, $ch: ChannelId!, $n: Int) { posts(first: $n, input: { organizationId: $org, filter: { channelIds: [$ch], status: [error, scheduled, sending, sent] }, sort: [{ field: dueAt, direction: desc }] }) { edges { node { id text status dueAt sentAt externalLink error { message } } } } }`,
+      `query($org: OrganizationId!, $ch: ChannelId!, $n: Int) { posts(first: $n, input: { organizationId: $org, filter: { channelIds: [$ch], status: [error, scheduled, sending, sent] }, sort: [{ field: dueAt, direction: desc }] }) { edges { node { id text status dueAt sentAt externalLink error { message } assets { source type } } } } }`,
       { org: this.org, ch: channelId, n },
     );
     return r.posts.edges.map((e) => e.node);
@@ -123,15 +123,46 @@ export async function backfillTikTok(
  * What the owner must hear about TikTok: a failed post (with Buffer's reason) or one still not out 45 min after
  * its time. Each alert has a stable id, so the bot sends it once only.
  */
-export function tiktokAlerts(posts: BufferPost[], now = new Date()): { id: string; text: string }[] {
+export function tiktokAlerts(posts: BufferPost[], now = new Date(), retried: Set<string> = new Set()): { id: string; text: string }[] {
   const title = (t: string) => t.split('\n')[0]!.slice(0, 70);
   const out: { id: string; text: string }[] = [];
   for (const p of posts) {
     const due = p.dueAt ? Date.parse(p.dueAt) : NaN;
     if (p.status === 'sent' && p.sentAt && now.getTime() - Date.parse(p.sentAt) < 6 * 3_600_000) out.push({ id: `tt-sent-${p.id}`, text: `🎵 تيك توك: اتنشر «${title(p.text)}»${p.externalLink ? `\n${p.externalLink}` : ''}` });
-    else if (p.status === 'error') out.push({ id: `tt-error-${p.id}`, text: `❌ تيك توك: الفيديو «${title(p.text)}» فشل نشره.\nالسبب من Buffer: ${p.error?.message ?? 'غير معروف'}\nافتح Buffer ← تيك توك وجرّب «Retry»، أو قولّي وأنا أعيد جدولته.` });
+    else if (p.status === 'error' && !retried.has(p.id)) out.push({ id: `tt-error-${p.id}`, text: `❌ تيك توك: الفيديو «${title(p.text)}» فشل نشره.\nالسبب من Buffer: ${p.error?.message ?? 'غير معروف'}\nافتح Buffer ← تيك توك وجرّب «Retry»، أو قولّي وأنا أعيد جدولته.` });
     else if ((p.status === 'scheduled' || p.status === 'sending') && Number.isFinite(due) && now.getTime() - due > 45 * 60_000 && now.getTime() - due < 2 * 86_400_000)
       out.push({ id: `tt-late-${p.id}`, text: `⏰ تيك توك: الفيديو «${title(p.text)}» كان المفروض ينزل الساعة ${new Date(due + 2 * 3_600_000).toISOString().slice(11, 16)} بتوقيت القاهرة ولسه منزلش (الحالة: ${p.status}). ممكن قناة تيك توك تكون محتاجة تتربط تاني في Buffer.` });
   }
   return out;
+}
+
+/** Invisible marker appended to a re-sent caption: counts automatic retries without any stored state. */
+const RETRY_MARK = '\u200b';
+const retries = (t: string) => (t.match(new RegExp(RETRY_MARK, 'g')) ?? []).length;
+/** Buffer errors worth simply trying again (its own processing hiccups), vs ones that need the owner. */
+export const retryableError = (m = '') => /delay|processing|timed? ?out|temporar|try again|retry|unexpected|internal/i.test(m) && !/disconnect|reconnect|permission|token|auth|banned|violat|guideline/i.test(m);
+
+/**
+ * Self-healing: a TikTok post that failed for a passing reason (e.g. "media hit some delays while processing —
+ * please retry") is re-created with the same video and caption 20 minutes later and the failed one removed;
+ * at most 2 retries per video, only within a day of its time. Returns the handled post ids + Telegram alerts.
+ */
+export async function retryFailedTikToks(buffer: BufferClient, posts: BufferPost[], now = new Date()): Promise<{ retried: Set<string>; alerts: { id: string; text: string }[]; log: string[] }> {
+  const retried = new Set<string>();
+  const alerts: { id: string; text: string }[] = [];
+  const log: string[] = [];
+  for (const p of posts) {
+    const due = p.dueAt ? Date.parse(p.dueAt) : now.getTime();
+    const src = p.assets?.find((a) => a.source)?.source;
+    if (p.status !== 'error' || !retryableError(p.error?.message) || retries(p.text) >= 2 || now.getTime() - due > 86_400_000 || !src) continue;
+    const at = new Date(now.getTime() + 20 * 60_000).toISOString();
+    try {
+      const id = await buffer.scheduleTikTok(src, `${p.text}${RETRY_MARK}`, at);
+      await buffer.deletePost(p.id).catch(() => undefined);
+      retried.add(p.id);
+      log.push(`tiktok retry: ${p.id} → ${id} at ${at}`);
+      alerts.push({ id: `tt-retry-${p.id}`, text: `🔁 تيك توك: «${p.text.split('\n')[0]!.slice(0, 70)}» فشل لسبب مؤقت عند Buffer (${(p.error?.message ?? '').slice(0, 80)}) — أعدت جدولته لوحدي، هينزل خلال 20 دقيقة.` });
+    } catch (e) { log.push(`tiktok retry FAILED ${p.id}: ${(e as Error).message.slice(0, 160)}`); }
+  }
+  return { retried, alerts, log };
 }

@@ -147,11 +147,13 @@ async function main() {
         const tgc = telegramFromEnv();
         if (tgc && log.length) await tgc.send(log.map((l) => l.replace(/^facebook:/, '📘 فيسبوك:').replace(/^instagram:/, '📸 إنستجرام:').replace(/ posted /, ' اتنشر ').replace(/ FAILED /, ' فشل ')).join('\n')).catch(() => {});
         // TikTok (through Buffer): failed or late posts → one Telegram alert each (the bot de-duplicates by id).
-        const { bufferFromEnv, tiktokAlerts } = await import('../publishing/buffer.ts');
+        const { bufferFromEnv, retryFailedTikToks, tiktokAlerts } = await import('../publishing/buffer.ts');
         const buf = bufferFromEnv(ctx.config.env);
         if (buf) {
           const posts = await buf.recentTikTokPosts().catch((e: Error) => { log.push(`tiktok status: ${e.message.slice(0, 160)}`); return []; });
-          const alerts = tiktokAlerts(posts);
+          const fix = await retryFailedTikToks(buf, posts);
+          log.push(...fix.log);
+          const alerts = [...fix.alerts, ...tiktokAlerts(posts, new Date(), fix.retried)];
           log.push(`tiktok status: ${posts.length} recent posts (${['scheduled', 'sending', 'sent', 'error'].map((st) => `${posts.filter((p) => p.status === st).length} ${st}`).join(', ')})`);
           log.push(...alerts.map((a) => `tiktok ${a.id.startsWith('tt-sent') ? 'posted' : 'ALERT'}: ${a.text.replace(/\n/g, ' | ')}`));
           const url = process.env.BOT_URL, secret = process.env.BOT_INGEST_SECRET;

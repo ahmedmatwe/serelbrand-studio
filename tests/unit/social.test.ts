@@ -110,3 +110,23 @@ test('tiktok monitor: failed and late posts alert once (stable ids), recent ones
   assert.match(a[0]!.text, /Video could not be fetched/);
   assert.match(a[1]!.text, /12:00/);
 });
+
+test('tiktok self-healing: a temporary Buffer failure is re-sent (same video + caption) at most twice; other failures only alert', async () => {
+  const { retryFailedTikToks, retryableError } = await import('../../src/publishing/buffer.ts');
+  const now = new Date('2026-11-11T14:00:00Z');
+  const made: { url: string; text: string; at: string }[] = [];
+  const deleted: string[] = [];
+  const fake = { scheduleTikTok: async (url: string, text: string, at: string) => { made.push({ url, text, at }); return `new${made.length}`; }, deletePost: async (id: string) => { deleted.push(id); } };
+  const err = (id: string, msg: string, text = 'أصوات مخفية في الآيفون') => ({ id, text, status: 'error' as const, dueAt: '2026-11-11T13:00:00Z', error: { message: msg }, assets: [{ source: `https://cdn/${id}.mp4` }] });
+  const r = await retryFailedTikToks(fake as never, [
+    err('a', 'The media for this post hit some delays while processing. Please retry the post'),
+    err('b', 'Your TikTok channel needs to be reconnected'),
+    err('c', 'processing delay', 'نص​​'),
+  ], now);
+  assert.deepEqual([...r.retried], ['a']);
+  assert.deepEqual(deleted, ['a']);
+  assert.equal(made[0]!.url, 'https://cdn/a.mp4');
+  assert.equal(made[0]!.text, 'أصوات مخفية في الآيفون​');
+  assert.equal(made[0]!.at, '2026-11-11T14:20:00.000Z');
+  assert.ok(!retryableError('Your TikTok channel needs to be reconnected'));
+});
