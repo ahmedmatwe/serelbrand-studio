@@ -1,3 +1,4 @@
+import { applyHook, chooseHooks } from './hook-editor.ts';
 import { writerLessons } from '../analytics/analyst.ts';
 import { z } from 'zod';
 import { Agent, countWords, type AgentContext } from './base.ts';
@@ -31,9 +32,11 @@ export function spokenText(s: Pick<Script, 'opening' | 'scenes' | 'cta' | 'endin
 
 /** How every phone-secrets Short is written (used for the pack and for repairing a single Short). */
 export const PHONE_SHORT_RULES = 'Each scene is a complete, independent YouTube Short of 30–45 seconds (70–100 spoken words) in natural EGYPTIAN Arabic, like a friend showing you a secret on his phone — fast, warm, excited, never formal. ' +
-          'Structure of every scene: (1) HOOK in the first sentence (≤ 12 words): the surprising benefit, e.g. "فيه كود لو كتبته في موبايلك هيقولك…", "الآيفون بتاعك فيه زرار سري ورا الضهر!"; ' +
+          'Written to be watched TO THE END. Structure of every scene: (1) HOOK in the first sentence (≤ 12 words, no greeting, no "النهارده هقولك"): the surprising benefit or a warning, e.g. "فيه كود لو كتبته في موبايلك هيقولك…", "الآيفون بتاعك فيه زرار سري ورا الضهر!"; ' +
+          '(1b) OPEN LOOP in the second sentence: promise something true that only comes at the END (e.g. "وآخر حاجة هتقولك هي أهم حاجة", "واستنى لحد الآخر عشان تعرف تستخدمها في إيه") — and really deliver it last; ' +
+          'one short re-hook in the middle (e.g. "ودي لسه مش أهم حاجة…") — never more than one; '
           '(2) the exact steps the viewer follows RIGHT NOW. A code MUST be said out loud, spelled symbol by symbol in Egyptian words so the narrator reads it right (e.g. *#06# → «نجمة، شباك، صفر، ستة، شباك»; *#*#4636#*#* → «نجمة شباك نجمة شباك أربعة ستة تلاتة ستة شباك نجمة شباك نجمة»), or the settings path in the words the phone shows (الإعدادات ← تسهيلات الاستخدام ← اللمس ← النقر على الظهر), one short step per sentence; ' +
-          '(3) what they will see and one concrete use for it; (4) which phones it works on (آيفون / أندرويد / سامسونج) and any difference; (5) one short punchy closing line that invites sharing ("ابعتها لصاحبك اللي مش عارفها"). ' +
+          '(3) what they will see and one concrete use for it; (4) which phones it works on (آيفون / أندرويد / سامسونج) and any difference; (5) the promised payoff (the best use / the surprising extra), then ONE short punchy line that invites sharing ("ابعتها لصاحبك اللي مش عارفها") — no long outro, the video ends right after the payoff. ' +
           'Only steps and facts stated in the sources; never codes that reset, erase or unlock anything. curiosityGap = the hook question; onScreenText = the code itself or the feature name (1–4 words, e.g. "*#06#", "النقر على الظهر"). Keep opening, cta and ending to one short sentence each.';
 
 const EditorLLM = z.object({ problems: z.array(z.object({ scene: z.number().int().default(0), problem: z.string().min(5) })).default([]) });
@@ -172,6 +175,14 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
     if (phone && topics?.length) {
       const lib = loadPhoneLibrary(this.ctx.config.rootDir);
       data = { ...data, scenes: data.scenes.map((sc, i) => { const e = lib?.secrets.find((x) => x.id === topics[i]?.subject); return e ? { ...sc, onScreenText: e.onScreen } : sc; }) };
+    }
+    // Hook editor: 5 openings per Short, the strongest (learned from our retention numbers) goes first.
+    if (phone && input.format === 'short') {
+      const picks = await chooseHooks(this.ctx, data.scenes.map((sc, i) => ({ n: sc.n ?? i + 1, narration: sc.voiceover, title: topics?.[i]?.title ?? data.mainTitle })), input.videoId);
+      if (picks.length) {
+        data = { ...data, scenes: data.scenes.map((sc, i) => { const p = picks.find((x) => x.n === (sc.n ?? i + 1)); return p ? { ...sc, voiceover: applyHook(sc.voiceover, p.to, p.bridge) } : sc; }) };
+        this.ctx.repos.artifacts.save({ videoId: input.videoId, kind: 'hook_choices', agent: 'hook-editor', data: { picks } });
+      }
     }
     if (problems.length) this.ctx.logger.child('scriptwriter').warn('script problems left after fixing', { videoId: input.videoId, problems });
     const wordCount = countWords(spokenText({ ...data, format: input.format }));
