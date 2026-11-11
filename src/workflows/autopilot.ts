@@ -31,7 +31,7 @@ import { cairoTime, telegramFromEnv, type Telegram } from '../publishing/telegra
 import { syncBot, type LiveStats } from '../publishing/bot-sync.ts';
 import { readPosted, socialFromEnv } from '../publishing/social.ts';
 import { family, loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
-import { handleTopicRequests, priorityIds } from '../agents/niche/topic-requests.ts';
+import { growLibrary, handleTopicRequests, priorityIds } from '../agents/niche/topic-requests.ts';
 
 export interface CycleOptions {
   now?: Date;
@@ -281,6 +281,9 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     try {
       const usedIds = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
       await handleTopicRequests(ctx, usedIds);
+      // Library researcher: keeps ≥ 30 vetted topics ready (phones + social media), once a day when low.
+      const grown = await growLibrary(ctx, usedIds, now);
+      if (grown.length && process.env.BOT_URL && process.env.BOT_INGEST_SECRET) await fetch(`${process.env.BOT_URL.replace(/\/$/, '')}/ingest`, { method: 'POST', headers: { authorization: `Bearer ${process.env.BOT_INGEST_SECRET}`, 'content-type': 'application/json' }, body: JSON.stringify({ messages: grown }) }).catch(() => undefined);
     } catch (err) { rep.errors.push(`topic requests: ${(err as Error).message}`); }
   }
   const t0 = Date.now();

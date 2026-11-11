@@ -68,3 +68,19 @@ test('topic request: full cycle — bot requests → reply on Telegram → first
   assert.match(again[0]!, /اتعمل/);
   assert.deepEqual(await handleTopicRequests(ctx, new Set(['req-7']), {} as NodeJS.ProcessEnv, fakeFetch), []);
 });
+
+test('library researcher: when stock is low, ideas are vetted and only approved ones are added; a failed model call retries next cycle', async () => {
+  const { growLibrary } = await import('../../src/agents/niche/topic-requests.ts');
+  const ideas = { ideas: [{ topic: 'ابعت رسالة في تيليجرام من غير صوت', category: 'telegram' }, { topic: 'كود يفتح أي موبايل', category: 'code' }] };
+  // idea list, then: idea 1 draft ok + check ok, idea 2 rejected by the drafter
+  const { ctx, root } = setup([ideas, { verdict: 'ok', confidence: 0.9, entry: { ...ENTRY, source: 'telegram' } }, { verdict: 'ok', confidence: 0.9 }, { verdict: 'reject', confidence: 0.9, reasonArabic: 'مش آمن' }]);
+  const used = new Set(loadPhoneLibrary(root)!.secrets.map((s) => s.id));
+  const msgs = await growLibrary(ctx, used, new Date('2026-11-12T08:00:00Z'));
+  assert.match(msgs[0]!, /ضاف 1/);
+  assert.ok(loadPhoneLibrary(root)!.secrets.some((s) => s.id.startsWith('req-auto-')));
+  assert.deepEqual(priorityIds(ctx, used), [], 'researcher topics are not pushed ahead like the owner’s');
+  assert.deepEqual(await growLibrary(ctx, used, new Date('2026-11-12T11:00:00Z')), [], 'once a day');
+  const failing = setup([]);
+  assert.deepEqual(await growLibrary(failing.ctx, new Set(loadPhoneLibrary(failing.root)!.secrets.map((s) => s.id)), new Date('2026-11-12T08:00:00Z')), []);
+  assert.equal(failing.arts.filter((a) => a.kind === 'library_growth').length, 0, 'failure does not block the day');
+});

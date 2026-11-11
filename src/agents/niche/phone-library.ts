@@ -45,7 +45,8 @@ export function secretSource(lib: Library, s: PhoneSecret) {
   };
 }
 
-export const family = (s: PhoneSecret) => (s.id.startsWith('app-') ? 'apps' : s.kind === 'code' ? 'code' : s.id.startsWith('ios-') ? 'ios' : 'android');
+const APP_SOURCES = new Set(['whatsapp', 'instagram', 'facebook', 'tiktok', 'youtube', 'maps', 'gboard', 'telegram', 'x', 'snapchat', 'chrome', 'google']);
+export const family = (s: PhoneSecret) => (s.id.startsWith('app-') || APP_SOURCES.has(s.source) ? 'apps' : s.kind === 'code' ? 'code' : s.id.startsWith('ios-') || s.source === 'apple' ? 'ios' : 'android');
 
 /**
  * Three unused secrets for today's pack, mixed for variety: a code, an iPhone secret and an Android/Samsung

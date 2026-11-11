@@ -18,7 +18,7 @@ import { guardCodes } from '../../publishing/social.ts';
 export const REQUESTED_FILE = 'data/requested-secrets.json';
 
 export interface TopicRequest { id: string; text: string; at: string }
-interface Requested { request: TopicRequest; status: 'approved' | 'rejected' | 'duplicate' | 'produced'; entry?: PhoneSecret; reason?: string; duplicateOf?: string }
+interface Requested { /** Proposed by the library researcher (not the owner). */ auto?: boolean; request: TopicRequest; status: 'approved' | 'rejected' | 'duplicate' | 'produced'; entry?: PhoneSecret; reason?: string; duplicateOf?: string }
 
 const Ui = z.union([
   z.object({ type: z.literal('dialer'), code: z.string().regex(/^[0-9*#+]{2,20}$/), call: z.boolean().default(true) }),
@@ -71,7 +71,7 @@ export async function vetRequest(ctx: AgentContext, req: TopicRequest): Promise<
   const draft = await ctx.providers.llm.generateJson({
     task: 'topic.request.draft',
     tier: 'writing',
-    system: 'You research a Short topic the channel owner asked for ("سر الموبايل": Egyptian Arabic phone/app secrets). ' +
+    system: 'You research a Short topic for "سر الموبايل" (Egyptian Arabic Shorts about phones and social media: hidden secrets, useful features, everyday tips, new updates of iPhone/Android/Samsung and apps like WhatsApp, Instagram, TikTok, Facebook, YouTube, Telegram, Google). ' +
       'Turn the request into ONE library entry in exactly the format of `example` (Egyptian Arabic fields; facts = the precise English facts + Arabic summary; source = one key of `sources`; ui = a dialer code or the settings path to draw, when it applies; footage = English stock searches that literally show the topic). ' +
       'verdict "duplicate" with duplicateOf = the id when `known` already has the same secret; "reject" with reasonArabic (short, polite Egyptian Arabic) when it is not about phones/apps, unsafe, not real, or you are not sure the steps are exactly right. ' +
       SAFETY + ' confidence = how sure you are every step and code is exactly correct (0–1). JSON only.',
@@ -122,7 +122,7 @@ export function writeRequestedLibrary(ctx: AgentContext): void {
 }
 /** Library ids the owner asked for that are waiting to be made (approved requests + requested duplicates). */
 export function priorityIds(ctx: AgentContext, used: Set<string>): string[] {
-  return requestedEntries(ctx).map((r) => (r.status === 'approved' ? r.entry?.id : r.status === 'duplicate' ? r.duplicateOf : undefined)).filter((id): id is string => Boolean(id) && !used.has(id!));
+  return requestedEntries(ctx).filter((r) => !r.auto).map((r) => (r.status === 'approved' ? r.entry?.id : r.status === 'duplicate' ? r.duplicateOf : undefined)).filter((id): id is string => Boolean(id) && !used.has(id!));
 }
 
 /**
@@ -147,7 +147,7 @@ export async function handleTopicRequests(ctx: AgentContext, used: Set<string>, 
   }
   // Requested topics whose video was just made.
   for (const r of requestedEntries(ctx)) {
-    const id = r.status === 'approved' ? r.entry?.id : undefined;
+    const id = r.status === 'approved' && !r.auto ? r.entry?.id : undefined;
     if (id && used.has(id)) {
       ctx.repos.artifacts.save({ videoId: null, kind: 'topic_request', agent: 'topic-requests', data: { ...r, status: 'produced' } });
       msgs.push(`🎬 فيديو موضوعك «${r.entry!.title}» اتعمل وداخل جدول النشر — اكتب «فيديو» عشان تشوفه.`);
@@ -158,4 +158,50 @@ export async function handleTopicRequests(ctx: AgentContext, used: Set<string>, 
     await fetchImpl(`${env.BOT_URL.replace(/\/$/, '')}/ingest`, { method: 'POST', headers: { authorization: `Bearer ${env.BOT_INGEST_SECRET}`, 'content-type': 'application/json' }, body: JSON.stringify({ requestsDone: done, messages: msgs }) }).catch(() => undefined);
   }
   return msgs;
+}
+
+// ── Library researcher ───────────────────────────────────────────────────────────────────────────────────────
+export const LIBRARY_STOCK = 30;
+const Ideas = z.object({ ideas: z.array(z.object({ topic: z.string().min(8).max(200), category: z.string().max(30) })).min(1).max(15) });
+
+/**
+ * Keeps the library stocked: when fewer than LIBRARY_STOCK topics are left unused, proposes fresh topics people
+ * care about (phones + social media: features, tips, privacy, new updates…), runs each through the same research
+ * + independent fact-check as the owner's requests, and adds the approved ones (at most `max` a day, once a day).
+ * Returns Telegram lines.
+ */
+export async function growLibrary(ctx: AgentContext, used: Set<string>, now = new Date(), max = 6): Promise<string[]> {
+  const lib = loadPhoneLibrary(ctx.config.rootDir);
+  if (!lib || ctx.providers.llm.name.startsWith('mock')) return [];
+  const left = lib.secrets.filter((s) => !used.has(s.id)).length;
+  const day = now.toISOString().slice(0, 10);
+  if (left >= LIBRARY_STOCK || ctx.repos.artifacts.listKind<{ day: string }>('library_growth').some((a) => a.data.day === day)) return [];
+  const counts: Record<string, number> = {};
+  for (const s of lib.secrets) counts[s.source] = (counts[s.source] ?? 0) + 1;
+  const ideas = await ctx.providers.llm.generateJson({
+    task: 'library.ideas',
+    tier: 'writing',
+    system: 'You plan topics for "سر الموبايل" — Egyptian Arabic Shorts about what people care about on their phones and social media. ' +
+      'Propose 12 DIFFERENT, specific, useful topics in a healthy mix: hidden features and settings (iPhone, Android, Samsung), everyday tips (battery, storage, camera, privacy, security, keyboard, sharing), ' +
+      'social media features and tricks (WhatsApp, Instagram, TikTok, Facebook, YouTube, Telegram, Google, Chrome), and recent official updates that are already rolled out. ' +
+      'Each must be real, documented, safe, and something a normal Egyptian user would love to try right away. Prefer under-covered areas (fewer entries in `coverage`). Never repeat or near-repeat anything in `existing`. ' +
+      'topic = one Arabic line describing exactly the feature/tip (what it does + where). JSON only.',
+    prompt: JSON.stringify({ existing: lib.secrets.map((s) => s.title), coverage: counts }),
+    schema: Ideas,
+    maxOutputTokens: 4000,
+  }).catch((e) => { ctx.logger?.child('library-researcher').warn('ideas failed', { error: String((e as Error).message).slice(0, 300) }); return undefined; });
+  const list = (ideas?.data as z.infer<typeof Ideas> | undefined)?.ideas;
+  if (!list?.length) return []; // the model failed (quota, network): try again next cycle, not tomorrow
+  ctx.repos.artifacts.save({ videoId: null, kind: 'library_growth', agent: 'library-researcher', data: { day, left } });
+  const added: Requested[] = [];
+  let i = 0;
+  for (const idea of list) {
+    if (added.length >= max) break;
+    const r = await vetRequest(ctx, { id: `auto-${day}-${i++}`, text: idea.topic, at: now.toISOString() });
+    ctx.repos.artifacts.save({ videoId: null, kind: 'topic_request', agent: 'library-researcher', data: { ...r, auto: true } });
+    if (r.status === 'approved') added.push(r);
+  }
+  writeRequestedLibrary(ctx);
+  if (!added.length) return [];
+  return [`📚 الباحث ضاف ${added.length} مواضيع جديدة للمكتبة (كلها اتراجعت واتأكد منها):\n\n${added.map((r) => `• ${r.entry!.title}`).join('\n')}\n\nالمكتبة فيها دلوقتي ${left + added.length} موضوع جاهز للإنتاج.`];
 }
