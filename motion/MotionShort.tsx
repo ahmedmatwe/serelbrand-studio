@@ -5,7 +5,8 @@
  * the plan, so the team can tune it over time.
  */
 import React from 'react';
-import { AbsoluteFill, Audio, Easing, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Audio, Easing, Sequence, cancelRender, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { fitText } from '@remotion/layout-utils';
 import { loadFont } from '@remotion/google-fonts/Cairo';
 import type { Hl, IconName, MotionPlan, MotionScene, MotionStyle, Tone, Variants } from './types';
 
@@ -108,23 +109,55 @@ const Headline: React.FC<{ hl: Hl; delay?: number; size?: number; top?: number; 
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const p = instant ? 1 : pop(frame, fps, delay);
-  // one line when it can (≥ 58 px): a wrapped headline would cover what is drawn under it
-  const fit = Math.max(58, Math.min(size, Math.floor(950 / (Math.max(1, hl.text.length) * 0.5))));
   const st = useStyle();
+  // Measured with the real font: always ONE line (a wrapped headline would cover what is drawn under it).
+  const fit = oneLine(hl.text, size, V(st).headline === 'stagger' && !instant ? hl.text.split(/\s+/).length * 20 : 0);
   if (!instant && V(st).headline === 'stagger') {
     const accent = new Set((hl.accent ?? '').split(/\s+/).filter(Boolean));
     return (
       <div style={{ position: 'absolute', top, left: 50, right: 50, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: fit, lineHeight: 1.25, color: WHITE, textShadow: '0 8px 30px rgba(0,0,0,0.5)' }}>
-        {hl.text.split(/\s+/).map((w, i) => {
+        <span data-qa="headline" style={{ display: 'inline-block' }}>{hl.text.split(/\s+/).map((w, i) => {
           const q = pop(frame, fps, delay + i * 3);
           return <span key={i} style={{ display: 'inline-block', margin: '0 10px', opacity: q, transform: `translateY(${(1 - q) * 60}px) rotate(${(1 - q) * -8}deg)`, color: accent.has(w) ? toneColor(st, hl.tone) : WHITE }}>{w}</span>;
-        })}
+        })}</span>
       </div>
     );
   }
   return (
-    <div style={{ position: 'absolute', top, left: 60, right: 60, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: fit, lineHeight: 1.25, color: WHITE, opacity: p, transform: `translateY(${(1 - p) * 40}px) scale(${0.85 + 0.15 * p})`, textShadow: '0 8px 30px rgba(0,0,0,0.5)' }}><Rich hl={hl} /></div>
+    <div style={{ position: 'absolute', top, left: 60, right: 60, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: fit, lineHeight: 1.25, color: WHITE, opacity: p, transform: `translateY(${(1 - p) * 40}px) scale(${0.85 + 0.15 * p})`, textShadow: '0 8px 30px rgba(0,0,0,0.5)', whiteSpace: 'nowrap' }}><span data-qa="headline" style={{ display: 'inline-block' }}><Rich hl={hl} /></span></div>
   );
+};
+
+/** Largest font size (≤ max) that keeps `text` on one line inside the 960 px text column. */
+function oneLine(text: string, max: number, extra = 0): number {
+  try {
+    const { fontSize } = fitText({ text, withinWidth: 940 - extra, fontFamily, fontWeight: 900, validateFontIsLoaded: false });
+    return Math.max(40, Math.min(max, Math.floor(fontSize * 0.94)));
+  } catch { return Math.max(40, Math.min(max, Math.floor(1900 / Math.max(1, text.length)))); }
+}
+
+/**
+ * Layout guard: on every frame, any two visible texts (headline, captions, codes, cards…) that overlap stop the
+ * render with LAYOUT_OVERLAP — the Short is then re-planned or not published. Text on top of text never ships.
+ */
+const LayoutGuard: React.FC = () => {
+  const frame = useCurrentFrame();
+  React.useLayoutEffect(() => {
+    const vis = [...document.querySelectorAll<HTMLElement>('[data-qa]')].map((el) => {
+      let o = 1;
+      for (let n: HTMLElement | null = el; n; n = n.parentElement) { const cs = getComputedStyle(n); o *= Number(cs.opacity); if (cs.display === 'none' || cs.visibility === 'hidden') o = 0; }
+      return { el, o, r: el.getBoundingClientRect() };
+    }).filter((x) => x.o > 0.6 && x.r.width > 2 && x.r.height > 2);
+    for (let i = 0; i < vis.length; i++) for (let j = i + 1; j < vis.length; j++) {
+      const a = vis[i]!.r, b = vis[j]!.r;
+      const w = Math.min(a.right, b.right) - Math.max(a.left, b.left), h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      if (w > 6 && h > 6 && w * h > 0.06 * Math.min(a.width * a.height, b.width * b.height)) {
+        cancelRender(new Error(`LAYOUT_OVERLAP frame ${frame}: "${(vis[i]!.el.textContent ?? '').slice(0, 40)}" × "${(vis[j]!.el.textContent ?? '').slice(0, 40)}"`));
+        return;
+      }
+    }
+  }, [frame]);
+  return null;
 };
 
 const Phone: React.FC<{ children: React.ReactNode; top?: number; glow?: string }> = ({ children, top = 470, glow }) => {
@@ -134,7 +167,7 @@ const Phone: React.FC<{ children: React.ReactNode; top?: number; glow?: string }
   const sweep = ((t * 0.45) % 1.4) - 0.2;
   return (
     <div style={{ position: 'absolute', inset: 0, perspective: 1800 }}>
-    <div style={{ position: 'absolute', top, left: '50%', width: 520, height: 960, marginLeft: -260, borderRadius: 74, transform: tilt ? `rotateY(${-10 + 4 * Math.sin(t * 0.8)}deg) rotateX(${5 + 2 * Math.cos(t * 0.6)}deg)` : undefined, transformStyle: 'preserve-3d', background: '#0A0F22', border: '12px solid #2B3760', boxShadow: `0 40px 120px rgba(0,0,0,0.6), 0 0 80px ${glow ?? s.accent}33`, overflow: 'hidden' }}>
+    <div style={{ position: 'absolute', top, left: '50%', width: 520, height: 900, marginLeft: -260, borderRadius: 74, transform: tilt ? `rotateY(${-10 + 4 * Math.sin(t * 0.8)}deg) rotateX(${5 + 2 * Math.cos(t * 0.6)}deg)` : undefined, transformStyle: 'preserve-3d', background: '#0A0F22', border: '12px solid #2B3760', boxShadow: `0 40px 120px rgba(0,0,0,0.6), 0 0 80px ${glow ?? s.accent}33`, overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: 18, left: '50%', width: 150, height: 34, marginLeft: -75, borderRadius: 20, background: '#000', zIndex: 5 }} />
       {children}
       {tilt && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 20, background: `linear-gradient(115deg, transparent ${sweep * 100 - 12}%, rgba(255,255,255,0.13) ${sweep * 100}%, transparent ${sweep * 100 + 12}%)` }} />}
@@ -149,7 +182,7 @@ const Finger: React.FC<{ x: number; y: number }> = ({ x, y }) => <div style={{ p
 const Camera: React.FC<{ t: number; a: number; b: number; origin: string; children: React.ReactNode }> = ({ t, a, b, origin, children }) => {
   const s = useStyle();
   const k = (ease(t, a, a + 0.5) - ease(t, b - 0.5, b)) * s.camera;
-  return <AbsoluteFill style={{ transformOrigin: origin, transform: `scale(${1 + 0.35 * k}) translateY(${-40 * k}px) rotate(${-2.5 * k}deg)` }}>{children}</AbsoluteFill>;
+  return <AbsoluteFill style={{ transformOrigin: origin, transform: `scale(${1 + 0.2 * k}) rotate(${-2 * k}deg)` }}>{children}</AbsoluteFill>;
 };
 
 // ── scenes ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -182,14 +215,14 @@ const HookSlam: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
         <div style={{ width: 150, height: 150, borderRadius: 44, background: s.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 70px ${s.accent}`, transform: `rotate(${Math.sin(t * 3) * 6}deg)` }}><Icon name={sc.icon} size={96} color="#111" /></div>
       </div>
       <div style={{ position: 'absolute', top: 470, left: 50, right: 50, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: size, lineHeight: 1.15, transform: `translate(${shake * Math.sin(frame)}px, ${shake * Math.cos(frame)}px)` }}>
-        {words.map((w, i) => {
+        <span data-qa="slam">{words.map((w, i) => {
           const q = frame >= i * per ? spring({ frame: frame - i * per, fps, config: { damping: 9, stiffness: 260, mass: 0.6 } }) : 0;
           return <span key={i} style={{ display: 'inline-block', margin: '0 14px', opacity: Math.min(1, q * 2), transform: `scale(${2.2 - 1.2 * q})`, color: accent.has(w) ? toneColor(s, sc.headline.tone) : WHITE, textShadow: `0 10px 40px rgba(0,0,0,0.6)` }}>{w}</span>;
-        })}
+        })}</span>
       </div>
       {sc.teaserCode && (
         <div style={{ position: 'absolute', top: 1080, left: 0, right: 0, textAlign: 'center', opacity: ease(t, sc.start + 0.6, sc.start + 1) }}>
-          <span style={{ display: 'inline-block', padding: '12px 46px', borderRadius: 30, background: '#1E2A55', border: `3px ${t < reveal ? 'dashed' : 'solid'} ${s.accent}` }}>
+          <span data-qa="teaser" style={{ display: 'inline-block', padding: '12px 46px', borderRadius: 30, background: '#1E2A55', border: `3px ${t < reveal ? 'dashed' : 'solid'} ${s.accent}` }}>
             <Code style={{ fontSize: 80, color: s.accent, filter: `blur(${(1 - ease(t, reveal, reveal + 0.3)) * (10 - 3 * Math.abs(Math.sin(t * 3)))}px)` }}>{sc.teaserCode}</Code>
           </span>
         </div>
@@ -231,7 +264,7 @@ const HookRings: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
       <Headline hl={sc.headline} instant />
       {sc.teaserCode && (
         <div style={{ position: 'absolute', top: 430, left: 0, right: 0, textAlign: 'center' }}>
-          <span style={{ display: 'inline-block', padding: '10px 40px', borderRadius: 30, background: '#1E2A55', border: `3px ${t < reveal ? 'dashed' : 'solid'} ${s.accent}` }}>
+          <span data-qa="teaser" style={{ display: 'inline-block', padding: '10px 40px', borderRadius: 30, background: '#1E2A55', border: `3px ${t < reveal ? 'dashed' : 'solid'} ${s.accent}` }}>
             <Code style={{ fontSize: 72, color: s.accent, filter: `blur(${(1 - ease(t, reveal, reveal + 0.3)) * (10 - 3 * Math.abs(Math.sin(t * 3)))}px)` }}>{sc.teaserCode}</Code>
           </span>
         </div>
@@ -263,10 +296,10 @@ const DialerScene: React.FC<{ sc: Of<'dialer'> }> = ({ sc }) => {
   const ti = target && target !== 'call' ? pad.indexOf(target) : -1;
   return (
     <>
-      <Camera t={t} a={k0 - 0.4} b={k1} origin="540px 900px">
+      <Camera t={t} a={k0 - 0.4} b={k1} origin="540px 940px">
         <Phone>
           <div style={{ position: 'absolute', top: 120, left: 0, right: 0, height: 120, textAlign: 'center' }}>
-            <Code style={{ fontSize: typed.length > 8 ? 60 : 84, color: WHITE }}>{typed || ' '}</Code>
+            <span data-qa="typed"><Code style={{ fontSize: typed.length > 8 ? 60 : 84, color: WHITE }}>{typed || ' '}</Code></span>
             {Math.floor(frame / 15) % 2 === 0 && <span style={{ display: 'inline-block', width: 5, height: 70, background: s.accent, marginLeft: 6, verticalAlign: 'middle' }} />}
           </div>
           <div style={{ position: 'absolute', top: 250, left: 40, right: 40, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', rowGap: 16, justifyItems: 'center' }}>
@@ -287,7 +320,7 @@ const DialerScene: React.FC<{ sc: Of<'dialer'> }> = ({ sc }) => {
             <Icon name="call" size={66} color="#fff" />
             {callP > 0 && <div style={{ position: 'absolute', width: 120 + 200 * ease(t, callAt, callAt + 0.7), height: 120 + 200 * ease(t, callAt, callAt + 0.7), borderRadius: '50%', border: `5px solid ${s.good}`, opacity: 1 - ease(t, callAt, callAt + 0.7) }} />}
           </div>
-          {target === 'call' && <Finger x={248} y={790} />}
+          {target === 'call' && <Finger x={248} y={730} />}
           {ti >= 0 && <Finger x={40 + ((ti % 3) + 0.5) * (416 / 3)} y={250 + Math.floor(ti / 3) * 112 + 48} />}
         </Phone>
       </Camera>
@@ -314,7 +347,7 @@ const SettingsScene: React.FC<{ sc: Of<'settings'> }> = ({ sc }) => {
   const TARGET = 2;
   return (
     <>
-      <Camera t={t} a={sc.start + 0.6} b={sc.end - 0.2} origin="540px 1000px">
+      <Camera t={t} a={sc.start + 0.6} b={sc.end - 0.2} origin="540px 940px">
         <Phone>
           <div style={{ position: 'absolute', inset: 0, background: ios ? '#0E1328' : '#0B1020', transform: `translateX(${(1 - slide) * -500}px)`, opacity: slide }}>
             <div style={{ position: 'absolute', top: 90, left: 30, right: 30, direction: 'rtl', fontFamily, fontWeight: 900, fontSize: ios ? 46 : 40, color: WHITE, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sc.path[page]}</div>
@@ -355,7 +388,7 @@ const CardScene: React.FC<{ sc: Of<'card'> }> = ({ sc }) => {
       <Phone glow={flipped ? s.bad : s.good}>
         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(#0F1736, #0A0F22)' }} />
         {sc.alert && <div style={{ position: 'absolute', top: 90, left: 30, right: 30, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: 30, color: '#fff', background: s.bad, borderRadius: 24, padding: '10px 0', opacity: ease(t, sc.alert.at, sc.alert.at + 0.3) }}>{sc.alert.text}</div>}
-        <div style={{ position: 'absolute', top: 190, left: 26, right: 26, borderRadius: 34, background: CARD, border: `2px solid ${LINE}`, padding: '30px 26px', direction: 'rtl', fontFamily, transform: `translateY(${(1 - card) * 120}px) scale(${0.9 + 0.1 * card})`, opacity: card }}>
+        <div data-qa="card" style={{ position: 'absolute', top: 190, left: 26, right: 26, borderRadius: 34, background: CARD, border: `2px solid ${LINE}`, padding: '30px 26px', direction: 'rtl', fontFamily, transform: `translateY(${(1 - card) * 120}px) scale(${0.9 + 0.1 * card})`, opacity: card }}>
           <div style={{ fontWeight: 900, fontSize: 42, color: WHITE, marginBottom: 22 }}>{sc.title}</div>
           {sc.rows.map((r, i) => {
             const show = ease(t, r.at, r.at + 0.4);
@@ -391,7 +424,7 @@ const AlertScene: React.FC<{ sc: Of<'alert'> }> = ({ sc }) => {
         <Icon name={sc.icon} size={330} color={col} style={{ filter: `drop-shadow(0 0 40px ${col})` }} />
       </div>
       {sc.action && (
-        <div style={{ position: 'absolute', top: 1010, left: 90, right: 90, borderRadius: 40, background: CARD, border: `3px solid ${s.good}`, padding: 32, display: 'flex', alignItems: 'center', gap: 28, direction: 'rtl', transform: `translateY(${(1 - b) * 200}px)`, opacity: b }}>
+        <div data-qa="action" style={{ position: 'absolute', top: 1010, left: 90, right: 90, borderRadius: 40, background: CARD, border: `3px solid ${s.good}`, padding: 32, display: 'flex', alignItems: 'center', gap: 28, direction: 'rtl', transform: `translateY(${(1 - b) * 200}px)`, opacity: b }}>
           <div style={{ width: 140, height: 140, borderRadius: '50%', background: s.good, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Icon name={sc.action.icon} size={90} color="#fff" /></div>
           <div style={{ fontFamily, fontWeight: 900, fontSize: 48, lineHeight: 1.3, color: WHITE }}><Rich hl={{ text: sc.action.text, accent: sc.action.accent, tone: 'green' }} /></div>
         </div>
@@ -424,7 +457,7 @@ const CompatScene: React.FC<{ sc: Of<'compat'> }> = ({ sc }) => {
       </div>
       {sc.badge && (
         <div style={{ position: 'absolute', top: 1140, left: 0, right: 0, textAlign: 'center', transform: `scale(${g})` }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 16, padding: '14px 40px', borderRadius: 60, background: '#1E2A55', border: `3px solid ${s.accent}`, fontFamily, fontWeight: 900, fontSize: 44, color: WHITE, direction: 'rtl' }}>
+          <span data-qa="badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 16, padding: '14px 40px', borderRadius: 60, background: '#1E2A55', border: `3px solid ${s.accent}`, fontFamily, fontWeight: 900, fontSize: 44, color: WHITE, direction: 'rtl' }}>
             <Icon name="antenna" size={50} color={s.accent} /> {sc.badge}
           </span>
         </div>
@@ -453,7 +486,7 @@ const CtaScene: React.FC<{ sc: Of<'cta'>; endCard: string }> = ({ sc, endCard })
       </div>
       {sc.sub && <Headline hl={sc.sub} size={70} top={960} delay={f((sc.subAt ?? sc.start + 1) - sc.start)} />}
       <div style={{ position: 'absolute', top: 1120, left: 0, right: 0, textAlign: 'center', transform: `scale(${follow})`, opacity: follow }}>
-        <span style={{ display: 'inline-block', padding: '18px 46px', borderRadius: 60, background: s.accent, fontFamily, fontWeight: 900, fontSize: 46, color: '#111', direction: 'rtl' }}>{endCard}</span>
+        <span data-qa="follow" style={{ display: 'inline-block', padding: '18px 46px', borderRadius: 60, background: s.accent, fontFamily, fontWeight: 900, fontSize: 46, color: '#111', direction: 'rtl' }}>{endCard}</span>
       </div>
     </>
   );
@@ -475,7 +508,7 @@ const StatementScene: React.FC<{ sc: Of<'statement'> }> = ({ sc }) => {
         {sc.lines.slice(0, 3).map((l, i) => {
           const p = pop(frame, fps, f(l.at - sc.start));
           return (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 22, padding: '22px 30px', borderRadius: 30, background: CARD, border: `2px solid ${LINE}`, opacity: p, transform: `translateX(${(1 - p) * 120}px)` }}>
+            <div data-qa="line" key={i} style={{ display: 'flex', alignItems: 'center', gap: 22, padding: '22px 30px', borderRadius: 30, background: CARD, border: `2px solid ${LINE}`, opacity: p, transform: `translateX(${(1 - p) * 120}px)` }}>
               <Icon name="check" size={52} color={s.good} />
               <span style={{ fontFamily, fontWeight: 800, fontSize: 42, color: WHITE }}>{l.text}</span>
             </div>
@@ -511,9 +544,9 @@ const Captions: React.FC<{ caps: MotionPlan['captions'] }> = ({ caps }) => {
   const p = pop(frame, fps, f(cur.a));
   return (
     <div style={{ position: 'absolute', top: 1480, left: 70, right: 70, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: s.captionSize, lineHeight: 1.35, transform: `scale(${0.8 + 0.2 * p})`, opacity: p }}>
-      {words.map((w, i) => (
+      <span data-qa="caption">{words.map((w, i) => (
         <span key={i} style={{ display: 'inline-block', margin: '0 9px', padding: '0 10px', borderRadius: 14, color: i === idx ? '#111' : WHITE, background: i === idx ? s.accent : 'transparent', transform: `scale(${i === idx ? 1.08 : 1})`, WebkitTextStroke: i === idx ? '0' : '2px rgba(0,0,0,0.5)', textShadow: i === idx ? 'none' : '0 4px 18px rgba(0,0,0,0.8)' }}>{w}</span>
-      ))}
+      ))}</span>
     </div>
   );
 };
@@ -547,6 +580,7 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
         </AbsoluteFill>
         <AbsoluteFill style={{ background: '#fff', opacity: s.flash * flash }} />
         <Captions caps={plan.captions} />
+        <LayoutGuard />
         <div style={{ position: 'absolute', top: 0, left: 0, height: 10, width: `${(frame / durationInFrames) * 100}%`, background: s.accent, boxShadow: `0 0 20px ${s.accent}` }} />
         <div style={{ position: 'absolute', top: 60, right: 60, fontFamily, fontWeight: 800, fontSize: 34, color: DIM, direction: 'rtl' }}>{plan.brand}</div>
         {plan.audio && <Audio src={staticFile(plan.audio)} />}

@@ -337,13 +337,20 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const score = (r?: { hook: number; visualMatch: number; pacing: number; captions: number }) => (r ? r.hook * 2 + r.visualMatch * 2 + r.pacing + r.captions : -1);
     try {
       let plan = await planMotion(this.ctx, input, o.videoId);
-      await renderMotion(root, plan, o.audio, o.path);
+      try { await renderMotion(root, plan, o.audio, o.path); } catch (e) {
+        // Layout guard (text on top of text): re-plan once with shorter headlines; a second failure → stock.
+        const msg = String((e as Error).message).match(/LAYOUT_OVERLAP[^\n]*/)?.[0];
+        if (!msg) throw e;
+        o.notes.push(`Short ${o.n}: layout guard stopped the render (${msg.slice(0, 140)}) — re-planned`);
+        plan = await planMotion(this.ctx, input, o.videoId, `TEXTS OVERLAPPED in the previous attempt (${msg}). Use shorter headlines (≤ 4 words) and fewer texts on screen.`, false);
+        await renderMotion(root, plan, o.audio, o.path);
+      }
       let review = await this.editReview(o.path, o.dir, `motion-${o.n}`, said(plan), o.videoId);
       if (review && (review.hook < 7 || review.visualMatch < 7) && review.notes) {
         const plan2 = await planMotion(this.ctx, input, o.videoId, review.notes);
         const alt = o.path.replace(/\.mp4$/, '-b.mp4');
-        await renderMotion(root, plan2, o.audio, alt);
-        const review2 = await this.editReview(alt, o.dir, `motion-${o.n}-b`, said(plan2), o.videoId);
+        const drawn = await renderMotion(root, plan2, o.audio, alt).then(() => true, () => false);
+        const review2 = drawn ? await this.editReview(alt, o.dir, `motion-${o.n}-b`, said(plan2), o.videoId) : undefined;
         if (score(review2) > score(review)) { renameSync(alt, o.path); plan = plan2; review = review2; o.notes.push(`Short ${o.n}: motion re-planned after the critic's notes (${review?.hook}/10 hook)`); } else rmSync(alt, { force: true });
       }
       if (review) this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'edit_review', agent: 'editing-critic', data: { n: o.n, look: 'motion', variants: plan.style.variants, ...review } });
