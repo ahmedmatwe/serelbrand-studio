@@ -111,7 +111,9 @@ export class GeminiLLM implements LLMProvider {
       } catch (err) {
         last = err;
         const m = (err as Error).message;
-        if (!(err instanceof ProviderError) || !/HTTP (503|429|404)/.test(m)) throw err;
+        // A slow/overloaded model (timeout) also falls through to the next model or key at once, instead of
+        // waiting out 3 minutes × 4 retries on the same one.
+        if (!(err instanceof ProviderError) || !/HTTP (503|429|404|500)|Network error/.test(m)) throw err;
         if (/HTTP 429/.test(m) && /PerDay|per ?day|free_tier_requests/i.test(m)) exhaustedToday.add(c.id);
       }
     }

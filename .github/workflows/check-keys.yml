@@ -36,3 +36,13 @@ jobs:
               https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent)
             echo "key $n: text HTTP $t · voice HTTP $v"
           done
+  facebook:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: node --no-warnings scripts/check-facebook.ts
+        env:
+          META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+          META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
