@@ -1,4 +1,5 @@
 import { applyHook, chooseHooks } from './hook-editor.ts';
+import { labAssign, saveAssign } from '../lab/lab.ts';
 import { writerLessons } from '../analytics/analyst.ts';
 import { z } from 'zod';
 import { Agent, countWords, type AgentContext } from './base.ts';
@@ -105,6 +106,10 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
       : input.format === 'short'
       ? { shortsPack: 'Write EXACTLY 3 scenes. Each scene is a complete, independent YouTube Short of 40–55 seconds (90–115 spoken words)' + (topics?.length === 3 ? ` — scene 1 is about "${topics[0]!.title}", scene 2 about "${topics[1]!.title}", scene 3 about "${topics[2]!.title}" (three DIFFERENT subjects; scene N tells ONLY topic N — never mix them, never borrow facts from another scene's topic, and for a story the company/person is named in the first sentence)` : '') + '. The FIRST sentence states the secret/idea (and names the company if it is a story), so the viewer knows within 2 seconds what it is about and why it matters to them; then the proof in a few concrete beats (the documented fact, experiment, example or story, with numbers from the sources) using everyday, filmable examples (a price tag, a shop shelf, a menu, an office meeting…); then the takeaway in one clear sentence and how the viewer can apply it in their own work or project (one practical step). curiosityGap = its hook question, onScreenText = the subject name (1–3 words). Keep opening, cta and ending to one short sentence each.', topics }
       : {};
+    // Live experiments (the lab): each Short of the pack tries a version of length / open loop / closing line.
+    const labPick = input.format === 'short' && topics?.length ? labAssign(this.ctx, topics.map((t) => t.subject)) : undefined;
+    if (labPick) saveAssign(this.ctx, input.videoId, labPick);
+    const lab = labPick ? { experimentsPerScene: topics!.map((t, i) => `Scene ${i + 1}: ${labPick.get(t.subject)?.instructions.join(' ') ?? ''}`), experimentsRule: 'These are live experiments: follow each scene\'s instructions exactly (they override the general rules on the same point); everything else stays as the rules say.' } : {};
     // Real sources first: facts in the script must come from them, so verification can confirm them.
     // Sequential (not parallel): Wikipedia throttles bursts from cloud IPs.
     const perTopic: ResearchSource[][] = [];
@@ -121,14 +126,16 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
       task: 'script.write',
       tier: 'writing',
       system: loadPrompt('scriptwriter'),
-      prompt: JSON.stringify({ ...input, ...pack, ...sourcing, ...this.experience(phone), brief: this.ctx.repos.artifacts.latest(input.videoId, 'brief')?.data, targetWords: target, dialect: this.ctx.config.channel.dialect }),
+      prompt: JSON.stringify({ ...input, ...pack, ...lab, ...sourcing, ...this.experience(phone), brief: this.ctx.repos.artifacts.latest(input.videoId, 'brief')?.data, targetWords: target, dialect: this.ctx.config.channel.dialect }),
       schema: ScriptLLM,
       maxOutputTokens: 16000,
       videoId: input.videoId,
     });
     // Never trust the model's own length estimate — measure it, and ask once for a deeper version if too short.
     let data = res.data;
-    if (countWords(spokenText({ ...data, format: input.format })) < target.minWords * 0.9) {
+    // With the length experiment, the minimum is the sum of each Short's own lower bound (never stretch a short arm).
+    const labMin = labPick ? topics!.reduce((sum, t) => sum + Number(labPick.get(t.subject)?.instructions.join(' ').match(/(\d{2,3})\s*[–-]\s*\d{2,3} spoken words/)?.[1] ?? 60), 0) : undefined;
+    if (countWords(spokenText({ ...data, format: input.format })) < (labMin ?? target.minWords) * 0.9) {
       const words = countWords(spokenText({ ...data, format: input.format }));
       const exp = await this.ctx.providers.llm.generateJson({
         task: 'script.expand',

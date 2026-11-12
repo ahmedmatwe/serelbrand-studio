@@ -7,6 +7,8 @@ import type { AgentContext } from '../agents/base.ts';
 import { allPosts, type Post } from '../analytics/learner.ts';
 import { buildPerformance } from '../analytics/analyst.ts';
 import { z } from 'zod';
+import { labSummary } from '../lab/lab.ts';
+import { errorSummary } from '../lab/errors.ts';
 
 const NAME: Record<string, string> = { youtube: '▶️ يوتيوب', facebook: '📘 فيسبوك', instagram: '📸 إنستجرام', tiktok: '🎵 تيك توك' };
 const views = (p: Post) => p.metrics.h72?.views ?? p.metrics.h24?.views ?? 0;
@@ -56,6 +58,11 @@ export function weeklyReport(ctx: AgentContext, now = new Date(), subscribers?: 
   const week = now.getTime() - 7 * 86_400_000;
   const learned = ctx.repos.knowledge.byCategory('lesson').filter((k) => k.confidence * 1e13 > week).slice(0, 4);
   if (learned.length) lines.push('', '🧠 الفريق اتعلم الأسبوع ده:', ...learned.map((k) => `- ${k.insight.replace(/^Performance \([^)]*\):\s*/, '').slice(0, 140)}`));
+  // The lab (live experiments) and the error memory.
+  const lab = labSummary(ctx, now);
+  if (lab.length) lines.push('', '🧪 التجارب الشغالة (×المشاهدات من المعتاد، وعدد الفيديوهات):', ...lab);
+  const errs = errorSummary(ctx, now);
+  if (errs.length) lines.push('', '🧯 الأخطاء اللي اتكررت:', ...errs);
   // Monetisation (Shorts path): 1,000 subscribers + 10M Shorts views in the last 90 days.
   const v90 = posts.filter((p) => p.platform === 'youtube' && now.getTime() - new Date(p.publish_at).getTime() < 90 * 86_400_000).reduce((s, p) => s + views(p), 0);
   lines.push('', '💰 الطريق لأرباح يوتيوب:', `- المشتركين: ${subscribers ?? '؟'} / 1000`, `- مشاهدات الشورتس آخر 90 يوم: ${fmt(v90)} / 10M`);

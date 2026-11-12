@@ -35,6 +35,8 @@ import { growLibrary, handleTopicRequests, priorityIds } from '../agents/niche/t
 import { scoutTrends, waitingTrends } from '../agents/niche/trend-scout.ts';
 import { weeklyReportArabic } from '../reports/weekly.ts';
 import { weeklyCompilation } from './weekly-compilation.ts';
+import { learnFromErrors, rememberErrors } from '../lab/errors.ts';
+import { labEvolve } from '../lab/lab.ts';
 
 export interface CycleOptions {
   now?: Date;
@@ -486,6 +488,15 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
       } else if (w.reason) ctx.logger.info('weekly compilation skipped', { reason: w.reason });
     } catch (err) { rep.errors.push(`weekly compilation: ${(err as Error).message.slice(0, 160)}`); }
   }
+  // Error memory: remember this cycle's errors; recurring ones are studied once → a lesson the writers read,
+  // or (code-level) one alert to the owner. Then the lab: judge experiments and add new challengers weekly.
+  try {
+    rememberErrors(ctx, rep.errors, now);
+    const learned = await learnFromErrors(ctx, now);
+    for (const a of learned.alerts) await tg?.send(a).catch(() => {});
+    const lab = await labEvolve(ctx, now);
+    if (lab.length) ctx.logger.info('lab evolved', { changes: lab });
+  } catch (err) { ctx.logger.warn('error memory / lab failed', { error: (err as Error).message }); }
   writeDailyReport(ctx, rep, now);
   ctx.audit.record({ actor: 'autopilot', action: 'cycle.completed', details: { published: rep.published.length, produced: rep.produced?.videoId, errors: rep.errors.length } });
   log.info('cycle done', { published: rep.published.length, analytics: rep.analyticsUpdated.length, produced: rep.produced?.videoId ?? null, errors: rep.errors.length });
