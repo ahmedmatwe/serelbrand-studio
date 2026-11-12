@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { AgentContext } from './base.ts';
 import { allPosts } from '../analytics/learner.ts';
 import { buildPerformance } from '../analytics/analyst.ts';
+import { vaguePenalty } from './text/vague.ts';
 
 const Choice = z.object({
   shorts: z.array(z.object({
@@ -45,11 +46,16 @@ export function hookPatternStats(ctx: AgentContext, now = new Date()) {
  * The strongest, varied pick: candidates within 0.6 of the top score; a pattern proven weak (≥ 3 Shorts, clearly
  * below the best pattern) is dropped; patterns the last Shorts used go last; ties go to the pattern that kept more viewers.
  */
-export function pickHook(cands: { hook: string; pattern: string; score: number }[], st: ReturnType<typeof hookPatternStats>, used: string[] = []) {
+export function pickHook(raw: { hook: string; pattern: string; score: number }[], st: ReturnType<typeof hookPatternStats>, used: string[] = []) {
+  // Vague openings lose viewers (our numbers): their score drops unless they also name something concrete.
+  const cands = raw.map((c) => ({ ...c, score: c.score - vaguePenalty(c.hook) }));
   const top = Math.max(...cands.map((c) => c.score));
   const bestPat = Math.max(0, ...Object.values(st.stats).filter((x) => x.n >= 3).map((x) => x.score));
   const weak = (p: string) => (st.stats[p]?.n ?? 0) >= 3 && st.stats[p]!.score < bestPat - 0.12;
-  const pool = cands.filter((c) => c.score >= top - 0.6 && !weak(c.pattern) && /^[^0-9٠-٩*#]*$/.test(c.hook) && words(c.hook) >= 3 && words(c.hook) <= 14);
+  const ok = (c: (typeof cands)[number]) => !weak(c.pattern) && /^[^0-9٠-٩*#]*$/.test(c.hook) && words(c.hook) >= 3 && words(c.hook) <= 11;
+  // Never the same pattern twice in one day's pack when a close alternative exists.
+  const fresh = cands.filter((c) => ok(c) && !used.includes(c.pattern) && c.score >= top - 1.5);
+  const pool = fresh.length ? fresh.filter((c) => c.score >= Math.max(...fresh.map((x) => x.score)) - 0.6) : cands.filter((c) => c.score >= top - 0.6 && ok(c));
   const recent = [...st.recent, ...used];
   return pool.sort((a, b) => Number(recent.includes(a.pattern)) - Number(recent.includes(b.pattern)) || (st.stats[b.pattern]?.score ?? 0.5) - (st.stats[a.pattern]?.score ?? 0.5) || b.score - a.score)[0];
 }
@@ -75,10 +81,10 @@ export async function chooseHooks(ctx: AgentContext, shorts: { n: number; narrat
     task: 'hooks.choose',
     tier: 'writing',
     system: 'You are the hook editor of "سر الموبايل" (Egyptian Arabic phone-secret Shorts). The FIRST SENTENCE decides if people keep watching. ' +
-      'For EACH Short write 5 genuinely different opening sentences in natural spoken Egyptian Arabic (≤ 12 words, said in under 3 seconds), each using a different pattern: ' +
+      'For EACH Short write 5 genuinely different opening sentences in natural spoken Egyptian Arabic (≤ 10 words, said in under 3 seconds), each using a different pattern: ' +
       '"shock-benefit" (موبايلك بيقدر يعمل كذا ومحدش قالك), "warning" (لو مش عامل كده… / بلاش تعمل كذا قبل ما تشوف ده), "nobody-tells" (الحاجة دي الشركات مش عايزاك تعرفها — only if true), ' +
-      '"challenge" (أراهنك إنك متعرفش…), "result-first" (شوف موبايلك بيعمل إيه لما…), "question" (عارف إن…؟). ' +
-      'Rules: start with the payoff, never with a greeting or "النهارده هقولك"; no codes, digits or menu paths in the hook (they come later); TRUE to the narration — promise only what the Short delivers; it must flow into the narration\'s second sentence. If a Short has `trend`, EVERY candidate must tie that trend (what Egypt is talking about now) to the tip — that is what makes it spread. ' +
+      '"challenge" (أراهنك إنك متعرفش…), "result-first" (شوف موبايلك بيعمل إيه لما…), "question" (عارف إن…؟). Never claim companies hide things unless the narration says so. ' +
+      'Rules: NAME THE EXACT THING the viewer gets — the app/phone and the concrete feature or result they can picture (our best: "الآيفون فيه أصوات مطر وبحر مخفية…", "كود بيفتح قائمة اختبار مخفية"); vague lines lose viewers (our worst: "رسايلك محتاجة تأمين أكتر", "عشان خصوصيتك تفضل في أمان") — never "الحركة دي / الحاجة دي / كده" or abstract safety words without the concrete thing; start with the payoff, never with a greeting or "النهارده هقولك"; no codes, digits or menu paths in the hook (they come later); TRUE to the narration — promise only what the Short delivers; it must flow into the narration\'s second sentence. If a Short has `trend`, EVERY candidate must tie that trend (what Egypt is talking about now) to the tip — that is what makes it spread. ' +
       'Score each 0–10: stops the scroll in 1 second, clear personal benefit or fear of missing out, curiosity that only the end of the Short answers, natural Egyptian speech. ' +
       'Learn from hooksThatKeptViewers / hooksThatLostViewers (our real retention: keptAfterOpening = share still watching after the opening) patternStats (how each pattern kept viewers) and hookRules (rules the analyst learned from our view counts); keep inventing fresher variations of the patterns that work. best = the highest-scoring hook. ' +
       'bridge = ONE short sentence (≤ 10 words) said right after the hook that keeps any information of the replaced currentHook the rest needs (e.g. "فيه كود سري هيكشفلك ده في ثانية."), or "" if the second sentence already flows. JSON only.',
@@ -111,8 +117,10 @@ export async function chooseHooks(ctx: AgentContext, shorts: { n: number; narrat
     if (tv?.bridgeFalse) s.bridge = '';
     const chosen = pickHook(honest, st, out.map((x) => x.pattern ?? ''));
     if (!orig || !chosen) continue;
-    const best = chosen.hook.trim();
-    const bridge = s.bridge.trim() && !/[0-9٠-٩*#]/.test(s.bridge) && words(s.bridge) <= 12 ? s.bridge.trim() : '';
+    // A trailing colon/comma reads as a broken pause ("…حالاً:.") — end every sentence cleanly.
+    const tidy = (x: string) => x.trim().replace(/[\s:،,؛;-]+$/, '');
+    const best = tidy(chosen.hook);
+    const bridge = tidy(s.bridge) && !/[0-9٠-٩*#]/.test(s.bridge) && words(s.bridge) <= 12 ? tidy(s.bridge) : '';
     out.push({ n: s.n, from: firstSentence(orig.narration), to: /[.!؟?…]$/.test(best) ? best : `${best}!`, ...(bridge ? { bridge: /[.!؟?…]$/.test(bridge) ? bridge : `${bridge}.` } : {}), pattern: chosen.pattern, candidates: s.candidates });
   }
   return out;

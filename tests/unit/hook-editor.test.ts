@@ -11,7 +11,7 @@ test('hooks: the bridge keeps what the replaced first sentence said', () => {
 });
 
 test('hooks: only strong candidates, weak patterns dropped, not the same style as the last Shorts', () => {
-  const cands = [C('مكالماتك ممكن تكون بتتحوّل لحد تاني!', 'warning', 9.5), C('أراهنك إنك متعرفش الحركة دي خالص!', 'challenge', 9.2), C('سؤال ضعيف جدا هنا يعني', 'question', 6)];
+  const cands = [C('مكالماتك ممكن تكون بتتحوّل لحد تاني!', 'warning', 9.5), C('أراهنك إنك متعرفش إن مكالماتك ممكن تتحوّل!', 'challenge', 9.2), C('سؤال ضعيف جدا هنا يعني', 'question', 6)];
   const none = { stats: {}, recent: [] as string[] };
   assert.equal(pickHook(cands, none)!.pattern, 'warning', 'the best when nothing is known');
   assert.equal(pickHook(cands, { stats: {}, recent: ['warning'] })!.pattern, 'challenge', 'variety: last Short used warning');

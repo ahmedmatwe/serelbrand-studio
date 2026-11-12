@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { AgentContext } from './base.ts';
 import { allPosts, scorePosts } from '../analytics/learner.ts';
 import { guardCodes } from '../publishing/social.ts';
+import { vaguePenalty } from './text/vague.ts';
 
 const Choice = z.object({
   shorts: z.array(z.object({
@@ -52,6 +53,7 @@ export async function chooseTitles(ctx: AgentContext, shorts: { n: number; title
     tier: 'writing',
     system: 'You are the title editor of "سر الموبايل", an Egyptian Arabic channel of short phone/app secrets (YouTube Shorts, Facebook and Instagram Reels). ' +
       'For EACH Short write 5 genuinely different titles in natural Egyptian Arabic (≤ 60 characters, no hashtags, at most one emoji): e.g. a clear personal benefit, a warning, a surprising "you didn\'t know", a question, a number. ' +
+      'Name the exact thing: the app/phone plus the concrete feature or result the viewer can picture (our best titles: "الآيفون فيه أصوات مطر وبحر مخفية تساعدك تنام", "كود أندرويد بيفتحلك قائمة اختبار مخفية"); vague fear or "do this" titles flopped ("لو معملتش كدة واتساب بتاعك ممكن يتسرق بسهولة" got half the usual views) — never "الحركة دي / كده / بسهولة" or abstract safety words without the concrete thing. ' +
       'Every title must be TRUE to the narration (never promise what the Short does not deliver, never add facts) and name the app/phone when the narration does (people search "واتساب", "آيفون", "سامسونج"). ' +
       'Score each 0–10 for: understood in 2 seconds, makes the viewer curious, says what they gain, matches what people search. ' +
       'best = the highest-scoring title (used on YouTube Shorts: put the searched words — app/phone + benefit — in the first half, ≤ 60 chars). ' +
@@ -69,14 +71,17 @@ export async function chooseTitles(ctx: AgentContext, shorts: { n: number; title
   const out: TitleChoice[] = [];
   for (const s of (r.data as z.infer<typeof Choice>).shorts) {
     const orig = shorts.find((x) => x.n === s.n);
-    const best = noTags(s.best);
+    // Re-rank: the model's score minus a vagueness penalty (concrete titles win on our channel).
+    const ranked = [...s.candidates].map((c) => ({ ...c, adj: c.score - vaguePenalty(c.title) })).sort((a, b) => b.adj - a.adj);
+    const pickTitle = ranked[0] && ranked[0].adj > (s.candidates.find((c) => c.title.trim() === s.best.trim())?.score ?? 0) - vaguePenalty(s.best) + 0.01 ? ranked[0].title : s.best;
+    const best = noTags(pickTitle);
     if (!orig || best.length < 5 || best.length > 90) continue;
     // Phone codes in any headline must be exactly the narration's (models sometimes write them backwards).
     const platforms: Headlines = {};
     for (const [pl, h] of Object.entries(s.platforms ?? {}) as [keyof Headlines, string][]) { const g = h ? guardCodes(noTags(h), orig.narration) : undefined; if (g && g.length >= 5) platforms[pl] = g; }
     const safeBest = guardCodes(best, orig.narration);
     if (!safeBest) continue;
-    out.push({ n: s.n, from: orig.title, to: safeBest, style: s.candidates.find((c) => c.title.trim() === s.best.trim())?.style, candidates: s.candidates, platforms });
+    out.push({ n: s.n, from: orig.title, to: safeBest, style: s.candidates.find((c) => c.title.trim() === pickTitle.trim())?.style, candidates: s.candidates, platforms });
   }
   return out;
 }
