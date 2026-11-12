@@ -204,12 +204,22 @@ export async function enqueue(q: SocialQueue, file: string, t: Omit<SocialTicket
   await q.upload(`${video}.json`, Buffer.from(JSON.stringify({ ...t, done: [], tries: 0, video } satisfies SocialTicket)), 'application/json');
 }
 
+/** Re-encodes a video in place to the format every platform accepts (H.264 yuv420p bt709 limited range, AAC 48 kHz). */
+export async function standardMp4(file: string) {
+  const { ffmpeg } = await import('../media/ffmpeg.ts');
+  const { renameSync } = await import('node:fs');
+  const tmp = `${file}.std.mp4`;
+  await ffmpeg(['-i', file, '-c:v', 'libx264', '-crf', '20', '-preset', 'medium', '-pix_fmt', 'yuv420p', '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-movflags', '+faststart', tmp], { timeoutMs: 10 * 60_000 });
+  renameSync(tmp, file);
+}
+
 /** Posts every due ticket on the platforms it still lacks. Returns a log line per action. */
 export async function processQueue(q: SocialQueue, meta: MetaClient, now = new Date(), tmpDir = '/tmp', tiktok?: TikTokClient): Promise<string[]> {
   const log: string[] = [];
   const posted: PostedEntry[] = [];
   const assets = await q.assets();
-  for (const tAsset of assets.filter((a) => a.name.endsWith('.json') && a.name !== POSTED)) {
+  const failures: FailedEntry[] = [];
+  for (const tAsset of assets.filter((a) => a.name.endsWith('.json') && a.name !== POSTED && a.name !== FAILED)) {
     const t = JSON.parse((await q.download(tAsset.id)).toString('utf8')) as SocialTicket;
     const due = (p: 'facebook' | 'instagram' | 'tiktok') => new Date(t.at?.[p] ?? t.publishAt) <= now;
     const todo = t.platforms.filter((x) => !t.done.includes(x) && due(x));
@@ -220,10 +230,19 @@ export async function processQueue(q: SocialQueue, meta: MetaClient, now = new D
     const file = `${tmpDir}/${t.video}`;
     writeFileSync(file, await q.download(vAsset.id));
     let failed = false;
+    let healed = false;
     for (const p of todo) {
       try {
         const cap = t.captions?.[p] || t.caption;
-        const id = p === 'facebook' ? await meta.facebookReel(file, cap, t.coverMs) : p === 'instagram' ? await meta.instagramReel(file, cap, t.coverMs) : tiktok ? await tiktok.video(file, cap) : (() => { throw new Error('TikTok is not connected'); })();
+        const post = () => p === 'facebook' ? meta.facebookReel(file, cap, t.coverMs) : p === 'instagram' ? meta.instagramReel(file, cap, t.coverMs) : tiktok ? tiktok.video(file, cap) : Promise.reject(new Error('TikTok is not connected'));
+        const id = await post().catch(async (err: Error) => {
+          // Meta rejected the file itself → convert to the plain standard format (yuv420p/bt709, AAC 48 kHz) and retry once.
+          if (healed || !/processing failed|unsupported|format|codec|aspect|ProcessingFailed/i.test(err.message)) throw err;
+          healed = true;
+          await standardMp4(file);
+          log.push(`${p}: re-encoded "${t.title}" to the standard format after: ${err.message.slice(0, 80)}`);
+          return post();
+        });
         t.done.push(p);
         log.push(`${p}: posted "${t.title}" (${id})`);
         posted.push({ platform: p, id, at: new Date().toISOString(), title: t.title, videoId: t.videoId, secretId: t.secretId, family: t.family });
@@ -231,6 +250,7 @@ export async function processQueue(q: SocialQueue, meta: MetaClient, now = new D
         failed = true;
         t.lastError = `${p}: ${(err as Error).message.slice(0, 200)}`;
         log.push(`${p}: FAILED "${t.title}" — ${t.lastError}`);
+        failures.push({ at: new Date().toISOString(), platform: p, title: t.title, error: t.lastError });
       }
     }
     rmSync(file, { force: true });
@@ -245,6 +265,7 @@ export async function processQueue(q: SocialQueue, meta: MetaClient, now = new D
     }
   }
   if (posted.length) await appendPosted(q, posted);
+  if (failures.length) await appendFailed(q, failures).catch(() => {});
   return log;
 }
 
@@ -254,6 +275,19 @@ const POSTED = 'posted-log.json';
 export async function readPosted(q: SocialQueue): Promise<PostedEntry[]> {
   const a = (await q.assets()).find((x) => x.name === POSTED);
   return a ? (JSON.parse((await q.download(a.id)).toString('utf8')) as PostedEntry[]) : [];
+}
+/** Posting failures, read by the autopilot into its error memory (so social errors are learned from too). */
+export interface FailedEntry { at: string; platform: string; title: string; error: string }
+const FAILED = 'failed-log.json';
+export async function readFailed(q: SocialQueue): Promise<FailedEntry[]> {
+  const a = (await q.assets()).find((x) => x.name === FAILED);
+  return a ? (JSON.parse((await q.download(a.id)).toString('utf8')) as FailedEntry[]) : [];
+}
+async function appendFailed(q: SocialQueue, entries: FailedEntry[]) {
+  const a = (await q.assets()).find((x) => x.name === FAILED);
+  const all = [...(a ? (JSON.parse((await q.download(a.id)).toString('utf8')) as FailedEntry[]) : []), ...entries].slice(-300);
+  if (a) await q.remove(a.id);
+  await q.upload(FAILED, Buffer.from(JSON.stringify(all)), 'application/json');
 }
 async function appendPosted(q: SocialQueue, entries: PostedEntry[]) {
   const a = (await q.assets()).find((x) => x.name === POSTED);

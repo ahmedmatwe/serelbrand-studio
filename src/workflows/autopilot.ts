@@ -29,7 +29,7 @@ import { analyzePerformance, isInfraProblem } from '../analytics/analyst.ts';
 import { dailyReport, learnedFamilyWeights, registerPost, runLearning } from '../analytics/learner.ts';
 import { cairoTime, telegramFromEnv, type Telegram } from '../publishing/telegram.ts';
 import { syncBot, type LiveStats } from '../publishing/bot-sync.ts';
-import { readPosted, socialFromEnv } from '../publishing/social.ts';
+import { readFailed, readPosted, socialFromEnv } from '../publishing/social.ts';
 import { family, loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
 import { growLibrary, handleTopicRequests, priorityIds } from '../agents/niche/topic-requests.ts';
 import { scoutTrends, waitingTrends } from '../agents/niche/trend-scout.ts';
@@ -492,7 +492,12 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   // or (code-level) one alert to the owner. Then the lab: judge experiments and add new challengers weekly.
   try {
     const motionFails = ctx.repos.artifacts.listKind<{ n: number; error: string }>('motion_failure').filter((a) => a.created_at >= rep.startedAt).map((a) => `motion graphics fell back to stock: ${a.data.error}`);
-    rememberErrors(ctx, [...rep.errors, ...motionFails], now);
+    // Posting failures from the social workflow (runs separately) since the last time they were read.
+    const soc = socialFromEnv(ctx.config.env);
+    const seen = ctx.repos.artifacts.latest<{ at: string }>(null, 'social_failed_seen')?.data.at ?? '';
+    const socialFails = soc ? (await readFailed(soc.queue).catch(() => [])).filter((f) => f.at > seen) : [];
+    if (socialFails.length) ctx.repos.artifacts.save({ videoId: null, kind: 'social_failed_seen', agent: 'errors', data: { at: socialFails.at(-1)!.at } });
+    rememberErrors(ctx, [...rep.errors, ...motionFails, ...socialFails.map((f) => `social ${f.platform}: ${f.error}`)], now);
     const learned = await learnFromErrors(ctx, now);
     for (const a of learned.alerts) await tg?.send(a).catch(() => {});
     const lab = await labEvolve(ctx, now);

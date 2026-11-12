@@ -60,10 +60,11 @@ test('social: a failed platform is retried next run without re-posting the other
     await enqueue(q, file, { title: 'x', caption: 'x', publishAt: '2026-01-01T00:00:00Z', platforms: ['facebook', 'instagram'] });
     await processQueue(q, meta, new Date('2026-01-02T00:00:00Z'), d);
     assert.deepEqual(posted, ['facebook:x']);
-    assert.equal([...assets.values()].filter((a) => a.name !== 'posted-log.json').length, 2, 'kept for the retry');
+    assert.equal([...assets.values()].filter((a) => a.name !== 'posted-log.json' && a.name !== 'failed-log.json').length, 2, 'kept for the retry');
+    assert.ok([...assets.values()].some((a) => a.name === 'failed-log.json'), 'the failure is logged for the error memory');
     await processQueue(q, meta, new Date('2026-01-02T00:15:00Z'), d);
     assert.deepEqual(posted, ['facebook:x', 'instagram'], 'facebook not posted twice');
-    assert.deepEqual([...assets.values()].map((a) => a.name), ['posted-log.json']);
+    assert.deepEqual([...assets.values()].map((a) => a.name).sort(), ['failed-log.json', 'posted-log.json']);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 

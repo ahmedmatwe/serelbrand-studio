@@ -371,7 +371,8 @@ export async function renderMotion(rootDir: string, plan: MotionPlan, audio: str
     copyFileSync(audio, resolve(pub, plan.audio));
     const props = resolve(pub, 'props.json');
     writeFileSync(props, JSON.stringify(plan));
-    await promisify(execFile)(resolve(rootDir, 'node_modules/.bin/remotion'), ['render', 'motion/index.ts', 'MotionShort', out, `--props=${props}`, `--public-dir=${pub}`, '--codec=h264', '--crf=20', '--log=error'], { cwd: rootDir, timeout: 20 * 60_000, maxBuffer: 32 * 1024 * 1024 });
+    // Standard limited-range yuv420p/bt709: Instagram rejected Remotion's default full-range (yuvj420p) uploads.
+    await promisify(execFile)(resolve(rootDir, 'node_modules/.bin/remotion'), ['render', 'motion/index.ts', 'MotionShort', out, `--props=${props}`, `--public-dir=${pub}`, '--codec=h264', '--crf=20', '--pixel-format=yuv420p', '--color-space=bt709', '--log=error'], { cwd: rootDir, timeout: 20 * 60_000, maxBuffer: 32 * 1024 * 1024 });
   } finally { rmSync(pub, { recursive: true, force: true }); }
 }
 
