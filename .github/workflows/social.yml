@@ -66,6 +66,9 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund --ignore-scripts
         if: steps.gate.outputs.connected == 'true'
+      - name: FFmpeg binary (covers + re-encoding a file a platform rejects)
+        if: steps.gate.outputs.connected == 'true'
+        run: npm rebuild ffmpeg-static && node -e "console.log(require('ffmpeg-static'))"
       - name: Read the latest state (read-only)
         if: steps.gate.outputs.connected == 'true'
         run: |

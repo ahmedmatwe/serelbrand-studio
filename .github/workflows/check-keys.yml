@@ -46,3 +46,22 @@ jobs:
         env:
           META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
           META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
+  instagram-upload:
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - name: Test videos (the stuck Short as queued, with 128k audio, and a Short Instagram accepted)
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          mkdir -p t && cd t
+          gh release download social-queue -R ${{ github.repository }} -p '2026-11-12T14-00-00-000Z__mwdi9bt3__short-1.mp4' -p '2026-11-13T11-00-00-000Z__mwdi9lqx__short-3.mp4'
+          mv 2026-11-12T14*short-1.mp4 a-stuck.mp4; mv 2026-11-13T11*short-3.mp4 c-control.mp4
+          ffmpeg -loglevel error -i a-stuck.mp4 -c:v copy -c:a aac -b:a 128k -ar 48000 -ac 2 b-audio128.mp4
+          ffprobe -v error -show_entries stream=codec_name,pix_fmt,bit_rate,sample_rate,channels -of compact a-stuck.mp4 b-audio128.mp4 c-control.mp4 || true
+      - run: node --no-warnings scripts/check-instagram-upload.ts t/a-stuck.mp4 t/b-audio128.mp4 t/c-control.mp4
+        env:
+          META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+          META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
