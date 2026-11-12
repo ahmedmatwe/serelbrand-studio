@@ -133,6 +133,17 @@ export class MetaClient {
 
   /** Instagram Reel (resumable upload → wait until processed → publish). */
   async instagramReel(file: string, caption: string, coverMs?: number): Promise<string> {
+    // Instagram randomly answers "Request processing failed" to an upload it accepts on the next try (tested
+    // 2026-11-12: same file accepted, a near-identical copy rejected) → a fresh container, up to 3 attempts.
+    for (let i = 0; ; i++) {
+      try { return await this.instagramReelOnce(file, caption, coverMs); } catch (e) {
+        if (i >= 2 || !/processing failed|ProcessingFailed/i.test((e as Error).message)) throw e;
+        await (this.o.sleep ?? sleep)(15_000);
+      }
+    }
+  }
+
+  private async instagramReelOnce(file: string, caption: string, coverMs?: number): Promise<string> {
     const ig = await this.instagramUser();
     if (!ig) throw new Error('No Instagram professional account is linked to the Facebook Page');
     const c = await this.graph(`${ig}/media`, { media_type: 'REELS', upload_type: 'resumable', caption, share_to_feed: 'true', ...(coverMs !== undefined ? { thumb_offset: String(coverMs) } : {}) });
