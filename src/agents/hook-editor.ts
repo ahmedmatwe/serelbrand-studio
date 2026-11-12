@@ -69,7 +69,7 @@ export function hookEvidence(ctx: AgentContext, now = new Date()) {
 }
 
 /** Best opening per Short; a Short the model can't handle keeps its hook. Never throws. */
-export async function chooseHooks(ctx: AgentContext, shorts: { n: number; narration: string; title: string }[], videoId?: string): Promise<HookChoice[]> {
+export async function chooseHooks(ctx: AgentContext, shorts: { n: number; narration: string; title: string; trend?: string }[], videoId?: string): Promise<HookChoice[]> {
   if (!shorts.length) return [];
   const r = await ctx.providers.llm.generateJson({
     task: 'hooks.choose',
@@ -78,11 +78,11 @@ export async function chooseHooks(ctx: AgentContext, shorts: { n: number; narrat
       'For EACH Short write 5 genuinely different opening sentences in natural spoken Egyptian Arabic (≤ 12 words, said in under 3 seconds), each using a different pattern: ' +
       '"shock-benefit" (موبايلك بيقدر يعمل كذا ومحدش قالك), "warning" (لو مش عامل كده… / بلاش تعمل كذا قبل ما تشوف ده), "nobody-tells" (الحاجة دي الشركات مش عايزاك تعرفها — only if true), ' +
       '"challenge" (أراهنك إنك متعرفش…), "result-first" (شوف موبايلك بيعمل إيه لما…), "question" (عارف إن…؟). ' +
-      'Rules: start with the payoff, never with a greeting or "النهارده هقولك"; no codes, digits or menu paths in the hook (they come later); TRUE to the narration — promise only what the Short delivers; it must flow into the narration\'s second sentence. ' +
+      'Rules: start with the payoff, never with a greeting or "النهارده هقولك"; no codes, digits or menu paths in the hook (they come later); TRUE to the narration — promise only what the Short delivers; it must flow into the narration\'s second sentence. If a Short has `trend`, EVERY candidate must tie that trend (what Egypt is talking about now) to the tip — that is what makes it spread. ' +
       'Score each 0–10: stops the scroll in 1 second, clear personal benefit or fear of missing out, curiosity that only the end of the Short answers, natural Egyptian speech. ' +
       'Learn from hooksThatKeptViewers / hooksThatLostViewers (our real retention: keptAfterOpening = share still watching after the opening) patternStats (how each pattern kept viewers) and hookRules (rules the analyst learned from our view counts); keep inventing fresher variations of the patterns that work. best = the highest-scoring hook. ' +
       'bridge = ONE short sentence (≤ 10 words) said right after the hook that keeps any information of the replaced currentHook the rest needs (e.g. "فيه كود سري هيكشفلك ده في ثانية."), or "" if the second sentence already flows. JSON only.',
-    prompt: JSON.stringify({ shorts: shorts.map((s) => ({ n: s.n, title: s.title, currentHook: firstSentence(s.narration), narration: s.narration })), ...hookEvidence(ctx), patternStats: hookPatternStats(ctx).stats, hookRules: ctx.repos.knowledge.byCategory('lesson').map((k) => k.insight).filter((x) => /^Performance \((hook|retention)/.test(x)).slice(0, 6) }),
+    prompt: JSON.stringify({ shorts: shorts.map((s) => ({ n: s.n, title: s.title, currentHook: firstSentence(s.narration), narration: s.narration, ...(s.trend ? { trend: s.trend } : {}) })), ...hookEvidence(ctx), patternStats: hookPatternStats(ctx).stats, hookRules: ctx.repos.knowledge.byCategory('lesson').map((k) => k.insight).filter((x) => /^Performance \((hook|retention)/.test(x)).slice(0, 6) }),
     schema: Choice,
     videoId,
     maxOutputTokens: 3000,

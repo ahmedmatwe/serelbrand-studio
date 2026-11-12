@@ -32,6 +32,7 @@ import { syncBot, type LiveStats } from '../publishing/bot-sync.ts';
 import { readPosted, socialFromEnv } from '../publishing/social.ts';
 import { family, loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
 import { growLibrary, handleTopicRequests, priorityIds } from '../agents/niche/topic-requests.ts';
+import { scoutTrends, waitingTrends } from '../agents/niche/trend-scout.ts';
 
 export interface CycleOptions {
   now?: Date;
@@ -180,7 +181,7 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
     const crashed = new Set(ctx.repos.artifacts.listKind<{ blockers: string[] }>('auto_blocked').filter((a) => a.data.blockers.some((b) => b.startsWith('production failed'))).map((a) => a.video_id));
     const used = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').filter((a) => !crashed.has(a.video_id)).flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
     const picks = pickPhoneSecrets(lib, used, 3, learnedFamilyWeights(ctx), priorityIds(ctx, used));
-    if (picks.length === 3) return picks.map((x): PackTopic => ({ title: x.title, subject: x.id, angle: `${x.steps.join(' ← ')} → ${x.result}`, kind: x.kind, sourceUrl: lib.sources[x.source] ?? '' }));
+    if (picks.length === 3) return picks.map((x): PackTopic => ({ title: x.title, subject: x.id, angle: `${x.trend ? `[TREND «${x.trend.name}»: ${x.trend.link} — hook: ${x.trend.hookAngle}] ` : ''}${x.steps.join(' ← ')} → ${x.result}`, kind: x.kind, sourceUrl: lib.sources[x.source] ?? '' }));
     ctx.logger.child('autopilot').warn('phone-secrets library used up — add reviewed entries to config/phone-secrets.json', { left: picks.length });
     // Out of reviewed entries: fall through to AI-proposed topics (still need a real source and the full gates).
   }
@@ -282,7 +283,7 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
       const usedIds = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
       await handleTopicRequests(ctx, usedIds);
       // Library researcher: keeps ≥ 30 vetted topics ready (phones + social media), once a day when low.
-      const grown = await growLibrary(ctx, usedIds, now);
+      const grown = [...await growLibrary(ctx, usedIds, now), ...await scoutTrends(ctx, usedIds, now).catch((err) => { rep.errors.push(`trend scout: ${(err as Error).message.slice(0, 160)}`); return [] as string[]; })];
       if (grown.length && process.env.BOT_URL && process.env.BOT_INGEST_SECRET) await fetch(`${process.env.BOT_URL.replace(/\/$/, '')}/ingest`, { method: 'POST', headers: { authorization: `Bearer ${process.env.BOT_INGEST_SECRET}`, 'content-type': 'application/json' }, body: JSON.stringify({ messages: grown }) }).catch(() => undefined);
     } catch (err) { rep.errors.push(`topic requests: ${(err as Error).message}`); }
   }
@@ -315,7 +316,12 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     const strat = ctx.repos.artifacts.latest<StrategyOutput>(null, 'content_strategy')?.data;
     const producedNow = new Set([...ctx.repos.videos.list().map((v) => v.title), ...ctx.repos.artifacts.listKind<{ title: string }>('calendar_entry').map((a) => a.data.title)]);
     const longDue = ctx.config.channel.publishing.longPerWeek > 0 && !ok('long') && failed('long') < 3 && Boolean(longPlan(strat, producedNow, now));
-    const packDue = !ok('short') && failed('short') < 3;
+    // A hot trend ("now") spotted after today's pack was made gets ONE extra pack today (trend Short first).
+    const usedNow = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
+    // (counted fresh from the DB, so a pack made earlier in this same cycle counts too: at most one extra a day)
+    const okShorts = ctx.repos.videos.list().filter((v) => v.format === 'short' && v.created_at.slice(0, 10) === day(now) && !ctx.repos.artifacts.latest(v.id, 'auto_blocked')).length;
+    const trendExtra = okShorts === 1 && waitingTrends(ctx, usedNow, now).some((r) => r.entry!.trend!.urgency === 'now');
+    const packDue = (!ok('short') || trendExtra) && failed('short') < 3;
     if (o.produce === false) { rep.skippedProductionReason = 'production disabled for this run'; break; }
     const quota = ctx.repos.artifacts.latest<{ until: string }>(null, 'tts_quota_exhausted')?.data;
     if (quota && quota.until > now.toISOString()) { rep.skippedProductionReason = `voice quota used up — waiting until ${quota.until.slice(0, 16)} UTC`; break; }

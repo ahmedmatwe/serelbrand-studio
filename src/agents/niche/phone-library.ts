@@ -15,6 +15,8 @@ export interface PhoneSecret {
   footage?: string[];
   /** Too well known to be worth a Short (most viewers already use it) — never picked. */
   skip?: string;
+  /** Tied to a trend in Egypt (set by the trend scout): the hook opens on it. */
+  trend?: { name: string; link: string; hookAngle: string; heat: number; urgency: 'now' | 'soon'; at: string };
 }
 export type PhoneUi = { type: 'dialer'; code: string; call?: boolean } | { type: 'settings'; os: 'ios' | 'android'; path: string[] };
 interface Library { sources: Record<string, string>; secrets: PhoneSecret[] }

@@ -69,7 +69,7 @@ export async function fetchRequests(env: { BOT_URL?: string; BOT_INGEST_SECRET?:
 }
 
 /** Drafts + fact-checks one request. Never throws. */
-export async function vetRequest(ctx: AgentContext, req: TopicRequest, strictNovelty = false): Promise<Requested> {
+export async function vetRequest(ctx: AgentContext, req: TopicRequest, strictNovelty = false, maxKnownBy = NOVELTY.maxKnownBy): Promise<Requested> {
   const lib = loadPhoneLibrary(ctx.config.rootDir);
   const known = (lib?.secrets ?? []).map((s) => ({ id: s.id, title: s.title }));
   const example = lib?.secrets.find((s) => s.ui?.type === 'settings') ?? lib?.secrets[0];
@@ -90,7 +90,7 @@ export async function vetRequest(ctx: AgentContext, req: TopicRequest, strictNov
   if (d.verdict === 'duplicate' && known.some((k) => k.id === d.duplicateOf)) return { request: req, status: 'duplicate', duplicateOf: d.duplicateOf };
   if (d.verdict !== 'ok' || !d.entry || d.confidence < 0.75) return { request: req, status: 'rejected', reason: d.reasonArabic || 'مش متأكد إن المعلومة دي صح 100%، فمش هعمل عنها فيديو.' };
   // The researcher's own ideas must be genuinely new to most viewers (the owner's requests are only warned about).
-  if (strictNovelty && (d.knownBy > NOVELTY.maxKnownBy || d.wow < NOVELTY.minWow)) return { request: req, status: 'rejected', reason: `معروف لمعظم الناس (حوالي ${Math.round(d.knownBy)}%) — مش هيضيف جديد`, knownBy: d.knownBy, wow: d.wow };
+  if (strictNovelty && (d.knownBy > maxKnownBy || d.wow < NOVELTY.minWow)) return { request: req, status: 'rejected', reason: `معروف لمعظم الناس (حوالي ${Math.round(d.knownBy)}%) — مش هيضيف جديد`, knownBy: d.knownBy, wow: d.wow };
   const check = await ctx.providers.llm.generateJson({
     task: 'topic.request.factcheck',
     tier: 'writing',
@@ -123,14 +123,19 @@ export function requestedEntries(ctx: AgentContext): Requested[] {
 }
 export function writeRequestedLibrary(ctx: AgentContext): void {
   const file = resolve(ctx.config.rootDir, REQUESTED_FILE);
-  const entries = requestedEntries(ctx).filter((r) => r.entry && (r.status === 'approved' || r.status === 'produced')).map((r) => r.entry!);
+  // A trend topic nobody made within its window is dropped: its hook would talk about yesterday's news.
+  const stale = (r: Requested) => r.status === 'approved' && r.entry?.trend && Date.now() - Date.parse(r.entry.trend.at) > 60 * 3_600_000;
+  const entries = requestedEntries(ctx).filter((r) => r.entry && (r.status === 'approved' || r.status === 'produced') && !stale(r)).map((r) => r.entry!);
   if (!entries.length && !existsSync(file)) return;
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify({ secrets: entries }, null, 1));
 }
 /** Library ids the owner asked for that are waiting to be made (approved requests + requested duplicates). */
-export function priorityIds(ctx: AgentContext, used: Set<string>): string[] {
-  return requestedEntries(ctx).filter((r) => !r.auto).map((r) => (r.status === 'approved' ? r.entry?.id : r.status === 'duplicate' ? r.duplicateOf : undefined)).filter((id): id is string => Boolean(id) && !used.has(id!));
+export function priorityIds(ctx: AgentContext, used: Set<string>, now = new Date()): string[] {
+  // The owner's topics first, then fresh trend topics (hottest first) — a trend dies in a day or two.
+  const trends = requestedEntries(ctx).filter((r) => r.status === 'approved' && r.entry?.trend && now.getTime() - Date.parse(r.entry.trend.at) < 60 * 3_600_000)
+    .sort((a, b) => b.entry!.trend!.heat - a.entry!.trend!.heat).map((r) => r.entry!.id).filter((id) => !used.has(id));
+  return [...requestedEntries(ctx).filter((r) => !r.auto).map((r) => (r.status === 'approved' ? r.entry?.id : r.status === 'duplicate' ? r.duplicateOf : undefined)).filter((id): id is string => Boolean(id) && !used.has(id!)), ...trends];
 }
 
 /**

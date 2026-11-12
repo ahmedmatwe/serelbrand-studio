@@ -11,7 +11,7 @@ import { allPosts, learnedMaxShot, readKnowledge, type Post } from './learner.ts
 import { motionShare, motionStyle, stepStyle } from '../media/motion.ts';
 import { GENES } from '../../motion/types.ts';
 
-const AREAS = ['hook', 'title', 'topic', 'length', 'retention', 'visuals', 'shots', 'editing', 'motion', 'timing', 'caption', 'platform', 'experiment'] as const;
+const AREAS = ['hook', 'title', 'topic', 'trend', 'length', 'retention', 'visuals', 'shots', 'editing', 'motion', 'timing', 'caption', 'platform', 'experiment'] as const;
 const Analysis = z.object({
   diagnoses: z.array(z.object({ title: z.string(), platform: z.string(), cause: z.string(), evidence: z.string() })).max(8),
   actions: z.array(z.object({ area: z.enum(AREAS), platform: z.enum(['all', 'youtube', 'facebook', 'instagram']).default('all'), rule: z.string().min(10).max(300), why: z.string().max(300) })).max(5),
@@ -31,6 +31,8 @@ export interface ShortPerformance {
   title: string; family?: string | null; secretId?: string | null; hook?: string; words?: number; durationSec?: number;
   /** motion = drawn motion graphics, stock = stock footage. */
   look?: 'motion' | 'stock';
+  /** The Egyptian trend this Short rode, if any. */
+  trend?: string;
   /** Motion design genes used, e.g. "motion hook/slam [stagger/tilt]". */
   design?: string;
   /** The editing critic's scores before publishing (0–10) and its notes. */
@@ -82,8 +84,10 @@ export function postNarration(ctx: AgentContext, p: Post): string | undefined {
 function whatItSaid(ctx: AgentContext, p: Post): Omit<ShortPerformance, 'title' | 'family' | 'secretId'> {
   const out: Omit<ShortPerformance, 'title' | 'family' | 'secretId'> = { results: [] };
   if (!p.video_id) return out;
-  const topics = ctx.repos.artifacts.latest<{ topics?: { title: string; subject: string }[] }>(p.video_id, 'calendar_entry')?.data.topics ?? [];
+  const topics = ctx.repos.artifacts.latest<{ topics?: { title: string; subject: string; angle?: string }[] }>(p.video_id, 'calendar_entry')?.data.topics ?? [];
   const i = topics.findIndex((t) => t.subject === p.secret_id || strip(t.title) === strip(p.title));
+  const tr = topics[i]?.angle?.match(/^\[TREND «([^»]+)»/)?.[1];
+  if (tr) out.trend = tr;
   const scene = ctx.repos.artifacts.latest<{ scenes: { n: number; voiceover: string }[] }>(p.video_id, 'script')?.data.scenes.find((s) => s.n === i + 1);
   if (scene) {
     out.hook = (scene.voiceover.match(/[^.!؟?…]+[.!؟?…]+/) ?? [scene.voiceover])[0]!.trim().slice(0, 200);
@@ -128,6 +132,7 @@ export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<
       'Each Short has look = "motion" (drawn motion graphics) or "stock" (stock footage). Compare them on vsPlatformUsual, watchedPercent and whereViewersLeft; set settings.motionShare (0–1, share of Shorts in motion) toward the better look only when the difference is clear; ' +
       'for motion Shorts, use editReview + whereViewersLeft (showing = "motion <scene>: <headline>") to improve the drawn look: rules in area "motion" (e.g. which scene types hold viewers, shorter headlines, faster opening) and settings.motion (camera 0–1, transition whip|zoom|fade, particles, captionSize 52–80, flash 0–0.4) in small steps. ' +
       'Motion Shorts carry their design genes in "design" (theme, background, caption style, transition, hook, headline, phone). The team uses only strong versions and varies them so videos never look alike; when one version clearly keeps more viewers or gets more views, set settings.motion.variants to it (it gets a bonus, it is not forced on every video). ' +
+      'Shorts with "trend" rode a trend in Egypt: compare them with normal Shorts and write rules in area "trend" (which kinds of trends and bridges spread, how fast it must be out, how the hook should tie in) — the trend scout follows them. ' +
       'Read viewerComments too: what people ask, what confused them, what they want next, complaints (too fast, wrong phone, didn\'t work) — turn real patterns into rules (e.g. say which phones/versions it works on, slow down the steps, cover the requested apps). ' +
       'If the numbers are too few to conclude, say so honestly and propose one small experiment (area "experiment") instead of a confident rule. Do not repeat rules already in previousRules unless the new data changes them. ' +
       'summaryArabic: 3–6 short lines in Egyptian Arabic for the owner: what is weak, the likely reason, and what the team will change. JSON only.',
