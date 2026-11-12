@@ -18,3 +18,21 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: cloudflare-test, path: preview, if-no-files-found: ignore, retention-days: 3 }
+  gemini:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Each Gemini key answers (text + voice), status only
+        env:
+          K1: ${{ secrets.GEMINI_API_KEY }}
+          K2: ${{ secrets.GEMINI_API_KEY_2 }}
+        run: |
+          for n in 1 2; do
+            k=$([ $n = 1 ] && echo "$K1" || echo "$K2")
+            [ -n "$k" ] || { echo "key $n: missing"; continue; }
+            t=$(curl -s -o /dev/null -w '%{http_code}' -H "x-goog-api-key: $k" -H 'content-type: application/json' \
+              -d '{"contents":[{"parts":[{"text":"قول أهلاً"}]}]}' https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent)
+            v=$(curl -s -o /dev/null -w '%{http_code}' -H "x-goog-api-key: $k" -H 'content-type: application/json' \
+              -d '{"contents":[{"parts":[{"text":"أهلاً"}]}],"generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Charon"}}}}}' \
+              https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent)
+            echo "key $n: text HTTP $t · voice HTTP $v"
+          done
