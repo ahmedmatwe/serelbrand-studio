@@ -79,9 +79,12 @@ export function chooseVariants(ctx: AgentContext, explore: boolean, rnd: () => n
 }
 
 /** Share of Shorts drawn as motion graphics (the rest use stock footage), tuned by the analyst. Default 0.5. */
-export function motionShare(ctx: AgentContext): number {
-  const v = Number(readKnowledge(ctx, 'motion_share='));
-  return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.5;
+/**
+ * The channel moved to professional motion graphics: every Short is drawn (owner's decision, 2026-11-12). Stock
+ * footage is only the safety net when drawing fails twice. Learning happens inside motion (design genes, style).
+ */
+export function motionShare(_ctx: AgentContext): number {
+  return 1;
 }
 /**
  * Applies the analyst's wished style in small steps (camera ±0.15, captions ±4 px, flash ±0.06) so one bad week

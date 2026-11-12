@@ -491,7 +491,8 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   // Error memory: remember this cycle's errors; recurring ones are studied once → a lesson the writers read,
   // or (code-level) one alert to the owner. Then the lab: judge experiments and add new challengers weekly.
   try {
-    rememberErrors(ctx, rep.errors, now);
+    const motionFails = ctx.repos.artifacts.listKind<{ n: number; error: string }>('motion_failure').filter((a) => a.created_at >= rep.startedAt).map((a) => `motion graphics fell back to stock: ${a.data.error}`);
+    rememberErrors(ctx, [...rep.errors, ...motionFails], now);
     const learned = await learnFromErrors(ctx, now);
     for (const a of learned.alerts) await tg?.send(a).catch(() => {});
     const lab = await labEvolve(ctx, now);

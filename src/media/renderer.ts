@@ -319,10 +319,9 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     const forced = process.env.STUDIO_LOOK;
     if (forced === 'motion' || forced === 'stock') return forced === 'motion' && motionAvailable(this.ctx.config.rootDir) ? 'motion' : 'stock';
     if (this.ctx.providers.llm.name.startsWith('mock') || !motionAvailable(this.ctx.config.rootDir)) return 'stock';
-    const share = motionShare(this.ctx);
-    const recent = [...this.ctx.repos.artifacts.listKind<{ shorts?: RenderedShort[] }>('render').slice(-10).flatMap((a) => a.data.shorts ?? []), ...thisPack].map((x) => x.look).filter(Boolean);
-    const m = recent.filter((x) => x === 'motion').length;
-    return m < share * (recent.length + 1) ? 'motion' : 'stock';
+    // Every Short is motion graphics (stock only as the fallback when drawing fails).
+    void thisPack;
+    return motionShare(this.ctx) > 0 ? 'motion' : 'stock';
   }
 
   /**
@@ -330,13 +329,13 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
    * re-planned once with the critic's own notes and the better of the two kept. Returns its shot log, or
    * undefined (→ stock footage) if anything fails.
    */
-  private async motionShort(o: { videoId: string; dir: string; n: number; audio: string; path: string; d: number; title: string; narration: string; words: WordTime[]; entry?: PhoneSecret; notes: string[] }) {
+  private async motionShort(o: { videoId: string; dir: string; n: number; audio: string; path: string; d: number; title: string; narration: string; words: WordTime[]; entry?: PhoneSecret; notes: string[]; retried?: boolean; retryNote?: string }): Promise<{ start: number; duration: number; said: string; showing: string }[] | undefined> {
     const root = this.ctx.config.rootDir;
     const input = { narration: o.narration, words: o.words, duration: o.d, title: o.title, entry: o.entry, brand: this.ctx.config.channel.channelName || 'سر الموبايل', endCard: 'تابع القناة لسر جديد كل يوم' };
     const said = (p: MotionPlan) => p.captions.map((c) => ({ at: c.a, text: c.text }));
     const score = (r?: { hook: number; visualMatch: number; pacing: number; captions: number }) => (r ? r.hook * 2 + r.visualMatch * 2 + r.pacing + r.captions : -1);
     try {
-      let plan = await planMotion(this.ctx, input, o.videoId);
+      let plan = await planMotion(this.ctx, input, o.videoId, o.retryNote);
       try { await renderMotion(root, plan, o.audio, o.path); } catch (e) {
         // Layout guard (text on top of text): re-plan once with shorter headlines; a second failure → stock.
         const msg = String((e as Error).message).match(/LAYOUT_OVERLAP[^\n]*/)?.[0];
@@ -359,7 +358,15 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       o.notes.push(`Short ${o.n}: design genes ${JSON.stringify(plan.style.variants)}`);
       return plan.scenes.map((x) => ({ start: x.start, duration: Number((x.end - x.start).toFixed(1)), said: plan.captions.filter((c) => c.a >= x.start && c.a < x.end).map((c) => c.text).join(' ').slice(0, 120), showing: `motion ${x.type} ${JSON.stringify(plan.style.variants ?? {}).replace(/"/g, '')}: ${x.headline.text}`.slice(0, 200) }));
     } catch (e) {
-      o.notes.push(`Short ${o.n}: motion graphics failed (${String((e as Error).message).slice(0, 160)}) — stock footage used`);
+      const msg = String((e as Error).message).slice(0, 200);
+      // Second full attempt (fresh plan, told what went wrong) before falling back to stock footage.
+      if (!o.retried) {
+        o.notes.push(`Short ${o.n}: motion graphics failed once (${msg.slice(0, 120)}) — trying again`);
+        return this.motionShort({ ...o, retried: true, retryNote: `The previous attempt failed: ${msg}. Keep the plan simpler (fewer, shorter texts; standard scene types).` });
+      }
+      o.notes.push(`Short ${o.n}: motion graphics failed (${msg.slice(0, 160)}) — stock footage used`);
+      // Into the error memory: a recurring drawing failure is studied and fixed, never silently repeated.
+      this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'motion_failure', agent: 'motion-director', data: { n: o.n, error: msg } });
       return undefined;
     }
   }

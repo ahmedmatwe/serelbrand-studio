@@ -26,3 +26,8 @@ test('errors: the same problem gets the same signature whatever the ids, numbers
   assert.equal(a, b);
   assert.notEqual(a, errorSignature('comments: youtube: HTTP 500 for vid_fef81642664a4f66 "اقفل الأندرويد"'));
 });
+
+test('motion: every Short is motion graphics, whatever an old analyst setting says', async () => {
+  const { motionShare } = await import('../../src/media/motion.ts');
+  assert.equal(motionShare({} as never), 1);
+});

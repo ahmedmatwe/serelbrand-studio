@@ -129,7 +129,7 @@ export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<
       'Find the Shorts that under-performed and explain WHY from the evidence, comparing them with the ones that did better: weak first sentence (does it promise a clear personal benefit within 2 seconds?), unclear/low-curiosity title, a topic few people search for, too long (people left: low % watched), wrong hour, platform mismatch (e.g. good on Instagram but dead on Facebook → Facebook needs a different caption/approach), weak caption. ' +
       'Then give at most 5 concrete, testable rules for the NEXT Shorts (English, imperative, specific — e.g. "Open with the result in ≤ 6 words: \'موبايلك هيقفل لوحده لو…\'", not "make better hooks"). Only rules the team can apply: hook, title, topic choice, length, retention, visuals, timing, caption (per platform), platform. ' +
       'Each Short may carry editReview (the editing critic\'s scores before publishing) and whereViewersLeft (YouTube: share still watching after the opening, and the second most people left with what was on screen and being said then) — use them to find editing/shot problems (areas "shots", "editing", "visuals") and set settings.maxShotSec (3–6 s per shot; lower = faster cuts) only when the evidence points to pacing. ' +
-      'Each Short has look = "motion" (drawn motion graphics) or "stock" (stock footage). Compare them on vsPlatformUsual, watchedPercent and whereViewersLeft; set settings.motionShare (0–1, share of Shorts in motion) toward the better look only when the difference is clear; ' +
+      'Every Short is drawn motion graphics (look = "motion"; "stock" only appears when drawing failed — ignore it as a choice, never suggest going back to stock). Improve the motion itself: compare design genes and style on vsPlatformUsual, watchedPercent and whereViewersLeft; ' +
       'for motion Shorts, use editReview + whereViewersLeft (showing = "motion <scene>: <headline>") to improve the drawn look: rules in area "motion" (e.g. which scene types hold viewers, shorter headlines, faster opening) and settings.motion (camera 0–1, transition whip|zoom|fade, particles, captionSize 52–80, flash 0–0.4) in small steps. ' +
       'Motion Shorts carry their design genes in "design" (theme, background, caption style, transition, hook, headline, phone). The team uses only strong versions and varies them so videos never look alike; when one version clearly keeps more viewers or gets more views, set settings.motion.variants to it (it gets a bonus, it is not forced on every video). ' +
       'Shorts with "trend" rode a trend in Egypt: compare them with normal Shorts and write rules in area "trend" (which kinds of trends and bridges spread, how fast it must be out, how the hook should tie in) — the trend scout follows them. ' +
@@ -163,12 +163,7 @@ export async function analyzePerformance(ctx: AgentContext, now: Date): Promise<
     ctx.repos.knowledge.add({ category: 'learning', insight: `shot_max_sec=${next}`, evidence: 'analyst: where viewers leave / editing critic', confidence: Date.now() / 1e13, sampleSize: n });
     paceLine = `\n✂️ المونتاج: أقصى مدة للقطة بقت ${next} ثانية (كانت ${cur})`;
   }
-  // Motion graphics: share (±0.2 per analysis) and look (small steps).
-  if (a.settings?.motionShare !== undefined && !changedToday('motion_share=')) {
-    const cur2 = motionShare(ctx);
-    const next2 = Number(Math.min(1, Math.max(0, cur2 + Math.sign(a.settings.motionShare - cur2) * Math.min(0.2, Math.abs(a.settings.motionShare - cur2)))).toFixed(2));
-    if (next2 !== cur2) { ctx.repos.knowledge.add({ category: 'learning', insight: `motion_share=${next2}`, evidence: 'analyst: motion vs stock', confidence: Date.now() / 1e13, sampleSize: n }); paceLine += `\n🎨 الموشن جرافيك: ${Math.round(next2 * 100)}% من الفيديوهات (كانت ${Math.round(cur2 * 100)}%)`; }
-  }
+  // Motion graphics share is fixed at 100% (owner's decision); only the look is tuned (small steps).
   if (a.settings?.motion && !changedToday('motion_style=')) {
     const next3 = stepStyle(motionStyle(ctx), a.settings.motion);
     if (next3) { ctx.repos.knowledge.add({ category: 'learning', insight: `motion_style=${JSON.stringify(next3)}`, evidence: 'analyst: motion look', confidence: Date.now() / 1e13, sampleSize: n }); paceLine += '\n🎨 شكل الموشن اتظبط حسب الأرقام وملاحظات الناقد'; }
