@@ -10,6 +10,8 @@ export type MotionScene = { start: number; end: number; headline: Hl } & (
   | { type: 'hook'; icon: IconName; teaserCode?: string; revealAt?: number; question?: Hl; questionAt?: number }
   | { type: 'dialer'; code: string; keys: { k: string; at: number }[]; callAt?: number }
   | { type: 'settings'; os: 'ios' | 'android'; path: string[]; at: number[] }
+  /** Steps inside an app (Instagram, WhatsApp…) or the phone, drawn in the app's colours; each step tapped when said. */
+  | { type: 'app'; app: string; color: string; color2: string; steps: string[]; at: number[]; done?: string }
   | { type: 'card'; icon?: IconName; title: string; rows: { label: string; value: string; tone: 'good' | 'bad' | 'neutral'; at: number; then?: { at: number; value: string; tone: 'good' | 'bad' | 'neutral'; detail?: string } }[]; alert?: { text: string; at: number } }
   | { type: 'alert'; icon: IconName; tone: 'good' | 'bad'; action?: { text: string; accent?: string; at: number; icon: IconName } }
   | { type: 'compat'; items: string[]; code?: string; badge?: string; badgeAt?: number }

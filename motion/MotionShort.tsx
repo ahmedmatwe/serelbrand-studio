@@ -403,6 +403,62 @@ const SettingsScene: React.FC<{ sc: Of<'settings'> }> = ({ sc }) => {
   );
 };
 
+/**
+ * Inside the app: its coloured header and name, one screen per step; the step's row lights up and is tapped
+ * exactly when it is said, the next screen slides in; after the last step a green "done" toast.
+ */
+const AppScene: React.FC<{ sc: Of<'app'> }> = ({ sc }) => {
+  const s = useStyle();
+  const t = useAbsT(sc.start);
+  const n = sc.steps.length;
+  let k = 0;
+  for (let i = 1; i < n; i++) if (t >= sc.at[i]! - 0.15) k = i;
+  const at = sc.at[k] ?? sc.start;
+  const slide = k > 0 ? ease(t, at - 0.15, at + 0.25) : ease(t, sc.start, sc.start + 0.4);
+  const tap = t >= at + 0.15 && t < at + 0.65;
+  const lastDone = t >= (sc.at[n - 1] ?? sc.start) + 0.8;
+  const toast = ease(t, (sc.at[n - 1] ?? sc.start) + 0.8, (sc.at[n - 1] ?? sc.start) + 1.1);
+  const rowY = (i: number) => 300 + i * 100;
+  const TARGET = 1 + (k % 3);
+  const initial = sc.app.trim().charAt(0);
+  return (
+    <>
+      <Camera t={t} a={sc.start + 0.5} b={sc.end - 0.2} origin="540px 940px">
+        <Phone glow={sc.color}>
+          <div style={{ position: 'absolute', inset: 0, background: '#0B1020' }} />
+          {/* app header */}
+          <div style={{ position: 'absolute', top: 64, left: 0, right: 0, height: 120, background: `linear-gradient(120deg, ${sc.color}, ${sc.color2})`, display: 'flex', alignItems: 'center', gap: 18, padding: '0 28px', direction: 'rtl' }}>
+            <div style={{ width: 70, height: 70, borderRadius: 20, background: 'rgba(255,255,255,0.22)', border: '3px solid rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily, fontWeight: 900, fontSize: 40, color: '#fff' }}>{initial}</div>
+            <div style={{ fontFamily, fontWeight: 900, fontSize: 40, color: '#fff', whiteSpace: 'nowrap' }}>{sc.app}</div>
+            <div style={{ marginRight: 'auto', fontFamily, fontWeight: 800, fontSize: 28, color: '#fff', background: 'rgba(0,0,0,0.25)', borderRadius: 20, padding: '4px 16px' }}>{k + 1}/{n}</div>
+          </div>
+          {/* the screen of step k */}
+          <div style={{ position: 'absolute', top: 200, left: 0, right: 0, bottom: 0, transform: `translateX(${(1 - slide) * -480}px)`, opacity: slide }}>
+            {[0, 1, 2, 3, 4].map((i) => {
+              const label = i === TARGET ? sc.steps[k] : undefined;
+              const hot = i === TARGET && (tap || (k === n - 1 && lastDone));
+              const doneRow = hot && k === n - 1 && lastDone;
+              return (
+                <div key={i} style={{ position: 'absolute', top: rowY(i) - 200, left: 24, right: 24, height: label ? 96 : 76, borderRadius: 22, background: doneRow ? `${s.good}33` : hot ? `${sc.color}44` : label ? '#18213F' : CARD, border: `3px solid ${doneRow ? s.good : label ? sc.color : LINE}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 22px', direction: 'rtl', transform: `scale(${hot ? 1.05 : 1})`, boxShadow: label ? `0 0 ${hot ? 40 : 18}px ${sc.color}66` : 'none' }}>
+                  {label
+                    ? <span style={{ fontFamily, fontWeight: 900, fontSize: Math.max(24, Math.min(34, Math.floor(720 / Math.max(10, label.length)))), color: WHITE, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 380 }}>{label}</span>
+                    : <span style={{ width: 130 + (i * 53) % 140, height: 16, borderRadius: 8, background: '#26335E' }} />}
+                  {label && <span style={{ color: doneRow ? s.good : sc.color, fontSize: 36, fontWeight: 900, fontFamily }}>{doneRow ? '✓' : '‹'}</span>}
+                </div>
+              );
+            })}
+            {tap && <Finger x={300} y={rowY(TARGET) - 200 + 16} />}
+          </div>
+          {sc.done && toast > 0 && (
+            <div style={{ position: 'absolute', bottom: 46, left: 24, right: 24, borderRadius: 24, background: s.good, padding: '16px 18px', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: 28, color: '#08240f', textAlign: 'center', opacity: toast, transform: `translateY(${(1 - toast) * 60}px)` }}>✓ {sc.done}</div>
+          )}
+        </Phone>
+      </Camera>
+      <Headline hl={sc.headline} size={80} top={150} />
+    </>
+  );
+};
+
 const CardScene: React.FC<{ sc: Of<'card'> }> = ({ sc }) => {
   const s = useStyle();
   const frame = useCurrentFrame();
@@ -414,6 +470,7 @@ const CardScene: React.FC<{ sc: Of<'card'> }> = ({ sc }) => {
     <>
       <Headline hl={sc.headline} size={80} top={150} />
       {sc.icon && <div style={{ position: 'absolute', top: 290, left: 0, right: 0, display: 'flex', justifyContent: 'center', opacity: ease(t, sc.start + 0.4, sc.start + 0.9) }}><Icon name={sc.icon} size={84} color={s.accent} /></div>}
+      <Camera t={t} a={sc.start + 0.3} b={sc.end + 0.6} origin="540px 900px">
       <Phone glow={flipped ? s.bad : s.good}>
         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(#0F1736, #0A0F22)' }} />
         {sc.alert && <div style={{ position: 'absolute', top: 90, left: 30, right: 30, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: 30, color: '#fff', background: s.bad, borderRadius: 24, padding: '10px 0', opacity: ease(t, sc.alert.at, sc.alert.at + 0.3) }}>{sc.alert.text}</div>}
@@ -432,6 +489,7 @@ const CardScene: React.FC<{ sc: Of<'card'> }> = ({ sc }) => {
           })}
         </div>
       </Phone>
+      </Camera>
     </>
   );
 };
@@ -553,6 +611,7 @@ const SceneView: React.FC<{ sc: MotionScene; endCard: string }> = ({ sc, endCard
     case 'hook': return <HookScene sc={sc} />;
     case 'dialer': return <DialerScene sc={sc} />;
     case 'settings': return <SettingsScene sc={sc} />;
+    case 'app': return <AppScene sc={sc} />;
     case 'card': return <CardScene sc={sc} />;
     case 'alert': return <AlertScene sc={sc} />;
     case 'compat': return <CompatScene sc={sc} />;
@@ -593,14 +652,14 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
   const { durationInFrames } = useVideoConfig();
   const t = frame / FPS;
   const cur = plan.scenes.find((x) => t >= x.start && t < x.end) ?? plan.scenes.at(-1);
-  const tint = cur?.type === 'alert' ? (cur.tone === 'bad' ? s.bad : s.good) : cur?.type === 'cta' || cur?.type === 'compat' ? s.good
+  const tint = cur?.type === 'app' ? cur.color : cur?.type === 'alert' ? (cur.tone === 'bad' ? s.bad : s.good) : cur?.type === 'cta' || cur?.type === 'compat' ? s.good
     : cur?.type === 'card' && cur.rows.some((r) => r.then && t >= r.then.at) ? s.bad : s.accent;
   const kick = Math.max(0, ...plan.beats.map((b) => (t >= b && t < b + 0.3 ? Math.sin((Math.PI * (t - b)) / 0.3) : 0)));
   const flash = Math.max(0, ...plan.beats.map((b) => (t >= b && t < b + 0.25 ? 1 - (t - b) / 0.25 : 0)));
   const sfx: [string, number, number][] = [
     ...plan.scenes.slice(1).map((x) => ['whoosh', x.start, 0.4] as [string, number, number]),
     ...plan.beats.map((b) => ['pop', b, 0.5] as [string, number, number]),
-    ...plan.scenes.flatMap((x) => (x.type === 'dialer' ? x.keys.map((k) => ['tap', k.at, 0.5] as [string, number, number]) : x.type === 'settings' ? x.at.slice(1).map((a) => ['tap', a, 0.5] as [string, number, number]) : x.type === 'alert' && x.tone === 'bad' ? [['alert', x.start + 0.1, 0.35] as [string, number, number]] : [])),
+    ...plan.scenes.flatMap((x) => (x.type === 'dialer' ? x.keys.map((k) => ['tap', k.at, 0.5] as [string, number, number]) : x.type === 'app' ? x.at.map((a) => ['tap', a + 0.15, 0.5] as [string, number, number]) : x.type === 'settings' ? x.at.slice(1).map((a) => ['tap', a, 0.5] as [string, number, number]) : x.type === 'alert' && x.tone === 'bad' ? [['alert', x.start + 0.1, 0.35] as [string, number, number]] : [])),
   ];
   return (
     <StyleCtx.Provider value={s}>
