@@ -139,6 +139,8 @@ export interface YouTubeProvider {
   channelStats?(): Promise<{ subscribers: number; views: number }>;
   /** Share of viewers still watching at each point of the video (0–1 of its length). */
   retentionCurve?(videoId: string): Promise<{ at: number; watching: number }[]>;
+  /** Posts a top-level comment from the channel. */
+  postComment?(videoId: string, text: string): Promise<string>;
   /** Top-level comments on one video that the channel has not answered yet. */
   unansweredComments?(videoId: string): Promise<IncomingComment[]>;
   /** Public reply from the channel under a comment. */

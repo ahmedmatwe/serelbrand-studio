@@ -65,6 +65,12 @@ export class MetaClient {
   }
 
   /** Public reply under a comment, as the Page (needs pages_manage_engagement) or the IG account. */
+  /** A top-level comment from the page on its own Reel. */
+  async postComment(_platform: 'facebook' | 'instagram', mediaId: string, text: string): Promise<string> {
+    const r = await this.graph(`${mediaId}/comments`, { message: text });
+    return (r as { id: string }).id;
+  }
+
   async replyToComment(platform: 'facebook' | 'instagram', commentId: string, text: string): Promise<string> {
     const r = await this.graph(platform === 'instagram' ? `${commentId}/replies` : `${commentId}/comments`, { message: text });
     return String(r.id);

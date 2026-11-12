@@ -13,6 +13,8 @@ import type { IncomingComment } from '../providers/media.ts';
 export interface CommentSources {
   unanswered: (platform: Post['platform'], mediaId: string) => Promise<IncomingComment[]>;
   reply: (platform: Post['platform'], commentId: string, text: string) => Promise<string>;
+  /** Top-level comment from the channel on its own post. */
+  post?: (platform: Post['platform'], mediaId: string, text: string) => Promise<string>;
 }
 export interface Replied { platform: string; author: string; comment: string; reply: string }
 
@@ -81,4 +83,39 @@ export function repliesMessage(replied: Replied[]): string | undefined {
   if (!replied.length) return undefined;
   const lines = replied.slice(0, 6).map((r) => `${NAME[r.platform] ?? r.platform} — ${r.author}: «${r.comment}»\n↩️ «${r.reply}»`);
   return `💬 رديت على ${replied.length} تعليق:\n\n${lines.join('\n\n')}${replied.length > 6 ? `\n\n… و${replied.length - 6} تانيين` : ''}`;
+}
+
+const Starters = z.object({ comments: z.array(z.object({ key: z.string(), text: z.string().min(5).max(160) })) });
+
+/**
+ * Opens the discussion: the channel's own first comment on every new Short — one short, specific question about
+ * that Short in Egyptian Arabic ("جربت الكود؟ قولّي طلعلك إيه 👇"), different each time. Comments make every
+ * platform show the video to more people. Once per post, within 2 days of publishing.
+ */
+export async function starterComments(ctx: AgentContext, src: CommentSources, now = new Date(), max = 6): Promise<string[]> {
+  if (!src.post || ctx.providers.llm.name.startsWith('mock')) return [];
+  const done = new Set(ctx.repos.artifacts.listKind<{ keys: string[] }>('starter_comments').flatMap((a) => a.data.keys));
+  const due = allPosts(ctx).filter((p) => p.platform !== 'tiktok' && new Date(p.publish_at) <= now && now.getTime() - new Date(p.publish_at).getTime() < 2 * 86_400_000 && !done.has(`${p.platform}:${p.external_id}`)).slice(0, max);
+  if (!due.length) return [];
+  const recentTexts = ctx.repos.artifacts.listKind<{ texts?: string[] }>('starter_comments').flatMap((a) => a.data.texts ?? []).slice(-12);
+  const r = await ctx.providers.llm.generateJson({
+    task: 'comments.starter',
+    tier: 'light',
+    system: 'Write the channel\'s own first comment for each Short of "سر الموبايل" (Egyptian Arabic phone/app tips). One short question (≤ 15 words, at most one emoji) that makes viewers answer: about their own experience with exactly this tip ("جربتها؟ طلعلك إيه؟", "مين كان يعرفها قبل كده؟", "عايز سر عن أنهي تطبيق المرة الجاية؟"). ' +
+      'Specific to the Short, natural, never the same wording as `recent`, no links, no @, no asking for personal data. key = the given key. JSON only.',
+    prompt: JSON.stringify({ shorts: due.map((p) => ({ key: `${p.platform}:${p.external_id}`, title: p.title, narration: (postNarration(ctx, p) ?? '').slice(0, 600) })), recent: recentTexts }),
+    schema: Starters,
+    maxOutputTokens: 1500,
+  }).catch(() => undefined);
+  const keys: string[] = [];
+  const texts: string[] = [];
+  const notes: string[] = [];
+  for (const c of (r?.data as z.infer<typeof Starters> | undefined)?.comments ?? []) {
+    const p = due.find((x) => `${x.platform}:${x.external_id}` === c.key);
+    const text = safeReply(c.text);
+    if (!p || !text) continue;
+    try { await src.post(p.platform, p.external_id, text); keys.push(c.key); texts.push(text); } catch (e) { keys.push(c.key); notes.push(`${p.platform}: ${(e as Error).message.slice(0, 120)}`); }
+  }
+  if (keys.length) ctx.repos.artifacts.save({ videoId: null, kind: 'starter_comments', agent: 'community', data: { keys, texts, notes } });
+  return texts;
 }

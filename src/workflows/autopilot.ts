@@ -24,7 +24,7 @@ import { qcBlockers, qualityChecklist } from '../reports/qc.ts';
 import { quotaResetSeconds } from '../providers/tts/gemini-tts.ts';
 import { writePackage } from '../reports/package.ts';
 import { steps } from './steps.ts';
-import { answerComments, repliesMessage } from '../publishing/comments.ts';
+import { answerComments, repliesMessage, starterComments } from '../publishing/comments.ts';
 import { analyzePerformance, isInfraProblem } from '../analytics/analyst.ts';
 import { dailyReport, learnedFamilyWeights, registerPost, runLearning } from '../analytics/learner.ts';
 import { cairoTime, telegramFromEnv, type Telegram } from '../publishing/telegram.ts';
@@ -33,6 +33,7 @@ import { readPosted, socialFromEnv } from '../publishing/social.ts';
 import { family, loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
 import { growLibrary, handleTopicRequests, priorityIds } from '../agents/niche/topic-requests.ts';
 import { scoutTrends, waitingTrends } from '../agents/niche/trend-scout.ts';
+import { weeklyReportArabic } from '../reports/weekly.ts';
 
 export interface CycleOptions {
   now?: Date;
@@ -259,6 +260,11 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
         unanswered: async (pl, id) => pl === 'youtube' ? (yt.unansweredComments ? yt.unansweredComments(id) : []) : social && pl !== 'tiktok' ? social.meta.unansweredComments(pl, id) : [],
         reply: async (pl, cid, text) => { if (pl === 'youtube') return yt.replyToComment!(cid, text); if (!social || pl === 'tiktok') throw new Error('not connected'); return social.meta.replyToComment(pl, cid, text); },
       }, now);
+      // The channel's own first comment (a question) on every new Short opens the discussion.
+      await starterComments(ctx, {
+        unanswered: async () => [], reply: async () => '',
+        post: async (pl, id, text) => { if (pl === 'youtube') { if (!yt.postComment) throw new Error('not supported'); return yt.postComment(id, text); } if (!social || pl === 'tiktok') throw new Error('not connected'); return social.meta.postComment(pl, id, text); },
+      }, now).catch((err) => rep.errors.push(`starter comments: ${(err as Error).message.slice(0, 120)}`));
       rep.commentReplies = r.replied.length;
       if (tg) {
         const msg = repliesMessage(r.replied);
@@ -459,6 +465,12 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   const today = now.toISOString().slice(0, 10);
   if (tg && now.getUTCHours() >= 19 && ctx.repos.artifacts.latest<{ date: string }>(null, 'telegram_daily')?.data.date !== today) {
     await tg.send(dailyReport(ctx, now)).then(() => ctx.repos.artifacts.save({ videoId: null, kind: 'telegram_daily', agent: 'autopilot', data: { date: today } })).catch(() => {});
+  }
+  // Weekly report on Telegram, Fridays from 21:00 Cairo.
+  const isoWeek = `${now.getUTCFullYear()}-${Math.floor((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - Date.UTC(now.getUTCFullYear(), 0, 1)) / (7 * 86_400_000))}`;
+  if (tg && now.getUTCDay() === 5 && now.getUTCHours() >= 19 && ctx.repos.artifacts.latest<{ week: string }>(null, 'telegram_weekly')?.data.week !== isoWeek) {
+    const subs = await liveStats(ctx).youtubeChannel?.().then((c) => c?.subscribers, () => undefined).catch(() => undefined);
+    await tg.send((await weeklyReportArabic(ctx, now, subs)).slice(0, 4000)).then(() => ctx.repos.artifacts.save({ videoId: null, kind: 'telegram_weekly', agent: 'autopilot', data: { week: isoWeek } })).catch(() => {});
   }
   writeDailyReport(ctx, rep, now);
   ctx.audit.record({ actor: 'autopilot', action: 'cycle.completed', details: { published: rep.published.length, produced: rep.produced?.videoId, errors: rep.errors.length } });

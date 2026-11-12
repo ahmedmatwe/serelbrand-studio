@@ -175,6 +175,13 @@ export class RealYouTube implements YouTubeProvider {
   }
 
   /** Replies under a comment as the channel (comments.insert, 50 quota units). */
+  /** A new top-level comment from the channel (e.g. the question that opens the discussion). */
+  async postComment(videoId: string, text: string): Promise<string> {
+    const res = await this.o.fetchImpl(`${API}/youtube/v3/commentThreads?part=snippet`, { method: 'POST', headers: await this.auth({ 'content-type': 'application/json' }), body: JSON.stringify({ snippet: { videoId, topLevelComment: { snippet: { textOriginal: text } } } }) });
+    if (!res.ok) await this.fail(res, 'commentThreads.insert');
+    return ((await res.json()) as { id: string }).id;
+  }
+
   async replyToComment(commentId: string, text: string): Promise<string> {
     const res = await this.o.fetchImpl(`${API}/youtube/v3/comments?part=snippet`, { method: 'POST', headers: await this.auth({ 'content-type': 'application/json' }), body: JSON.stringify({ snippet: { parentId: commentId, textOriginal: text } }) });
     if (!res.ok) await this.fail(res, 'comments.insert');
