@@ -12,7 +12,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 import { TikTokClient } from './tiktok.ts';
 
-export interface SocialTicket { title: string; caption: string; /** Platform-specific caption (written by each platform's specialist). */ captions?: Partial<Record<'facebook' | 'instagram' | 'tiktok', string>>; publishAt: string; /** Own best time per platform (else publishAt). */ at?: Partial<Record<'facebook' | 'instagram' | 'tiktok', string>>; videoId?: string; secretId?: string; family?: string; platforms: ('facebook' | 'instagram' | 'tiktok')[]; done: string[]; tries: number; lastError?: string; video: string }
+export interface SocialTicket { title: string; caption: string; /** Platform-specific caption (written by each platform's specialist). */ captions?: Partial<Record<'facebook' | 'instagram' | 'tiktok', string>>; publishAt: string; /** Own best time per platform (else publishAt). */ at?: Partial<Record<'facebook' | 'instagram' | 'tiktok', string>>; videoId?: string; secretId?: string; family?: string; platforms: ('facebook' | 'instagram' | 'tiktok')[]; /** Cover frame (ms into the Short). */ coverMs?: number; done: string[]; tries: number; lastError?: string; video: string }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -108,19 +108,33 @@ export class MetaClient {
     return (this.igUser = j.instagram_business_account?.id);
   }
 
-  /** Facebook Reel on the Page (resumable upload, published now). */
-  async facebookReel(file: string, description: string): Promise<string> {
+  /** Facebook Reel on the Page (resumable upload, published now), with the cover frame as its thumbnail. */
+  async facebookReel(file: string, description: string, coverMs?: number): Promise<string> {
     const start = await this.graph(`${this.o.pageId}/video_reels`, { upload_phase: 'start' });
     await this.rupload(start.upload_url ?? `https://rupload.facebook.com/video-upload/${this.o.version}/${start.video_id}`, file);
     await this.graph(`${this.o.pageId}/video_reels`, { upload_phase: 'finish', video_id: start.video_id, video_state: 'PUBLISHED', description });
+    if (coverMs !== undefined) await this.reelThumbnail(String(start.video_id), file, coverMs).catch(() => {}); // best effort: the Reel is already up
     return String(start.video_id);
   }
 
+  /** Sets the Reel's preferred thumbnail to the given frame of the video. */
+  private async reelThumbnail(videoId: string, file: string, coverMs: number) {
+    const { extractCover } = await import('../media/cover.ts');
+    const jpg = await extractCover(file, coverMs / 1000, `${file}-cover.jpg`);
+    const form = new FormData();
+    form.set('access_token', this.o.token);
+    form.set('is_preferred', 'true');
+    form.set('source', new Blob([new Uint8Array(readFileSync(jpg))], { type: 'image/jpeg' }), 'cover.jpg');
+    const res = await this.f(`https://graph.facebook.com/${this.o.version}/${videoId}/thumbnails`, { method: 'POST', body: form });
+    const j = (await res.json().catch(() => ({}))) as Record<string, any>;
+    if (!res.ok || j.error) throw new Error(`Meta thumbnail: ${j.error?.message ?? res.status}`);
+  }
+
   /** Instagram Reel (resumable upload → wait until processed → publish). */
-  async instagramReel(file: string, caption: string): Promise<string> {
+  async instagramReel(file: string, caption: string, coverMs?: number): Promise<string> {
     const ig = await this.instagramUser();
     if (!ig) throw new Error('No Instagram professional account is linked to the Facebook Page');
-    const c = await this.graph(`${ig}/media`, { media_type: 'REELS', upload_type: 'resumable', caption, share_to_feed: 'true' });
+    const c = await this.graph(`${ig}/media`, { media_type: 'REELS', upload_type: 'resumable', caption, share_to_feed: 'true', ...(coverMs !== undefined ? { thumb_offset: String(coverMs) } : {}) });
     await this.rupload(c.uri, file);
     for (let i = 0; i < 60; i++) {
       const st = await this.graph(String(c.id), { fields: 'status_code,status' }, 'GET');
@@ -208,7 +222,7 @@ export async function processQueue(q: SocialQueue, meta: MetaClient, now = new D
     for (const p of todo) {
       try {
         const cap = t.captions?.[p] || t.caption;
-        const id = p === 'facebook' ? await meta.facebookReel(file, cap) : p === 'instagram' ? await meta.instagramReel(file, cap) : tiktok ? await tiktok.video(file, cap) : (() => { throw new Error('TikTok is not connected'); })();
+        const id = p === 'facebook' ? await meta.facebookReel(file, cap, t.coverMs) : p === 'instagram' ? await meta.instagramReel(file, cap, t.coverMs) : tiktok ? await tiktok.video(file, cap) : (() => { throw new Error('TikTok is not connected'); })();
         t.done.push(p);
         log.push(`${p}: posted "${t.title}" (${id})`);
         posted.push({ platform: p, id, at: new Date().toISOString(), title: t.title, videoId: t.videoId, secretId: t.secretId, family: t.family });

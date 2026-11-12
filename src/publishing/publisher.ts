@@ -1,4 +1,5 @@
 import { Agent, type AgentContext } from '../agents/base.ts';
+import { coverTime, extractCover } from '../media/cover.ts';
 import type { ComplianceReport } from '../agents/compliance.ts';
 import type { FactCheckReport, Script, SeoPackage } from '../agents/schemas.ts';
 import { composeDescription } from '../agents/seo.ts';
@@ -47,7 +48,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     const { env } = this.ctx.config;
     if ((visibility === 'public' || scheduled) && !env.ALLOW_PUBLIC_PUBLISHING) throw new PublishBlockedError('Public publishing is disabled (ALLOW_PUBLIC_PUBLISHING=false)');
 
-    const render = this.ctx.repos.artifacts.latest<{ videoPath: string; thumbnailPath?: string; captionsPath?: string; captionsEnPath?: string; shorts?: { path: string; title: string; scenes?: number[] }[]; packOnly?: boolean; voice: { provider: string; voice: string; synthetic: boolean }; assets?: { source: string; attribution?: string; pageUrl?: string }[] }>(videoId, 'render');
+    const render = this.ctx.repos.artifacts.latest<{ videoPath: string; thumbnailPath?: string; captionsPath?: string; captionsEnPath?: string; shorts?: { path: string; title: string; scenes?: number[]; durationSec?: number; shotLog?: { start: number; duration: number }[] }[]; packOnly?: boolean; voice: { provider: string; voice: string; synthetic: boolean }; assets?: { source: string; attribution?: string; pageUrl?: string }[] }>(videoId, 'render');
     if (!render && !env.DRY_RUN) throw new PublishBlockedError('No rendered video file yet (rendering arrives in phase 4)');
     if (!env.DRY_RUN && render?.data.voice.provider.toLowerCase().includes('mock')) throw new PublishBlockedError('Experimental/mock voice can never be uploaded');
     if (!env.DRY_RUN && EXPERIMENTAL.test([video.title, render?.data.voice.provider, render?.data.voice.voice].filter(Boolean).join(' '))) {
@@ -93,13 +94,17 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
         this.ctx.repos.artifacts.save({ videoId, kind: 'render', agent: 'title-editor', data: render!.data });
       }
     }
+    // Each Short's cover: the frame where its opening headline is fully on screen (YouTube thumbnail + Reels cover).
+    const cover = async (sh: { path: string; durationSec?: number; shotLog?: { start: number; duration: number }[] }) =>
+      env.DRY_RUN ? undefined : extractCover(sh.path, coverTime(sh), sh.path.replace(/\.mp4$/, '-cover.jpg')).catch(() => undefined);
+    const firstCover = pack ? await cover(render!.data.shorts![0]!) : undefined;
     let attempts = 0;
     const res = await withRetry(
       () => {
         attempts++;
         return yt.upload({
           videoPath: pack ? render!.data.shorts![0]!.path : render?.data.videoPath ?? `mock://render/${videoId}.mp4`,
-          thumbnailPath: pack ? undefined : render?.data.thumbnailPath || undefined,
+          thumbnailPath: pack ? firstCover : render?.data.thumbnailPath || undefined,
           captionsPath: pack ? undefined : render?.data.captionsPath || undefined,
           extraCaptions: !pack && render?.data.captionsEnPath ? [{ path: render.data.captionsEnPath, language: 'en', name: 'English' }] : undefined,
           title: pack ? shortTitle(render!.data.shorts![0]!.title) : seo.primaryTitle,
@@ -127,6 +132,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
         const title = shortTitle(sh.title);
         const r = await yt.upload({
           videoPath: sh.path,
+          thumbnailPath: pack ? await cover(sh) : undefined,
           title,
           description: pack ? packDescription(sh.scenes) : `القصة كاملة: https://youtu.be/${res.youtubeVideoId}\n\n${seo.hashtags.join(' ')} #Shorts`,
           tags: seo.tags,
@@ -170,7 +176,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
           const captions = sc ? await platformCaptions(this.ctx, sh.title, sc.voiceover, seo.hashtags, videoId, { facebook: captionLessons(this.ctx, 'facebook'), instagram: captionLessons(this.ctx, 'instagram') }, headlinesByScene.get(sc.n) ?? {}) : {};
           const { tiktok, ...metaCaptions } = captions as typeof captions & { tiktok?: string };
           tiktokCaptions.push({ title: sh.title, caption: tiktok ?? socialCaption(sh.title, lead, seo.hashtags.slice(0, 5)), facebookAt: at.facebook, instagramAt: at.instagram, ...(social.tiktok && !viaBuffer ? { tiktokAt: ytAt } : {}) });
-          await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), captions: { ...metaCaptions, ...(tiktok ? { tiktok } : {}) }, publishAt: ytAt, at, platforms: ['facebook', 'instagram', ...(social.tiktok && !viaBuffer ? ['tiktok' as const] : [])], videoId, ...secretOf(sh) });
+          await enqueue(social.queue, sh.path, { title: sh.title, caption: socialCaption(sh.title, lead, seo.hashtags), captions: { ...metaCaptions, ...(tiktok ? { tiktok } : {}) }, publishAt: ytAt, at, platforms: ['facebook', 'instagram', ...(social.tiktok && !viaBuffer ? ['tiktok' as const] : [])], coverMs: Math.round(coverTime(sh) * 1000), videoId, ...secretOf(sh) });
         } catch (err) {
           this.ctx.logger.warn('social queue failed', { videoId, short: sh.title, error: (err as Error).message });
         }

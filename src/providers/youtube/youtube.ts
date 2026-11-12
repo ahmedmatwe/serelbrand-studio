@@ -130,7 +130,7 @@ export class RealYouTube implements YouTubeProvider {
     if (locked) warnings.push('YOUTUBE_LOCKED_PRIVATE: YouTube kept this video private — the API project needs the (free) YouTube API audit before automatic public publishing works');
     if (req.thumbnailPath) {
       const r = await this.o.fetchImpl(`${API}/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`, {
-        method: 'POST', headers: await this.auth({ 'content-type': 'image/png' }), body: readFileSync(req.thumbnailPath),
+        method: 'POST', headers: await this.auth({ 'content-type': /\.jpe?g$/i.test(req.thumbnailPath) ? 'image/jpeg' : 'image/png' }), body: readFileSync(req.thumbnailPath),
       });
       if (!r.ok) warnings.push(`Thumbnail not set (HTTP ${r.status}) — custom thumbnails need a phone-verified channel (youtube.com/verify)`);
     }
