@@ -78,11 +78,12 @@ export class MetaClient {
 
   /** Facebook Reel counters (plays from insights when allowed, else likes/comments only). */
   async facebookStats(id: string): Promise<{ views: number; likes?: number; comments?: number; insightsError?: string }> {
-    const base = await this.graph(id, { fields: 'likes.summary(true).limit(0),comments.summary(true).limit(0)' }, 'GET').catch(() => ({} as Record<string, any>));
+    const base = await this.graph(id, { fields: 'views,likes.summary(true).limit(0),comments.summary(true).limit(0)' }, 'GET').catch(() => ({} as Record<string, any>));
     let err = '';
     const ins = await this.graph(`${id}/video_insights`, { metric: 'blue_reels_play_count' }, 'GET').catch((e: Error) => { err = e.message; return undefined; });
     const plays = Number(ins?.data?.[0]?.values?.[0]?.value ?? NaN);
-    return { views: Number.isFinite(plays) ? plays : 0, likes: base.likes?.summary?.total_count, comments: base.comments?.summary?.total_count, ...(err ? { insightsError: err.slice(0, 200) } : {}) };
+    // The Reel's own `views` field is the reliable count (the insights metric is often rejected).
+    return { views: Math.max(Number.isFinite(plays) ? plays : 0, Number(base.views ?? 0) || 0), likes: base.likes?.summary?.total_count, comments: base.comments?.summary?.total_count, ...(err ? { insightsError: err.slice(0, 200) } : {}) };
   }
 
   /** Instagram Reel counters (views/shares/saves from insights when allowed, else likes/comments). */
