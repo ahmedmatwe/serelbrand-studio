@@ -34,6 +34,7 @@ import { family, loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phon
 import { growLibrary, handleTopicRequests, priorityIds } from '../agents/niche/topic-requests.ts';
 import { scoutTrends, waitingTrends } from '../agents/niche/trend-scout.ts';
 import { weeklyReportArabic } from '../reports/weekly.ts';
+import { weeklyCompilation } from './weekly-compilation.ts';
 
 export interface CycleOptions {
   now?: Date;
@@ -471,6 +472,19 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   if (tg && now.getUTCDay() === 5 && now.getUTCHours() >= 19 && ctx.repos.artifacts.latest<{ week: string }>(null, 'telegram_weekly')?.data.week !== isoWeek) {
     const subs = await liveStats(ctx).youtubeChannel?.().then((c) => c?.subscribers, () => undefined).catch(() => undefined);
     await tg.send((await weeklyReportArabic(ctx, now, subs)).slice(0, 4000)).then(() => ctx.repos.artifacts.save({ videoId: null, kind: 'telegram_weekly', agent: 'autopilot', data: { week: isoWeek } })).catch(() => {});
+  }
+  // Weekly long video (Friday evening): the week's Shorts stitched into one widescreen video with chapters.
+  const weeklyIn = resolve(ctx.config.rootDir, 'data', 'weekly-in');
+  if (!ctx.config.env.DRY_RUN && now.getUTCDay() === 5 && now.getUTCHours() >= 19 && existsSync(weeklyIn) && ctx.repos.artifacts.latest<{ week: string }>(null, 'weekly_compilation')?.data.week !== isoWeek) {
+    try {
+      const outDir = resolve(ctx.config.rootDir, 'data', 'renders', `weekly-${isoWeek}`);
+      mkdirSync(outDir, { recursive: true });
+      const w = await weeklyCompilation(ctx, weeklyIn, outDir, now);
+      if (w.youtubeVideoId) {
+        ctx.repos.artifacts.save({ videoId: null, kind: 'weekly_compilation', agent: 'autopilot', data: { week: isoWeek, youtubeVideoId: w.youtubeVideoId, clips: w.clips } });
+        await tg?.send(`🎬 اتنشر فيديو الأسبوع الطويل (${w.clips} سر): https://youtu.be/${w.youtubeVideoId}`).catch(() => {});
+      } else if (w.reason) ctx.logger.info('weekly compilation skipped', { reason: w.reason });
+    } catch (err) { rep.errors.push(`weekly compilation: ${(err as Error).message.slice(0, 160)}`); }
   }
   writeDailyReport(ctx, rep, now);
   ctx.audit.record({ actor: 'autopilot', action: 'cycle.completed', details: { published: rep.published.length, produced: rep.produced?.videoId, errors: rep.errors.length } });

@@ -23,6 +23,7 @@ concurrency:
 permissions:
   contents: write   # save state to the `state` branch
   issues: write     # notifications → issue comment → email
+  actions: read     # fetch the week's Shorts (kept as artifacts) for the weekly compilation
 
 jobs:
   cycle:
@@ -111,6 +112,7 @@ jobs:
       - name: Restore state
         run: |
           mkdir -p data reports/daily
+          touch data/studio.db.start   # renders newer than this are this run's
           if git ls-remote --exit-code --heads origin state > /dev/null; then
             git fetch -q origin state
             git show origin/state:studio.db > data/studio.db
@@ -120,6 +122,19 @@ jobs:
           else
             echo "no state yet — starting fresh"
           fi
+
+      - name: The week's Shorts (Friday evening, for the weekly compilation)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Fridays from 19:00 UTC (21:00 Cairo) only; the app skips if this week's compilation is already up.
+          [ "$(date -u +%u)" = 5 ] && [ "$(date -u +%H)" -ge 19 ] || exit 0
+          since=$(date -u -d '8 days ago' +%FT%TZ)
+          mkdir -p data/weekly-in
+          gh api --paginate "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+            -q ".artifacts[] | select(.name | startswith(\"shorts-\")) | select(.expired | not) | select(.created_at > \"$since\") | .workflow_run.id" \
+            | sort -u | while read id; do gh run download "$id" -p 'shorts-*' -D data/weekly-in/ 2>/dev/null || true; done
+          find data/weekly-in -name '*.mp4' | wc -l
 
       - name: Autopilot cycle
         env:
@@ -156,6 +171,23 @@ jobs:
             n=$(gh issue create --title "سر البراند — إشعارات التشغيل التلقائي" --label autopilot --body "كل تحديثات النظام بتظهر هنا (وبتوصلك على الإيميل)." | grep -o '[0-9]*$')
           fi
           gh issue comment "$n" --body-file data/notify.md
+
+      - name: Keep this run's Shorts 9 days (for the weekly compilation)
+        if: always()
+        run: |
+          mkdir -p keep
+          for v in $(find data/renders -maxdepth 1 -mindepth 1 -type d -newer data/studio.db.start 2>/dev/null); do
+            ls "$v"/short-*.mp4 > /dev/null 2>&1 || continue
+            mkdir -p "keep/$(basename "$v")" && cp "$v"/short-*.mp4 "keep/$(basename "$v")/"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shorts-${{ github.run_id }}
+          path: keep
+          retention-days: 9
+          if-no-files-found: ignore
+          compression-level: 0
 
       - name: Sample frames (for checking Arabic text)
         if: always()
