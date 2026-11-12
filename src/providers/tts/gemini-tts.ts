@@ -64,17 +64,22 @@ export class GeminiTTS implements TTSProvider {
     this.o = { ...o, fetchImpl: o.fetchImpl ?? fetch, limiter: o.limiter ?? new RateLimiter(2, 6 / 60) };
   }
 
-  private readonly models: string[] = [];
+  /** (model, key) pairs in order: each model on each key (a second key = another project's free quota). */
+  private readonly combos: { model: string; key: string }[] = [];
   private idx = 0;
-  /** Model currently used (sticky until its daily quota runs out). */
-  get model(): string { return this.models[this.idx]!; }
+  /** Model currently used (sticky until its daily quota runs out on every key). */
+  get model(): string { return this.combos[this.idx]!.model; }
+  private get models(): unknown[] { return this.combos; }
 
   private async once(text: string, direction?: VoiceDirection): Promise<Buffer> {
-    if (!this.models.length) this.models.push(...this.o.model.split(',').map((m) => m.trim()).filter(Boolean));
+    if (!this.combos.length) {
+      const keys = this.o.apiKey.split(',').map((k) => k.trim()).filter(Boolean);
+      this.combos.push(...this.o.model.split(',').map((m) => m.trim()).filter(Boolean).flatMap((model) => keys.map((key) => ({ model, key }))));
+    }
     await this.o.limiter.take();
     const res = await this.o.fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': this.o.apiKey },
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': this.combos[this.idx]!.key },
       body: JSON.stringify({
         contents: [{ parts: [{ text: ttsPrompt(this.o.style, text, direction) }] }],
         generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: this.o.voice } } } },

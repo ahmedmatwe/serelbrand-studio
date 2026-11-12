@@ -30,6 +30,8 @@ const EnvSchema = z.object({
   YOUTUBE_PROVIDER: providerMode.default('mock'),
   TRENDS_PROVIDER: providerMode.default('mock'),
   GEMINI_API_KEY: z.string().optional(),
+  /** Optional key from a second Google AI Studio project: used when the first one's daily free quota runs out. */
+  GEMINI_API_KEY_2: z.string().optional(),
   GEMINI_MODEL_WRITING: z.string().default('gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3-flash-preview,gemini-flash-latest,gemini-3.5-flash-lite'),
   GEMINI_MODEL_LIGHT: z.string().default('gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest,gemini-3.5-flash,gemini-3.6-flash,gemini-3-flash-preview'),
   /** true = Google AI Studio free tier: cost is recorded as $0. */
@@ -166,6 +168,7 @@ export function loadConfig(opts: { rootDir?: string; envOverrides?: Record<strin
 /** Names of env vars that hold secrets — used by the logger for redaction. */
 export const SECRET_ENV_KEYS = [
   'GEMINI_API_KEY',
+  'GEMINI_API_KEY_2',
   'ANTHROPIC_API_KEY',
   'ELEVENLABS_API_KEY',
   'PEXELS_API_KEY',

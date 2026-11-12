@@ -71,7 +71,7 @@ export function createContext(opts: CreateContextOptions = {}): AgentContext & {
   const real = (mode: string) => mode !== 'mock' && !env.DRY_RUN;
   const useGemini = !opts.llm && real(env.LLM_PROVIDER) && env.LLM_PROVIDER === 'gemini';
   const rawLLM: LLMProvider =
-    opts.llm ?? (useGemini ? new GeminiLLM({ apiKey: env.GEMINI_API_KEY!, models: { writing: env.GEMINI_MODEL_WRITING, light: env.GEMINI_MODEL_LIGHT } }) : new MockLLM());
+    opts.llm ?? (useGemini ? new GeminiLLM({ apiKey: [env.GEMINI_API_KEY, env.GEMINI_API_KEY_2].filter(Boolean).join(','), models: { writing: env.GEMINI_MODEL_WRITING, light: env.GEMINI_MODEL_LIGHT } }) : new MockLLM());
   const zero = { inputPerM: 0, outputPerM: 0 };
   const providers = {
     llm: new TrackedLLM(rawLLM, {
@@ -90,8 +90,8 @@ export function createContext(opts: CreateContextOptions = {}): AgentContext & {
       : env.TTS_PROVIDER === 'gemini'
         // On macOS fall back to the built-in voice; elsewhere (cloud) fail so the next cycle retries — never publish silence.
         ? (process.platform === 'darwin'
-          ? new FallbackTTS(new GeminiTTS({ apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_TTS_MODEL, voice: env.GEMINI_TTS_VOICE, style: env.GEMINI_TTS_STYLE, sleep: opts.sleep }), new MacSayTTS(env.MACOS_VOICE))
-          : new GeminiTTS({ apiKey: env.GEMINI_API_KEY!, model: env.GEMINI_TTS_MODEL, voice: env.GEMINI_TTS_VOICE, style: env.GEMINI_TTS_STYLE, sleep: opts.sleep }))
+          ? new FallbackTTS(new GeminiTTS({ apiKey: [env.GEMINI_API_KEY, env.GEMINI_API_KEY_2].filter(Boolean).join(','), model: env.GEMINI_TTS_MODEL, voice: env.GEMINI_TTS_VOICE, style: env.GEMINI_TTS_STYLE, sleep: opts.sleep }), new MacSayTTS(env.MACOS_VOICE))
+          : new GeminiTTS({ apiKey: [env.GEMINI_API_KEY, env.GEMINI_API_KEY_2].filter(Boolean).join(','), model: env.GEMINI_TTS_MODEL, voice: env.GEMINI_TTS_VOICE, style: env.GEMINI_TTS_STYLE, sleep: opts.sleep }))
         : new MacSayTTS(env.MACOS_VOICE),
     // Cloudflare image generation can leave a free allocation and become billable. FREE_ONLY keeps it off.
     image: !env.FREE_ONLY && real(env.IMAGE_PROVIDER) && env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN ? new CloudflareImage({ accountId: env.CLOUDFLARE_ACCOUNT_ID, token: env.CLOUDFLARE_API_TOKEN, sleep: opts.sleep }) : new MockImage(),

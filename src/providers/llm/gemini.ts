@@ -3,6 +3,7 @@ import { ProviderError, ValidationError } from '../../core/errors.ts';
 import type { LLMProvider, LLMRequest, LLMResult, ModelTier } from './types.ts';
 
 export interface GeminiOptions {
+  /** One key, or several comma-separated keys from separate projects (each project has its own free daily quota). */
   apiKey: string;
   models: Record<ModelTier, string>;
   /** Injected for tests. Defaults to global fetch. */
@@ -57,12 +58,14 @@ export class GeminiLLM implements LLMProvider {
     };
   }
 
-  private async call(model: string, system: string, userText: string, maxOutputTokens: number, images: { mimeType: string; data: string; label?: string }[] = []): Promise<{ text: string; inTok: number; outTok: number }> {
+  private get keys(): string[] { return this.o.apiKey.split(',').map((k) => k.trim()).filter(Boolean); }
+
+  private async call(model: string, system: string, userText: string, maxOutputTokens: number, images: { mimeType: string; data: string; label?: string }[] = [], key = this.keys[0]!): Promise<{ text: string; inTok: number; outTok: number }> {
     let res: Response;
     try {
       res = await this.o.fetchImpl(`${this.o.baseUrl}/models/${encodeURIComponent(model)}:generateContent`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': this.o.apiKey },
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
           contents: [{ role: 'user', parts: [{ text: userText }, ...images.flatMap((im) => [...(im.label ? [{ text: im.label }] : []), { inlineData: { mimeType: im.mimeType, data: im.data } }])] }],
@@ -99,15 +102,17 @@ export class GeminiLLM implements LLMProvider {
   private async callWithFallback(models: string[], system: string, userText: string, maxOutputTokens: number, images?: { mimeType: string; data: string; label?: string }[]) {
     let last: unknown;
     // Models whose DAILY free quota is used up are skipped for the rest of this run (no wasted calls/backoff).
-    const live = models.filter((m) => !exhaustedToday.has(m));
-    for (const model of live.length ? live : models) {
+    // Each model on each key (best model first; a second key = another project's quota for the same model).
+    const combos = models.flatMap((model) => this.keys.map((key, k) => ({ model, key, id: `${k}:${model}` })));
+    const live = combos.filter((c) => !exhaustedToday.has(c.id));
+    for (const c of live.length ? live : combos) {
       try {
-        return { ...(await this.call(model, system, userText, maxOutputTokens, images)), model };
+        return { ...(await this.call(c.model, system, userText, maxOutputTokens, images, c.key)), model: c.model };
       } catch (err) {
         last = err;
         const m = (err as Error).message;
         if (!(err instanceof ProviderError) || !/HTTP (503|429|404)/.test(m)) throw err;
-        if (/HTTP 429/.test(m) && /PerDay|per ?day|free_tier_requests/i.test(m)) exhaustedToday.add(model);
+        if (/HTTP 429/.test(m) && /PerDay|per ?day|free_tier_requests/i.test(m)) exhaustedToday.add(c.id);
       }
     }
     throw last;
