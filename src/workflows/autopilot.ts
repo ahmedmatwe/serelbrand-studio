@@ -37,6 +37,8 @@ import { weeklyReportArabic } from '../reports/weekly.ts';
 import { weeklyCompilation } from './weekly-compilation.ts';
 import { learnFromErrors, rememberErrors } from '../lab/errors.ts';
 import { labEvolve } from '../lab/lab.ts';
+import { checkRecords, checkRuns, healStuckTickets, newFindings, pendingTitles, watchdogMessage, type Finding } from '../agents/watchdog.ts';
+import { tmpdir } from 'node:os';
 
 export interface CycleOptions {
   now?: Date;
@@ -488,6 +490,25 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
       } else if (w.reason) ctx.logger.info('weekly compilation skipped', { reason: w.reason });
     } catch (err) { rep.errors.push(`weekly compilation: ${(err as Error).message.slice(0, 160)}`); }
   }
+  // The watchdog: hunts problems across the whole pipeline every cycle, fixes what is safe to fix, reports the rest
+  // once (and into the error memory below).
+  try {
+    const soc = socialFromEnv(ctx.config.env);
+    const found: Finding[] = [];
+    let pending: string[] = [];
+    if (soc && !ctx.config.env.DRY_RUN) {
+      found.push(...await healStuckTickets(soc.queue, tmpdir()).catch(() => []));
+      pending = await pendingTitles(soc.queue).catch(() => []);
+    }
+    const repo = process.env.GITHUB_REPOSITORY, ghToken = process.env.GITHUB_TOKEN;
+    if (repo && ghToken) found.push(...await checkRuns(repo, ghToken, now).catch(() => []));
+    found.push(...checkRecords(ctx, now, pending));
+    const fresh = newFindings(ctx, found, now);
+    for (const f of fresh.filter((x) => !x.fixed)) rep.errors.push(`watchdog: ${f.text}`);
+    const msg = watchdogMessage(fresh);
+    if (msg) await tg?.send(msg.slice(0, 4000)).catch(() => {});
+    if (fresh.length) ctx.repos.artifacts.save({ videoId: null, kind: 'watchdog_report', agent: 'watchdog', data: { at: now.toISOString(), findings: fresh } });
+  } catch (err) { ctx.logger.warn('watchdog failed', { error: (err as Error).message }); }
   // Error memory: remember this cycle's errors; recurring ones are studied once → a lesson the writers read,
   // or (code-level) one alert to the owner. Then the lab: judge experiments and add new challengers weekly.
   try {

@@ -23,7 +23,7 @@ concurrency:
 permissions:
   contents: write   # save state to the `state` branch
   issues: write     # notifications → issue comment → email
-  actions: read     # fetch the week's Shorts (kept as artifacts) for the weekly compilation
+  actions: write    # the week's Shorts (artifacts) + the watchdog re-runs a failed social/bot run
 
 jobs:
   cycle:
