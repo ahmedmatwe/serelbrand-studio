@@ -45,7 +45,8 @@ const toneColor = (s: MotionStyle, t?: Tone | 'good' | 'bad' | 'neutral') => (t 
 
 const f = (s: number) => Math.round(s * FPS);
 const ease = (t: number, a: number, b: number) => interpolate(t, [a, b], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic) });
-const pop = (frame: number, fps: number, delay = 0) => spring({ frame: frame - delay, fps, config: { damping: 12, stiffness: 160, mass: 0.7 } });
+// Snappy (≈ 0.25 s, small overshoot): professional motion grabs the eye, it never floats in.
+const pop = (frame: number, fps: number, delay = 0) => spring({ frame: frame - delay, fps, config: { damping: 13, stiffness: 300, mass: 0.55 } });
 /** Seconds since the start of the whole Short, inside a scene's Sequence. */
 const useAbsT = (start: number) => useCurrentFrame() / FPS + start;
 
@@ -133,15 +134,16 @@ const Shell: React.FC<{ len: number; children: React.ReactNode; instant?: boolea
   const s = useStyle();
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const inn = instant ? 1 : spring({ frame, fps, config: { damping: 18, stiffness: 140 } });
-  const out = interpolate(frame, [len - 7, len + 3], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.in(Easing.cubic) });
-  const op = Math.min(1, inn * 1.5) * (1 - out);
+  // fast in (≈ 7 frames) with a punch, fast out (4 frames) with motion blur in the direction of travel
+  const inn = instant ? 1 : spring({ frame, fps, config: { damping: 20, stiffness: 420, mass: 0.6 } });
+  const out = interpolate(frame, [len - 2, len + 3], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.in(Easing.quad) });
+  const op = Math.min(1, inn * 2.2) * (1 - out);
   const kind = V(s).transition;
   const tr = kind === 'whip'
-    ? `translateX(${(1 - inn) * -420 + out * 420}px) scale(${0.94 + 0.06 * inn}) skewX(${(1 - inn) * 6 - out * 6}deg)`
-    : kind === 'zoom' ? `scale(${0.7 + 0.3 * inn + out * 0.4})`
-    : kind === 'rise' ? `translateY(${(1 - inn) * 160 - out * 160}px) rotate(${(1 - inn) * 2}deg)` : `scale(${0.97 + 0.03 * inn})`;
-  const blur = kind === 'fade' ? 0 : (1 - inn) * 10 + out * 10;
+    ? `translateX(${(1 - inn) * -900 + out * 900}px) scale(${1.08 - 0.08 * inn}) skewX(${(1 - inn) * 10 - out * 10}deg)`
+    : kind === 'zoom' ? `scale(${1.35 - 0.35 * inn + out * 0.5})`
+    : kind === 'rise' ? `translateY(${(1 - inn) * 520 - out * 520}px) scale(${1.06 - 0.06 * inn})` : `scale(${1.12 - 0.12 * inn + out * 0.1})`;
+  const blur = (1 - inn) * 12 + out * 12;
   return <AbsoluteFill style={{ opacity: op, transform: tr, filter: `blur(${blur}px)` }}>{children}</AbsoluteFill>;
 };
 
@@ -157,7 +159,7 @@ const Headline: React.FC<{ hl: Hl; delay?: number; size?: number; top?: number; 
     return (
       <div style={{ position: 'absolute', top, left: 50, right: 50, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: fit, lineHeight: 1.25, color: WHITE, textShadow: '0 8px 30px rgba(0,0,0,0.5)' }}>
         <span data-qa="headline" style={{ display: 'inline-block' }}>{hl.text.split(/\s+/).map((w, i) => {
-          const q = pop(frame, fps, delay + i * 3);
+          const q = pop(frame, fps, delay + i * 2);
           return <span key={i} style={{ display: 'inline-block', margin: '0 10px', opacity: q, transform: `translateY(${(1 - q) * 60}px) rotate(${(1 - q) * -8}deg)`, color: accent.has(w) ? toneColor(st, hl.tone) : WHITE }}>{w}</span>;
         })}</span>
       </div>
@@ -862,6 +864,47 @@ const MockBody: React.FC<{ sc: Of<'mock'> }> = ({ sc }) => {
   }
 };
 
+/**
+ * A mouse pointer that glides to each item of a screen right before it is said and clicks it (ripple) — the
+ * reference's "someone is using it" feel. Row geometry per screen kind (CSS px before zoom).
+ */
+const ROWS: Partial<Record<Of<'mock'>['kind'], { first: number; pitch: number; x: (zoom: number) => number }>> = {
+  checklist: { first: 30, pitch: 90, x: (z) => 1080 - 80 - 70 * z },
+  ranked: { first: 48, pitch: 120, x: (z) => 1080 - 80 - 84 * z },
+  notify: { first: 60, pitch: 142, x: (z) => 1080 - 80 - 90 * z },
+  price: { first: 55, pitch: 136, x: (z) => 80 + 90 * z },
+  search: { first: 184, pitch: 134, x: () => 540 },
+  doc: { first: 28, pitch: 86, x: (z) => 1080 - 80 - 120 * z },
+};
+const Cursor: React.FC<{ sc: Of<'mock'>; top: number; zoom: number; header: boolean }> = ({ sc, top, zoom, header }) => {
+  const s = useStyle();
+  const t = useCurrentFrame() / FPS + sc.start;
+  const g = ROWS[sc.kind];
+  if (!g) return null;
+  const base = 34 + (header ? 112 : 0);
+  const pts = sc.items.slice(0, 5).map((it, i) => ({ at: it.at, x: g.x(zoom), y: top + (base + g.first + i * g.pitch) * zoom }));
+  if (sc.kind === 'search') pts.unshift({ at: sc.start + 0.3, x: 760, y: top + (34 + 50) * zoom });
+  if (!pts.length) return null;
+  // where it is: travelling (0.35 s) to the next point before its moment, resting after
+  let x = 1150, y = 1500;
+  for (const [i, p] of pts.entries()) {
+    const from = i === 0 ? { x: 1150, y: 1500 } : pts[i - 1]!;
+    const k = ease(t, p.at - 0.4, p.at - 0.05);
+    if (t >= p.at - 0.4) { x = from.x + (p.x - from.x) * k; y = from.y + (p.y - from.y) * k; }
+  }
+  const last = [...pts].reverse().find((p) => t >= p.at - 0.05);
+  const since = last ? t - last.at : 9;
+  const press = since >= 0 && since < 0.18 ? 0.85 : 1;
+  return (
+    <>
+      {since >= 0 && since < 0.5 && <div style={{ position: 'absolute', left: last!.x - 70, top: last!.y - 70, width: 140, height: 140, borderRadius: '50%', border: `6px solid ${s.accent}`, opacity: 1 - since / 0.5, transform: `scale(${0.4 + since * 2})` }} />}
+      <svg width={74} height={74} viewBox="0 0 24 24" style={{ position: 'absolute', left: x - 10, top: y - 6, transform: `scale(${press})`, transformOrigin: '10px 6px', filter: 'drop-shadow(0 6px 10px rgba(0,0,0,.55))' }}>
+        <path d="M4 2 L4 19 L8.5 14.8 L11.4 21.4 L14.3 20.1 L11.5 13.6 L17.6 13.4 Z" fill="#fff" stroke="#111" strokeWidth={1.2} strokeLinejoin="round" />
+      </svg>
+    </>
+  );
+};
+
 const MockScene: React.FC<{ sc: Of<'mock'> }> = ({ sc }) => {
   const s = useStyle();
   const frame = useCurrentFrame();
@@ -888,6 +931,7 @@ const MockScene: React.FC<{ sc: Of<'mock'> }> = ({ sc }) => {
         )}
         <MockBody sc={sc} />
       </div>
+      <Cursor sc={sc} top={top} zoom={zoom} header={Boolean(header)} />
       {sc.final && t >= sc.final.at - 0.05 && (
         <div style={{ position: 'absolute', top: 1290, left: 0, right: 0, textAlign: 'center', transform: `scale(${fin})` }}>
           <span data-qa="final" style={{ display: 'inline-block', padding: '16px 44px', borderRadius: 60, background: sc.final.tone === 'good' ? s.good : s.bad, ...txt(44, '#fff', 900), direction: 'rtl' }}>{sc.final.text}</span>
@@ -1001,6 +1045,13 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
     : cur?.type === 'card' && cur.rows.some((r) => r.then && t >= r.then.at) ? s.bad : s.accent;
   const kick = Math.max(0, ...plan.beats.map((b) => (t >= b && t < b + 0.3 ? Math.sin((Math.PI * (t - b)) / 0.3) : 0)));
   const flash = Math.max(0, ...plan.beats.map((b) => (t >= b && t < b + 0.25 ? 1 - (t - b) / 0.25 : 0)));
+  const curStart = cur?.start ?? 0, curEnd = cur?.end ?? plan.duration;
+  const sinceCut = t - curStart;
+  const punch = cur && curStart > 0 && sinceCut < 0.35 ? 0.05 * (1 - sinceCut / 0.35) ** 2 : 0;
+  const camPush = 0.035 * Math.min(1, Math.max(0, sinceCut / Math.max(0.5, curEnd - curStart))) + punch;
+  const camDrift = 6 * Math.sin(t * 0.7);
+  // brand-colour wipe sweeping across at every cut (≈ 0.2 s)
+  const wipe = cur && curStart > 0 && sinceCut < 0.22 ? sinceCut / 0.22 : -1;
   const sfx: [string, number, number][] = [
     ...plan.scenes.slice(1).map((x) => ['whoosh', x.start, 0.4] as [string, number, number]),
     ...plan.beats.map((b) => ['pop', b, 0.5] as [string, number, number]),
@@ -1011,7 +1062,8 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
       <AbsoluteFill style={{ ...vars(th), background: s.bg1 }}>
         <Background tint={tint} />
         {s.particles && <Particles color={tint} />}
-        <AbsoluteFill style={{ transform: `scale(${1 + 0.03 * kick})` }}>
+        {/* never still: a slow push-in through each scene + a punch when a scene starts */}
+        <AbsoluteFill style={{ transform: `scale(${1 + 0.03 * kick + camPush}) translate(${camDrift}px, 0)` }}>
           {plan.scenes.map((sc, i) => (
             <Sequence key={i} from={f(sc.start)} durationInFrames={Math.max(1, f(sc.end - sc.start) + 10)}>
               <Shell len={f(sc.end - sc.start)} instant={i === 0}><SceneView sc={sc} endCard={plan.endCard} /></Shell>
@@ -1021,6 +1073,7 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
           {plan.scenes.map((sc, i) => <PropLayer key={`p${i}`} props={sc.props} />)}
         </AbsoluteFill>
         <AbsoluteFill style={{ background: '#fff', opacity: s.flash * flash }} />
+        {wipe >= 0 && <AbsoluteFill style={{ background: `linear-gradient(100deg, transparent ${wipe * 140 - 40}%, ${s.accent}cc ${wipe * 140 - 25}%, ${s.accent}ee ${wipe * 140 - 18}%, transparent ${wipe * 140}%)`, mixBlendMode: 'screen', opacity: 0.85 }} />}
         <Captions caps={plan.captions} />
         <LayoutGuard />
         <div style={{ position: 'absolute', top: 0, left: 0, height: 10, width: `${(frame / durationInFrames) * 100}%`, background: s.accent, boxShadow: `0 0 20px ${s.accent}` }} />
