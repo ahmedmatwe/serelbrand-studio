@@ -17,6 +17,7 @@ import { renderThumbnail } from './thumbnail.ts';
 import { cuesFor, mixSoundtrackSafe, pickMusic } from './sound.ts';
 import { z } from 'zod';
 import { learnedMaxShot } from '../analytics/learner.ts';
+import { tightenNarration } from './tighten.ts';
 import { motionAvailable, motionShare, planMotion, renderMotion, type MotionPlan } from './motion.ts';
 
 export type RenderSize = 'full' | 'preview';
@@ -384,6 +385,17 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     // Clips already used anywhere in the pack + clips that failed the modesty audit are never picked again.
     const banned = new Set<string>(o.timed.flatMap((x) => (x.shots ?? []).map((sh) => sh.visual?.asset.id).filter((id): id is string => Boolean(id))));
     for (const [i, s] of o.timed.entries()) {
+      // Continuous narration: pauses between sentences shortened to a breath; words and shots move with the cut.
+      const tightPath = resolve(o.dir, `short-${s.n}.tight.wav`);
+      const tr = await tightenNarration(s.audioPath, tightPath, s.duration).catch(() => undefined);
+      if (tr && tr.saved >= 0.15) {
+        Object.assign(s, {
+          audioPath: tightPath, duration: Number((s.duration - tr.saved).toFixed(3)),
+          words: s.words?.map((w) => ({ ...w, start: tr.map(w.start), end: tr.map(w.end) })),
+          shots: s.shots?.map((x) => ({ ...x, start: tr.map(x.start), duration: Math.max(0.3, tr.map(x.start + x.duration) - tr.map(x.start)) })),
+        });
+        o.notes.push(`Short ${s.n}: ${tr.removed.length} pauses tightened (−${tr.saved}s of silence)`);
+      }
       // A Short slightly over the limit is sped up a little (≤ 12%, still natural) instead of losing its ending.
       const tempo = s.duration > SHORT_MAX_SEC + 1 ? Math.min(1.12, s.duration / SHORT_MAX_SEC) : 1;
       const full = s.duration / tempo;
