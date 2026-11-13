@@ -21,24 +21,24 @@ const FF = process.env.FFMPEG_PATH || (createRequire(import.meta.url)('ffmpeg-st
 /** What the edit needs. peakMax = latest acceptable peak (s) for sounds that must hit instantly. */
 /** Relevance: the sound's own name/tags must say it IS this kind of sound; some words always disqualify. */
 const MUST: Record<string, RegExp> = {
-  whoosh: /whoosh|swoosh|swish|whip|transition|woosh/i, 'swipe-up': /swipe|swoosh|whoosh|swish|interface|ui/i, impact: /impact|hit|boom|punch|thud|cinematic/i,
-  click: /click|button|mouse|tap|ui/i, pop: /pop|bubble|blip|ui/i, typing: /typing|keyboard|keys/i, camera: /camera|shutter|photo/i,
+  whoosh: /whoosh|swoosh|swish|whip|transition|woosh/i, 'swipe-up': /swipe|swoosh|whoosh|swish|interface|ui/i, impact: /impact|boom|cinematic|trailer|braam|sub drop|hit/i,
+  click: /click|button|mouse|tap|ui/i, pop: /pop|bubble|blip|ui/i, typing: /typing|keyboard/i, camera: /camera|shutter|photo/i,
   cash: /cash|register|coin|money|ching/i, notify: /notification|notify|ding|alert|message|chime/i, success: /success|correct|positive|win|complete|chime/i,
   error: /error|wrong|fail|buzz|denied|negative/i,
 };
-const NEVER = /axe|sword|knife|gun|shot|blood|scream|fart|burp|fish|oil|boil|fry|food|animal|dog|cat|bird|kiss|sex|horror|gore|zombie|explosion|bomb|siren|church|bell tower|music|song|vocal|voice|speech|laugh/i;
+const NEVER = /punch|boxing|fist|pillow|slap|body|power ?up|bouncing|game over|8.?bit|retro|beep\b|axe|sword|knife|gun|shot|blood|scream|fart|burp|fish|oil|boil|fry|food|animal|dog|cat|bird|kiss|sex|horror|gore|zombie|explosion|bomb|siren|church|bell tower|music|song|vocal|voice|speech|laugh/i;
 
 export const ROLES: Record<string, { q: string[]; dur: [number, number]; maxLen: number; peakMax?: number; keep: number; gainDb: number }> = {
   whoosh: { q: ['fast whoosh', 'swoosh transition', 'whip pan whoosh', 'short swish'], dur: [0.15, 1.2], maxLen: 0.6, keep: 4, gainDb: -6 },
   'swipe-up': { q: ['ui swipe', 'swoosh up', 'interface swipe'], dur: [0.1, 1.0], maxLen: 0.5, keep: 3, gainDb: -7 },
-  impact: { q: ['cinematic hit', 'impact punch', 'trailer hit short', 'boom impact'], dur: [0.2, 2.5], maxLen: 1.2, peakMax: 0.06, keep: 4, gainDb: -5 },
+  impact: { q: ['cinematic boom hit', 'trailer impact', 'transition impact hit', 'sub boom', 'braam hit'], dur: [0.2, 2.5], maxLen: 1.2, peakMax: 0.06, keep: 4, gainDb: -5 },
   click: { q: ['mouse click', 'ui click', 'button click'], dur: [0.02, 0.4], maxLen: 0.2, peakMax: 0.03, keep: 4, gainDb: -10 },
   pop: { q: ['pop ui', 'bubble pop', 'cartoon pop'], dur: [0.03, 0.6], maxLen: 0.3, peakMax: 0.05, keep: 3, gainDb: -12 },
   typing: { q: ['keyboard typing', 'typing laptop keyboard'], dur: [1, 8], maxLen: 2.5, keep: 2, gainDb: -16 },
   camera: { q: ['camera shutter', 'dslr shutter'], dur: [0.05, 1.5], maxLen: 0.7, peakMax: 0.08, keep: 2, gainDb: -9 },
   cash: { q: ['cash register', 'coins drop', 'cha ching'], dur: [0.2, 2.5], maxLen: 1.2, keep: 2, gainDb: -10 },
-  notify: { q: ['notification sound', 'message notification ding', 'phone notification'], dur: [0.1, 2], maxLen: 1.0, peakMax: 0.12, keep: 3, gainDb: -10 },
-  success: { q: ['success chime', 'positive ui', 'correct answer'], dur: [0.2, 2], maxLen: 1.2, keep: 2, gainDb: -10 },
+  notify: { q: ['notification sound', 'message notification ding', 'phone notification', 'ui notification', 'new message tone'], dur: [0.1, 2.5], maxLen: 1.0, peakMax: 0.25, keep: 3, gainDb: -10 },
+  success: { q: ['success chime', 'positive notification chime', 'level complete chime', 'correct answer ding'], dur: [0.2, 2], maxLen: 1.2, keep: 2, gainDb: -10 },
   error: { q: ['error buzz', 'wrong answer buzzer', 'ui error'], dur: [0.1, 1.5], maxLen: 0.8, keep: 2, gainDb: -11 },
 };
 
@@ -72,7 +72,7 @@ for (const [role, cfg] of Object.entries(ROLES)) {
       if (seen.has(h.id)) continue;
       seen.add(h.id);
       const words = `${h.name} ${(h.tags ?? []).join(' ')}`;
-      if (!MUST[role]!.test(words) || NEVER.test(words)) continue;
+      if (!MUST[role]!.test(role === 'typing' ? h.name : words) || NEVER.test(words)) continue;
       const url = h.previews['preview-hq-mp3'];
       if (!url) continue;
       const src = resolve(TMP, `${h.id}.mp3`);
