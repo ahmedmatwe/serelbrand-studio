@@ -179,7 +179,7 @@ export function captionsFromWords(words: WordTime[], duration: number): { a: num
 
 // ── props (3D objects of what is said) ────────────────────────────────────────────────────────────────────
 const PROPS_FILE = resolve(dirname(new URL(import.meta.url).pathname), '../../config/props.json');
-let propCat: { base: string; props: Record<string, string> } | undefined;
+let propCat: { base: string; props: Record<string, string>; animated?: Record<string, string>; animated_base?: string } | undefined;
 function catalog() { return (propCat ??= existsSync(PROPS_FILE) ? JSON.parse(readFileSync(PROPS_FILE, 'utf8')) : { base: '', props: {} }); }
 export const propNames = () => Object.keys(catalog().props);
 
@@ -200,6 +200,50 @@ export function resolveProp(thing: string): string | undefined {
 }
 export const propFile = (name: string) => basename(catalog().props[name] ?? '');
 export const propUrl = (name: string) => catalog().base + (catalog().props[name] ?? '').split('/').map(encodeURIComponent).join('/');
+
+/**
+ * Word → thing: when one of these words is SAID, its object appears at that moment (if the director did not
+ * already put something there) — the viewer sees what they hear, all the time.
+ */
+const WORD_PROPS: [RegExp, string][] = [
+  [/فلوس|اشتراك|بتدفع|ادفع|بفلوس/, 'money with wings'], [/ببلاش|مجان|هدية/, 'wrapped gift'], [/صور|صورة/, 'framed picture'], [/كاميرا|تصوير/, 'camera'],
+  [/فيديو|ريلز/, 'film frames'], [/رسال|رسايل|شات|محادث/, 'speech balloon'], [/مكالم|اتصال|كول/, 'telephone receiver'], [/دقيقة|ثواني|ثانية|وقت|ساعة/, 'hourglass not done'],
+  [/سري|مخفي|محدش يعرف|سر(?![\u0600-\u06FF])/, 'eyes'], [/سريع|بسرعة|فوراً|في لحظة/, 'high voltage'], [/فكرة|اكتشف/, 'light bulb'], [/خطر|تحذير|احذر|خلي بالك|إوعى/, 'warning'],
+  [/جديد|سحري|سحرية/, 'sparkles'], [/ذكاء اصطناعي|جيميناي|روبوت/, 'robot'], [/واي فاي|الإنترنت|النت(?![\u0600-\u06FF])|شبكة/, 'antenna bars'], [/بطاري|شحن/, 'battery'],
+  [/موبايل|تليفون|الهاتف/, 'mobile phone'], [/ملف|pdf|ورق|مستند/i, 'page facing up'], [/مذاكرة|كتاب|دراسة/, 'books'], [/صوت|صوتية|تسمع/, 'speaker high volume'],
+  [/سؤال|اسأل|اسأله/, 'red question mark'], [/جاوب|إجابة|صح(?![\u0600-\u06FF])/, 'check mark button'], [/احفظ|احفظه|احفظها/, 'bookmark'], 
+  [/ناس|الكل|أصحاب|صاحبك/, 'busts in silhouette'], [/أحسن|أقوى|الأفضل/, 'trophy'], [/جامد|نار(?![\u0600-\u06FF])/, 'fire'], [/باسورد|كلمة سر|قفل|اقفل/, 'locked with key'],
+  [/إشعار|اشعار|تنبيه/, 'bell'], [/ترجم|لغة/, 'globe showing europe-africa'], [/أمان|حماية|احمي/, 'shield'], [/منبه|الصبح/, 'alarm clock'],
+];
+const ACTIONS: PropAction[] = ['pop', 'drop', 'fly-in', 'spin', 'pulse'];
+
+/** Adds the said-word objects to each scene (≤ 4 per scene, never within 0.9 s of another object). */
+export function wordProps(scenes: MotionScene[], words: WordTime[]): void {
+  let k = 0;
+  for (const sc of scenes) {
+    if (sc.type === 'story' || sc.type === 'hook') continue;
+    // under an acted-out screen: the low corners; on the comparison: under the two cards; else beside the content
+    const slots = sc.type === 'mock' ? [2, 3] : sc.type === 'versus' ? [4, 5] : [0, 1, 2];
+    const props = (sc.props ??= []);
+    const used = new Set(props.map((x) => x.src));
+    for (const w of words.filter((x) => x.start >= sc.start + 0.2 && x.start < sc.end - 0.5)) {
+      if (props.length >= 4) break;
+      const name = WORD_PROPS.find(([re]) => re.test(w.w))?.[1];
+      if (!name || !catalog().props[name]) continue;
+      const src = `props/${propFile(name)}`;
+      if (used.has(src) || props.some((p) => Math.abs(p.at - w.start) < 0.9)) continue;
+      const busy = new Set(props.filter((p) => p.until > w.start).map((p) => p.slot));
+      const slot = slots.find((x) => !busy.has(x));
+      if (slot === undefined) continue;
+      const cp = catalog().animated?.[name];
+      const at = Number(Math.max(sc.start + 0.1, w.start - 0.05).toFixed(2));
+      props.push({ src, at, until: Number(Math.min(sc.end, at + 2.2).toFixed(2)), action: ACTIONS[k++ % ACTIONS.length]!, slot, ...(cp ? { lottie: `props/anim-${cp}.json` } : {}) });
+      used.add(src);
+    }
+    props.sort((a, b) => a.at - b.at);
+    if (!props.length) delete sc.props;
+  }
+}
 
 /** The topic's main object from its words (first match wins: the most specific topics first). */
 const HERO_WORDS: [RegExp, string][] = [
@@ -225,7 +269,10 @@ function sceneProps(planned: { thing: string; word?: string; sentence: number; a
     const s0 = Math.max(start, Math.min(end - 0.5, sAt(x.sentence)));
     const w = x.word ? ws.find((v) => v.start >= s0 - 0.05 && similarity(normWord(v.w), normWord(x.word!)) >= 0.7) : undefined;
     const at = Number(Math.min(end - 0.4, Math.max(start + 0.15, w ? w.start - 0.1 : s0 + 0.25)).toFixed(2));
-    out.push({ src: `props/${propFile(name)}`, at, until: Number(end.toFixed(2)), action: x.action, slot: slots[out.length]! });
+    // things come and go (≈ 2.4 s each, the next one takes over) — story objects stay for their scene
+    const until = big ? end : Math.min(end, at + 2.4);
+    const cp = catalog().animated?.[name];
+    out.push({ src: `props/${propFile(name)}`, at, until: Number(until.toFixed(2)), action: x.action, slot: slots[out.length]!, ...(cp ? { lottie: `props/anim-${cp}.json` } : {}) });
   }
   return out;
 }
@@ -436,6 +483,7 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
   // a scene dropped above (wrong ui type…) → stretch its neighbour so the timeline has no holes
   for (let i = 1; i < scenes.length; i++) scenes[i - 1]!.end = scenes[i]!.start;
   if (scenes.length) { scenes[0]!.start = 0; scenes.at(-1)!.end = inp.duration; }
+  wordProps(scenes, inp.words);
   // THE main object: the director's pick, else the topic's own words, else the first object it drew.
   const heroName = (heroThing && resolveProp(heroThing)) || heroFromWords(`${inp.title} ${inp.entry?.onScreen ?? ''} ${inp.narration}`);
   const hero = heroName ? `props/${propFile(heroName)}` : scenes.flatMap((x) => x.props ?? [])[0]?.src;
@@ -588,6 +636,24 @@ async function stageProps(rootDir: string, plan: MotionPlan, pub: string) {
       ok.add(src);
     } catch { /* skip this prop */ }
   }
+  // animated versions (Google Noto, CC BY 4.0): downloaded once; a prop whose animation can't be fetched keeps its still image
+  const anim = new Set<string>();
+  for (const src of new Set(plan.scenes.flatMap((sc) => sc.props ?? []).map((x) => x.lottie).filter((x): x is string => Boolean(x)))) {
+    const cp = src.match(/anim-([0-9a-f_]+)\.json$/)?.[1];
+    const local = resolve(cache, `anim-${cp}.json`);
+    try {
+      if (!existsSync(local)) {
+        const r = await fetch(`${catalog().animated_base}${cp}/lottie.json`, { signal: AbortSignal.timeout(25_000) }).catch(() => undefined);
+        if (!r?.ok) continue;
+        const txt = await r.text();
+        JSON.parse(txt);
+        writeFileSync(local, txt);
+      }
+      copyFileSync(local, resolve(pub, src));
+      anim.add(src);
+    } catch { /* keep the still image */ }
+  }
+  for (const sc of plan.scenes) for (const p of sc.props ?? []) if (p.lottie && !anim.has(p.lottie)) delete p.lottie;
   for (const sc of plan.scenes) if (sc.props) sc.props = sc.props.filter((x) => ok.has(x.src));
   if (plan.hero && !ok.has(plan.hero)) delete plan.hero;
   writeFileSync(resolve(pub, 'props.json'), JSON.stringify(plan));

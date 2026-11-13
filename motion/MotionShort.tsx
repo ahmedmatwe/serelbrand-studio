@@ -5,7 +5,8 @@
  * the plan, so the team can tune it over time.
  */
 import React from 'react';
-import { AbsoluteFill, Audio, Easing, Img, Sequence, cancelRender, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Audio, Easing, Img, Sequence, cancelRender, continueRender, delayRender, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { Lottie, type LottieAnimationData } from '@remotion/lottie';
 import { fitText } from '@remotion/layout-utils';
 import { loadFont } from '@remotion/google-fonts/Cairo';
 import type { Hl, IconName, MotionPlan, MotionScene, MotionStyle, Prop, Tone, Variants } from './types';
@@ -946,9 +947,20 @@ const MockScene: React.FC<{ sc: Of<'mock'> }> = ({ sc }) => {
 // ── props: 3D objects of what is said, alive (enter, float, act, leave) ──────────────────────────────────────
 /** Where props sit: beside the main content in normal scenes (0–2), big and central in story scenes (10–12). */
 const SLOTS: Record<number, { x: number; y: number; size: number; side: 1 | -1 }> = {
-  0: { x: 820, y: 470, size: 240, side: 1 }, 1: { x: 20, y: 880, size: 230, side: -1 }, 2: { x: 830, y: 1150, size: 220, side: 1 }, 3: { x: 30, y: 1160, size: 200, side: -1 },
+  0: { x: 820, y: 470, size: 240, side: 1 }, 1: { x: 20, y: 880, size: 230, side: -1 }, 2: { x: 830, y: 1150, size: 220, side: 1 }, 3: { x: 30, y: 1160, size: 200, side: -1 }, 4: { x: 150, y: 1215, size: 190, side: -1 }, 5: { x: 740, y: 1215, size: 190, side: 1 },
   10: { x: 290, y: 470, size: 500, side: 1 }, 11: { x: 80, y: 1000, size: 320, side: -1 }, 12: { x: 680, y: 1000, size: 320, side: 1 },
 };
+/** An animated emoji (Google Noto, Lottie) — loaded before the frame is rendered. */
+const LottieThing: React.FC<{ src: string; size: number }> = ({ src, size }) => {
+  const [data, setData] = React.useState<LottieAnimationData | null>(null);
+  const [handle] = React.useState(() => delayRender(`lottie ${src}`));
+  React.useEffect(() => {
+    fetch(staticFile(src)).then((r) => r.json()).then((d: LottieAnimationData) => { setData(d); continueRender(handle); }).catch(() => continueRender(handle));
+  }, [src, handle]);
+  if (!data) return null;
+  return <Lottie animationData={data} loop style={{ width: size, height: size }} />;
+};
+
 const PropView: React.FC<{ p: Prop }> = ({ p }) => {
   const s = useStyle();
   const frame = useCurrentFrame();
@@ -971,7 +983,9 @@ const PropView: React.FC<{ p: Prop }> = ({ p }) => {
   const no = p.action === 'no' ? pop(frame, fps, f(p.at + 0.45)) : 0;
   return (
     <div style={{ position: 'absolute', left: sl.x, top: sl.y, width: sl.size, height: sl.size, opacity: op, transform: `translate(${x}px, ${y}px) rotate(${rot}deg) perspective(900px) rotateY(${ry}deg) scale(${scale})` }}>
-      <Img src={staticFile(p.src)} style={{ width: '100%', height: '100%', objectFit: 'contain', filter: `drop-shadow(0 ${sl.size * 0.08}px ${sl.size * 0.1}px rgba(0,0,0,.45))` }} />
+      {p.lottie
+        ? <div style={{ width: '100%', height: '100%', filter: `drop-shadow(0 ${sl.size * 0.08}px ${sl.size * 0.1}px rgba(0,0,0,.45))` }}><LottieThing src={p.lottie} size={sl.size} /></div>
+        : <Img src={staticFile(p.src)} style={{ width: '100%', height: '100%', objectFit: 'contain', filter: `drop-shadow(0 ${sl.size * 0.08}px ${sl.size * 0.1}px rgba(0,0,0,.45))` }} />}
       {no > 0 && (
         <div style={{ position: 'absolute', inset: '-6%', borderRadius: '50%', border: `${sl.size * 0.07}px solid ${s.bad}`, transform: `scale(${no})` }}>
           <div style={{ position: 'absolute', left: '-4%', right: '-4%', top: '46%', height: sl.size * 0.07, background: s.bad, transform: 'rotate(-45deg)' }} />

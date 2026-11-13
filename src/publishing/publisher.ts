@@ -80,7 +80,8 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
       if (!pack || !sc) return `${description}\n#Shorts`;
       const lead = (sc.voiceover.match(/[^.!؟?…]+[.!؟?…]+/g) ?? [sc.voiceover]).slice(0, 2).join(' ').trim();
       const own = factCheck ? { ...factCheck, claims: factCheck.claims.filter((c) => c.sceneN === sc.n) } : undefined;
-      return `${composeDescription({ description: lead, hashtags: seo.hashtags, chapters: [] }, own, render?.data.assets)}\n#Shorts`;
+      // licence credits for the motion graphics' animated emoji (Google Noto, CC BY 4.0)
+      return `${composeDescription({ description: lead, hashtags: seo.hashtags, chapters: [] }, own, render?.data.assets)}\nAnimated emoji: Google Noto Emoji Animation (CC BY 4.0)\n#Shorts`;
     };
     const headlinesByScene = new Map<number, Partial<Record<'tiktok' | 'instagram' | 'facebook', string>>>();
     // Title editor: 5 titles per Short, the strongest one goes out (learned from our own view counts).

@@ -19,7 +19,7 @@ export interface MockItem { text: string; at: number; value?: number; label?: st
 /** How a 3D object enters / behaves (the story told with things, not only screens). */
 export type PropAction = 'pop' | 'fly-in' | 'drop' | 'fly-away' | 'shake' | 'spin' | 'pulse' | 'no';
 /** A 3D illustration (Fluent Emoji 3D, MIT) of the exact thing the narration names, appearing when it is said. */
-export interface Prop { src: string; at: number; until: number; action: PropAction; slot: number }
+export interface Prop { src: string; at: number; until: number; action: PropAction; slot: number; /** Animated version (Lottie JSON in the public dir) — played instead of the still image. */ lottie?: string }
 export type MotionScene = { start: number; end: number; headline: Hl; props?: Prop[] } & (
   | { type: 'hook'; icon: IconName; teaserCode?: string; revealAt?: number; question?: Hl; questionAt?: number }
   | { type: 'dialer'; code: string; keys: { k: string; at: number }[]; callAt?: number }
