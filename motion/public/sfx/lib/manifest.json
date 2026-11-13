@@ -2,31 +2,31 @@
  "whoosh": [
   {
    "file": "sfx/lib/whoosh-1.wav",
-   "peak": 0.059,
-   "dur": 0.6,
-   "credit": "\"Whoosh #1\" by Kinoton (CC0)",
-   "url": "https://freesound.org/s/427823/"
-  },
-  {
-   "file": "sfx/lib/whoosh-2.wav",
    "peak": 0.236,
    "dur": 0.6,
    "credit": "\"Fast Page Turn - 3\" by SpaceJoe (CC0)",
    "url": "https://freesound.org/s/484909/"
   },
   {
-   "file": "sfx/lib/whoosh-3.wav",
+   "file": "sfx/lib/whoosh-2.wav",
    "peak": 0.052,
    "dur": 0.491,
    "credit": "\"Fast Page Turn - 2\" by SpaceJoe (CC0)",
    "url": "https://freesound.org/s/484908/"
   },
   {
-   "file": "sfx/lib/whoosh-4.wav",
+   "file": "sfx/lib/whoosh-3.wav",
    "peak": 0.027,
    "dur": 0.6,
    "credit": "\"swoosh_bamboo_05\" by Evan_McLoud (CC0)",
    "url": "https://freesound.org/s/850168/"
+  },
+  {
+   "file": "sfx/lib/whoosh-4.wav",
+   "peak": 0.175,
+   "dur": 0.6,
+   "credit": "\"Swishes_13_fast.wav\" by videofueralle (CC0)",
+   "url": "https://freesound.org/s/614151/"
   }
  ],
  "swipe-up": [
@@ -55,31 +55,31 @@
  "impact": [
   {
    "file": "sfx/lib/impact-1.wav",
-   "peak": 0.021,
+   "peak": 0.001,
    "dur": 1.2,
-   "credit": "\"PUNCH-BOXING-02.wav\" by newagesoup (CC0)",
-   "url": "https://freesound.org/s/348243/"
+   "credit": "\"hit - metallic - trailer - metal fender 01.wav\" by Anthousai (CC0)",
+   "url": "https://freesound.org/s/406560/"
   },
   {
    "file": "sfx/lib/impact-2.wav",
-   "peak": 0.018,
-   "dur": 1.133,
-   "credit": "\"Big Pillow Hit.wav\" by saturdaysoundguy (CC0)",
-   "url": "https://freesound.org/s/388021/"
+   "peak": 0,
+   "dur": 1.2,
+   "credit": "\"hit - metallic - trailer - metal fender 02.wav\" by Anthousai (CC0)",
+   "url": "https://freesound.org/s/406559/"
   },
   {
    "file": "sfx/lib/impact-3.wav",
-   "peak": 0.025,
-   "dur": 0.501,
-   "credit": "\"Fist + shoulder_01.wav\" by deleted_user_2104797 (CC0)",
-   "url": "https://freesound.org/s/346700/"
+   "peak": 0.052,
+   "dur": 1.2,
+   "credit": "\"BRAAMS HIT - 2\" by XHALE303 (CC0)",
+   "url": "https://freesound.org/s/592039/"
   },
   {
    "file": "sfx/lib/impact-4.wav",
-   "peak": 0.003,
-   "dur": 0.255,
-   "credit": "\"\"Kamen Rider\" style smack punch impact\" by G40X (CC0)",
-   "url": "https://freesound.org/s/770176/"
+   "peak": 0.014,
+   "dur": 1.2,
+   "credit": "\"boom.wav\" by Blackie666 (CC0)",
+   "url": "https://freesound.org/s/135357/"
   }
  ],
  "click": [
@@ -115,40 +115,40 @@
  "pop": [
   {
    "file": "sfx/lib/pop-1.wav",
-   "peak": 0.002,
-   "dur": 0.167,
-   "credit": "\"Cartoon Pop (Clean)\" by unfa (CC0)",
-   "url": "https://freesound.org/s/245645/"
-  },
-  {
-   "file": "sfx/lib/pop-2.wav",
    "peak": 0.005,
    "dur": 0.3,
    "credit": "\"Bubble Pop\" by YehawSnail (CC0)",
    "url": "https://freesound.org/s/683587/"
   },
   {
-   "file": "sfx/lib/pop-3.wav",
+   "file": "sfx/lib/pop-2.wav",
    "peak": 0.018,
    "dur": 0.3,
    "credit": "\"UI Series: Hollow pop\" by brandondelehoy (CC0)",
    "url": "https://freesound.org/s/333428/"
+  },
+  {
+   "file": "sfx/lib/pop-3.wav",
+   "peak": 0.001,
+   "dur": 0.065,
+   "credit": "\"Pop 02\" by LilMati (CC0)",
+   "url": "https://freesound.org/s/506545/"
   }
  ],
  "typing": [
   {
    "file": "sfx/lib/typing-1.wav",
-   "peak": 0.093,
-   "dur": 1.19,
-   "credit": "\"Bouncing Power Up 1_4\" by Joao_Janz (CC0)",
-   "url": "https://freesound.org/s/478343/"
-  },
-  {
-   "file": "sfx/lib/typing-2.wav",
    "peak": 1.237,
    "dur": 1.436,
    "credit": "\"Typing On A Keyboard\" by lnab (CC0)",
    "url": "https://freesound.org/s/527726/"
+  },
+  {
+   "file": "sfx/lib/typing-2.wav",
+   "peak": 0.624,
+   "dur": 2.5,
+   "credit": "\"001_keyboard.wav\" by JL_barrett (CC0)",
+   "url": "https://freesound.org/s/152956/"
   }
  ],
  "camera": [
@@ -177,10 +177,10 @@
   },
   {
    "file": "sfx/lib/cash-2.wav",
-   "peak": 0.007,
-   "dur": 1.2,
-   "credit": "\"Store Scanner Beep\" by zerolagtime (CC0)",
-   "url": "https://freesound.org/s/144418/"
+   "peak": 0.291,
+   "dur": 0.856,
+   "credit": "\"Mechanical1.wav\" by BMacZero (CC0)",
+   "url": "https://freesound.org/s/94120/"
   }
  ],
  "notify": [
@@ -190,22 +190,29 @@
    "dur": 1,
    "credit": "\"GASP_UI_Alert_2.wav\" by Rob_Marion (CC0)",
    "url": "https://freesound.org/s/542042/"
+  },
+  {
+   "file": "sfx/lib/notify-2.wav",
+   "peak": 0.125,
+   "dur": 1,
+   "credit": "\"Ringtone:  Alert (fast)\" by knufds (CC0)",
+   "url": "https://freesound.org/s/633161/"
   }
  ],
  "success": [
   {
    "file": "sfx/lib/success-1.wav",
-   "peak": 0.003,
-   "dur": 1.135,
-   "credit": "\"Beep 2\" by CogFireStudios (CC0)",
-   "url": "https://freesound.org/s/528864/"
+   "peak": 0,
+   "dur": 0.545,
+   "credit": "\"ding.wav\" by mark205 (CC0)",
+   "url": "https://freesound.org/s/580649/"
   },
   {
    "file": "sfx/lib/success-2.wav",
-   "peak": 0.073,
-   "dur": 1.2,
-   "credit": "\"Beep 4\" by CogFireStudios (CC0)",
-   "url": "https://freesound.org/s/528862/"
+   "peak": 0.064,
+   "dur": 0.307,
+   "credit": "\"correct\" by ertfelda (CC0)",
+   "url": "https://freesound.org/s/243701/"
   }
  ],
  "error": [
