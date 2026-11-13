@@ -553,6 +553,38 @@ const CompatScene: React.FC<{ sc: Of<'compat'> }> = ({ sc }) => {
   );
 };
 
+/** "Why pay?": the paid tool's card is crossed out the moment the free tool is named, then the free card pops in. */
+const VersusScene: React.FC<{ sc: Of<'versus'> }> = ({ sc }) => {
+  const s = useStyle();
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const t = useAbsT(sc.start);
+  const inP = pop(frame, fps, 3);
+  const cut = ease(t, sc.freeAt - 0.15, sc.freeAt + 0.35);
+  const fr = pop(frame, fps, f(sc.freeAt - sc.start));
+  const card = (border: string): React.CSSProperties => ({ ...DARK, position: 'absolute', left: 110, right: 110, borderRadius: 48, background: '#0A0F22', border: `8px solid ${border}`, display: 'flex', alignItems: 'center', gap: 36, padding: '0 54px', direction: 'rtl' });
+  return (
+    <>
+      <Headline hl={sc.headline} size={88} top={190} />
+      <div data-qa="paid" style={{ ...card(s.bad), top: 470, height: 290, opacity: 1 - 0.45 * cut, transform: `translateX(${(1 - inP) * -700}px) scale(${1 - 0.06 * cut})` }}>
+        <div style={{ width: 130, height: 130, flex: 'none', borderRadius: '50%', background: s.bad, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 74 }}>💸</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+          <div style={{ fontFamily, fontWeight: 900, fontSize: 64, color: WHITE, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sc.paid.name}</div>
+          <div style={{ fontFamily, fontWeight: 800, fontSize: 42, color: s.bad }}>{sc.paid.note}</div>
+        </div>
+        <div style={{ position: 'absolute', left: 30, right: 30, top: '50%', height: 14, borderRadius: 7, background: s.bad, transformOrigin: 'right center', transform: `scaleX(${cut}) rotate(-4deg)` }} />
+      </div>
+      <div data-qa="free" style={{ ...card(s.good), top: 830, height: 330, opacity: Math.min(1, fr), transform: `translateY(${(1 - fr) * 320}px) scale(${0.9 + 0.1 * fr})`, boxShadow: `0 0 ${70 * fr}px ${s.good}` }}>
+        <div style={{ width: 150, height: 150, flex: 'none', borderRadius: '50%', background: s.good, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: `scale(${pop(frame, fps, f(sc.freeAt - sc.start) + 6)})` }}><Icon name="check" size={100} color="#fff" /></div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+          <div style={{ fontFamily, fontWeight: 900, fontSize: 72, color: WHITE, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sc.free.name}</div>
+          <div style={{ fontFamily, fontWeight: 900, fontSize: 48, color: s.good }}>{sc.free.note}</div>
+        </div>
+      </div>
+    </>
+  );
+};
+
 const CtaScene: React.FC<{ sc: Of<'cta'>; endCard: string }> = ({ sc, endCard }) => {
   const s = useStyle();
   const frame = useCurrentFrame();
@@ -615,6 +647,7 @@ const SceneView: React.FC<{ sc: MotionScene; endCard: string }> = ({ sc, endCard
     case 'card': return <CardScene sc={sc} />;
     case 'alert': return <AlertScene sc={sc} />;
     case 'compat': return <CompatScene sc={sc} />;
+    case 'versus': return <VersusScene sc={sc} />;
     case 'cta': return <CtaScene sc={sc} endCard={endCard} />;
     default: return <StatementScene sc={sc as Of<'statement'>} />;
   }

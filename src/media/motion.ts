@@ -175,7 +175,7 @@ export function captionsFromWords(words: WordTime[], duration: number): { a: num
 const Hl = z.object({ text: z.string().min(2).max(60), accent: z.string().max(30).optional(), tone: z.enum(['yellow', 'green', 'red']).optional() });
 const Planned = z.object({
   scenes: z.array(z.object({
-    type: z.enum(['hook', 'dialer', 'settings', 'app', 'card', 'alert', 'compat', 'cta', 'statement']),
+    type: z.enum(['hook', 'dialer', 'settings', 'app', 'card', 'alert', 'compat', 'cta', 'statement', 'versus']),
     from: z.number().int().min(0), to: z.number().int().min(0),
     headline: Hl,
     icon: z.enum(ICONS).optional(),
@@ -221,6 +221,7 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
       system: 'You are the motion-graphics director of "سر الموبايل" (Egyptian Arabic phone-secret Shorts). Plan drawn scenes for ONE Short so every second shows exactly what is being said. ' +
         'Scene types: hook (first, sentence 0: a big icon + a short shocking headline, optional question at a later sentence), dialer (only if ui.type is dialer: covers the sentences where the code is typed and called), ' +
         'settings (only if ui.type is settings: covers the sentences that walk the path), app (the steps inside an app — Instagram, WhatsApp, TikTok… — or on the phone when there is no dialer/settings screen: covers the sentences that walk entry.steps), card (a result/message screen: title + up to 4 rows label/value; a row may change at a later sentence with "then" — e.g. "not forwarded" → "forwarded" + a masked detail), ' +
+        'versus (only if ui.type is versus: the paid tool vs the free one — covers the sentences that compare them; it MUST appear right after the hook), ' +
         'alert (warning or reassurance with an action card, e.g. "call customer service"), compat (which phones it works on: items like "آيفون","أندرويد" + an optional badge), statement (generic: icon + up to 3 short check lines), cta (last: try it now + follow). ' +
         'SHOW THE CLOSEST THING TO WHAT IS SAID: the steps always get a dialer/settings/app scene; the result gets a card; use "statement" only when nothing else fits (at most once); never two scenes of the same type in a row; "compat" only if the narration names which phones. ' +
         'from/to = inclusive sentence indexes; scenes must cover every sentence in order with no gaps or overlaps; 4–7 scenes. Headlines: 2–4 words (≤ 24 characters, they are drawn on ONE big line), natural Egyptian Arabic, readable in 1 second, accent = one word of the headline to colour. ' +
@@ -235,7 +236,7 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
     planned = (r?.data as z.infer<typeof Planned> | undefined)?.scenes;
   }
   const valid = planned && planned.length >= 2 && planned[0]!.from === 0 && planned.every((p, i) => p.to >= p.from && (i === 0 || p.from === planned![i - 1]!.to + 1)) && planned.at(-1)!.to === sentences.length - 1
-    && planned.every((p) => (p.type !== 'dialer' || ui?.type === 'dialer') && (p.type !== 'settings' || ui?.type === 'settings') && (p.type !== 'app' || Boolean(inp.entry?.steps.length)));
+    && planned.every((p) => (p.type !== 'dialer' || ui?.type === 'dialer') && (p.type !== 'settings' || ui?.type === 'settings') && (p.type !== 'app' || Boolean(inp.entry?.steps.length)) && (p.type !== 'versus' || ui?.type === 'versus'));
   const plan = normalizePlan(valid ? planned! : fallbackPlan(sentences.length, inp.entry), inp.entry);
   const scenes: MotionScene[] = [];
   const beats: number[] = [];
@@ -274,7 +275,7 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
         const options = [ui?.type === 'settings' ? ui.path : [], inp.entry?.steps ?? []].filter((x) => x.length).map((x) => x.slice(0, 6));
         const steps = options.sort((x, y) => heardCount(ws, y) / y.length - heardCount(ws, x) / x.length)[0] ?? [];
         if (!steps.length) break;
-        const [app, color, color2] = brand ?? (ui?.type === 'settings' && ui.os === 'ios' ? ['الإعدادات', '#8E8E93', '#5A5A60'] : ['الإعدادات', '#3DDC84', '#1F9D57']);
+        const [app, color, color2] = brand ?? (ui?.type === 'versus' ? [ui.free.name, ui.free.color ?? '#4285F4', '#23408E'] : ui?.type === 'settings' && ui.os === 'ios' ? ['الإعدادات', '#8E8E93', '#5A5A60'] : ['الإعدادات', '#3DDC84', '#1F9D57']);
         scenes.push({ ...base, type: 'app', app, color, color2, steps, at: pathTimes(ws, steps, start, end), done: inp.entry?.onScreen });
         break;
       }
@@ -289,6 +290,17 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
       case 'alert': {
         scenes.push({ ...base, type: 'alert', icon: p.icon ?? (p.tone === 'good' ? 'shield' : 'warn'), tone: p.tone ?? 'bad', ...(p.action ? { action: { text: p.action.text, accent: p.action.accent, icon: p.action.icon, at: Number(at(p.action.sentence, 0.45).toFixed(2)) } } : {}) });
         beats.push(start + 0.1);
+        break;
+      }
+      case 'versus': {
+        if (ui?.type !== 'versus') break;
+        // The free card arrives when its name is said (else a little before the middle of the scene).
+        const keys = [ui.free.name.split(/\s+/)[0] ?? '', ...(ui.free.say ?? [])].map(normWord).filter(Boolean);
+        const inScene = ws.filter((x) => x.start >= start + 0.4 && x.start < end);
+        const w = inScene.find((x) => keys.some((k) => similarity(normWord(x.w), k) >= 0.7)) ?? inScene.find((x) => /ببلاش|مجان/.test(x.w));
+        const freeAt = Number(Math.min(end - 0.6, w?.start ?? start + (end - start) * 0.45).toFixed(2));
+        scenes.push({ ...base, type: 'versus', paid: ui.paid, free: { name: ui.free.name, note: ui.free.note }, freeAt });
+        beats.push(freeAt);
         break;
       }
       case 'compat':
@@ -334,6 +346,11 @@ export function normalizePlan(plan: PlannedScene[], entry?: PhoneSecret): Planne
     if (i > 0) out[i]!.type = stepsType;
   }
   if (entry && APP_BRAND[entry.source]) for (const p of out) if (p.type === 'settings') p.type = 'app';
+  // "Why pay?" topics: the paid-vs-free comparison is the point of the video — it must be on screen.
+  if (entry?.ui?.type === 'versus' && !out.some((p) => p.type === 'versus')) {
+    const i = out.findIndex((p, j) => j > 0 && j < out.length - 1 && (p.type === 'statement' || p.type === 'compat' || p.type === 'alert' || p.type === 'card'));
+    if (i > 0) out[i]!.type = 'versus';
+  }
   const merged: PlannedScene[] = [];
   for (const p of out) {
     const prev = merged.at(-1);
@@ -350,13 +367,16 @@ export function fallbackPlan(n: number, entry?: PhoneSecret): PlannedScene[] {
   if (n <= 2) return [{ type: 'hook', from: 0, to: 0, headline: { text: short }, icon: 'lock' }, { type: 'cta', from: Math.min(1, n - 1), to: n - 1, headline: { text: 'جرّبها دلوقتي', accent: 'دلوقتي' } }].slice(0, n === 1 ? 1 : 2) as PlannedScene[];
   const ui = entry?.ui;
   const mid: PlannedScene[] = [];
-  const stepsAt = Math.min(1, n - 2);
-  if (ui || entry?.steps.length) mid.push({ type: ui?.type === 'dialer' ? 'dialer' : ui?.type === 'settings' && !APP_BRAND[entry!.source] ? 'settings' : 'app', from: stepsAt, to: Math.min(n - 2, stepsAt + 1), headline: { text: ui?.type === 'dialer' ? 'افتح الاتصال واكتب' : APP_BRAND[entry!.source] ? `افتح ${APP_BRAND[entry!.source]![0]}` : 'ادخل على الإعدادات', accent: ui?.type === 'dialer' ? 'الاتصال' : APP_BRAND[entry!.source]?.[0] ?? 'الإعدادات', tone: 'green' } });
-  const next = mid.length ? mid[0]!.to + 1 : 1;
+  // "Why pay?": the comparison comes right after the hook, then the steps of the free tool.
+  const vs = ui?.type === 'versus' && n >= 4;
+  if (vs) mid.push({ type: 'versus', from: 1, to: 1, headline: { text: 'ليه تدفع؟', accent: 'تدفع', tone: 'red' } });
+  const stepsAt = vs ? 2 : Math.min(1, n - 2);
+  if ((ui || entry?.steps.length) && stepsAt <= n - 2) mid.push({ type: ui?.type === 'dialer' ? 'dialer' : ui?.type === 'settings' && !APP_BRAND[entry!.source] ? 'settings' : 'app', from: stepsAt, to: Math.min(n - 2, stepsAt + 1), headline: { text: ui?.type === 'dialer' ? 'افتح الاتصال واكتب' : APP_BRAND[entry!.source] ? `افتح ${APP_BRAND[entry!.source]![0]}` : ui?.type === 'versus' ? `افتح ${ui.free.name}` : 'ادخل على الإعدادات', accent: ui?.type === 'dialer' ? 'الاتصال' : APP_BRAND[entry!.source]?.[0] ?? (ui?.type === 'versus' ? ui.free.name : 'الإعدادات'), tone: 'green' } });
+  const next = mid.length ? mid.at(-1)!.to + 1 : 1;
   // The result in the entry's own words (short lines), not a generic sentence.
   const lines = (entry?.result ?? '').split(/[،,.]| و(?=\S)/).map((x) => x.trim()).filter((x) => x.length >= 6).map((x) => (x.length > 30 ? `${x.slice(0, 28)}…` : x)).slice(0, 3);
   if (next <= n - 2) mid.push({ type: 'statement', from: next, to: n - 2, headline: { text: entry?.onScreen ? `${entry.onScreen} ✓` : 'النتيجة', accent: entry?.onScreen }, icon: 'check', ...(lines.length ? { lines } : {}) });
-  return [{ type: 'hook', from: 0, to: stepsAt - 1 < 0 ? 0 : stepsAt - 1, headline: { text: short }, icon: ui?.type === 'dialer' ? 'lock' : 'star' }, ...mid, { type: 'cta', from: n - 1, to: n - 1, headline: { text: 'جرّبها دلوقتي', accent: 'دلوقتي' } }];
+  return [{ type: 'hook', from: 0, to: vs ? 0 : stepsAt - 1 < 0 ? 0 : stepsAt - 1, headline: { text: short }, icon: ui?.type === 'dialer' ? 'lock' : 'star' }, ...mid, { type: 'cta', from: n - 1, to: n - 1, headline: { text: 'جرّبها دلوقتي', accent: 'دلوقتي' } }];
 }
 
 // ── render ───────────────────────────────────────────────────────────────────────────────────────────────

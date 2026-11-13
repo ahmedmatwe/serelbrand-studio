@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 export interface PhoneSecret {
-  id: string; kind: 'code' | 'feature' | 'trick'; platforms: string; title: string; onScreen: string;
+  id: string; kind: 'code' | 'feature' | 'trick' | 'freealt'; platforms: string; title: string; onScreen: string;
   steps: string[]; result: string; use: string; facts: string; source: string;
   /** What the phone screen shows while the steps are explained (drawn by src/media/phone-ui.ts). */
   ui?: PhoneUi;
@@ -18,7 +18,9 @@ export interface PhoneSecret {
   /** Tied to a trend in Egypt (set by the trend scout): the hook opens on it. */
   trend?: { name: string; link: string; hookAngle: string; heat: number; urgency: 'now' | 'soon'; at: string };
 }
-export type PhoneUi = { type: 'dialer'; code: string; call?: boolean } | { type: 'settings'; os: 'ios' | 'android'; path: string[] };
+export type PhoneUi = { type: 'dialer'; code: string; call?: boolean } | { type: 'settings'; os: 'ios' | 'android'; path: string[] }
+  /** "Why pay?" topics: a paid tool and the free one that does the same job (drawn as a versus scene). */
+  | { type: 'versus'; paid: { name: string; note: string }; free: { name: string; note: string; color?: string; /** How the narrator says it (Arabic), to time its card. */ say?: string[] } };
 interface Library { sources: Record<string, string>; secrets: PhoneSecret[] }
 
 export function loadPhoneLibrary(rootDir: string): Library | undefined {
@@ -50,7 +52,7 @@ export function secretSource(lib: Library, s: PhoneSecret) {
 }
 
 const APP_SOURCES = new Set(['whatsapp', 'instagram', 'facebook', 'tiktok', 'youtube', 'maps', 'gboard', 'telegram', 'x', 'snapchat', 'chrome', 'google']);
-export const family = (s: PhoneSecret) => (s.id.startsWith('app-') || APP_SOURCES.has(s.source) ? 'apps' : s.kind === 'code' ? 'code' : s.id.startsWith('ios-') || s.source === 'apple' ? 'ios' : 'android');
+export const family = (s: PhoneSecret) => (s.kind === 'freealt' ? 'free' : s.id.startsWith('app-') || APP_SOURCES.has(s.source) ? 'apps' : s.kind === 'code' ? 'code' : s.id.startsWith('ios-') || s.source === 'apple' ? 'ios' : 'android');
 
 /**
  * Three unused secrets for today's pack, mixed for variety: a code, an iPhone secret and an Android/Samsung
@@ -62,10 +64,10 @@ export function pickPhoneSecrets(lib: Library, usedIds: Set<string>, n = 3, weig
   // Topics the owner asked for come first.
   const out: PhoneSecret[] = first.map((id) => fresh.find((s) => s.id === id)).filter((s): s is PhoneSecret => Boolean(s)).slice(0, n);
   // Learned appetite: the family audiences watch most gets a second slot (variety still kept: ≥ 2 families).
-  // Families: big-app secrets, phone codes, iPhone, Android. Daily: the 3 best-performing families; on ties the
+  // Families: big-app secrets, phone codes, iPhone, Android, free alternatives to paid (AI) tools. Daily: the 3 best-performing families; on ties the
   // family used least so far goes first, so every kind keeps rotating in.
   const usedCount = (f: string) => lib.secrets.filter((x) => usedIds.has(x.id) && family(x) === f).length;
-  const order = ['apps', 'code', 'ios', 'android'].sort((a, b) => (weights?.[b] ?? 1) - (weights?.[a] ?? 1) || usedCount(a) - usedCount(b));
+  const order = ['apps', 'code', 'ios', 'android', 'free'].sort((a, b) => (weights?.[b] ?? 1) - (weights?.[a] ?? 1) || usedCount(a) - usedCount(b));
   const best = order[0]!;
   const plan = weights && (weights[best] ?? 1) >= 1.3 ? [best, best, order[1]!] : order.slice(0, n);
   for (const f of plan) {

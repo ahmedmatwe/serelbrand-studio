@@ -271,7 +271,7 @@ export function dailyReport(ctx: AgentContext, now = new Date()): string {
   const hours = learnedShortHours(ctx);
   if (hours) lines.push(`🕒 مواعيد النشر الحالية: ${hours.map((h) => `${((h + 2 + 11) % 12) + 1} ${h + 2 < 12 ? 'ص' : 'م'}`).join(' و ')}`);
   const w = learnedFamilyWeights(ctx);
-  if (w) { const name: Record<string, string> = { apps: 'التطبيقات', code: 'الأكواد', ios: 'الآيفون', android: 'الأندرويد' }; const top = Object.entries(w).sort((a, b) => b[1] - a[1])[0]!; if (top[1] > 1.05) lines.push(`📈 الأكتر نجاحاً: أسرار ${name[top[0]] ?? top[0]}`); }
+  if (w) { const name: Record<string, string> = { apps: 'التطبيقات', code: 'الأكواد', ios: 'الآيفون', android: 'الأندرويد', free: 'البدائل المجانية' }; const top = Object.entries(w).sort((a, b) => b[1] - a[1])[0]!; if (top[1] > 1.05) lines.push(`📈 الأكتر نجاحاً: أسرار ${name[top[0]] ?? top[0]}`); }
   const lessons = ctx.repos.knowledge.byCategory('lesson').slice(0, 2);
   if (lessons.length) lines.push('', '📝 آخر دروس الفريق:', ...lessons.map((l) => `- ${l.insight.slice(0, 160)}`));
   lines.push('', '⏳ = لسه ما اتقاسش (بيتقاس بعد 24 ساعة من النشر)');

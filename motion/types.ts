@@ -15,6 +15,8 @@ export type MotionScene = { start: number; end: number; headline: Hl } & (
   | { type: 'card'; icon?: IconName; title: string; rows: { label: string; value: string; tone: 'good' | 'bad' | 'neutral'; at: number; then?: { at: number; value: string; tone: 'good' | 'bad' | 'neutral'; detail?: string } }[]; alert?: { text: string; at: number } }
   | { type: 'alert'; icon: IconName; tone: 'good' | 'bad'; action?: { text: string; accent?: string; at: number; icon: IconName } }
   | { type: 'compat'; items: string[]; code?: string; badge?: string; badgeAt?: number }
+  /** Paid tool vs the free one that does the same job: the paid card is crossed out when the free one is named. */
+  | { type: 'versus'; paid: { name: string; note: string }; free: { name: string; note: string }; freeAt: number }
   | { type: 'cta'; code?: string; icon?: IconName; sub?: Hl; subAt?: number; followAt: number }
   | { type: 'statement'; icon: IconName; lines: { text: string; at: number }[] }
 );

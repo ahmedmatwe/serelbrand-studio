@@ -164,7 +164,7 @@ export function phoneUiEvents(ui: PhoneUi, words: WordTime[], offset: number, du
     if (!times) return undefined;
     const a = Math.max(0, times[0]! - 0.5), b = Math.min(duration - 0.05, times.at(-1)! + (ui.call ? 3.2 : 2.6));
     dialer(c, ui, times, a, b);
-  } else {
+  } else if (ui.type === 'settings') {
     let times = pathTimes(words, ui.path);
     const found = times.filter((t) => Number.isFinite(t));
     if (found.length < Math.min(2, ui.path.length)) return undefined;
@@ -179,6 +179,6 @@ export function phoneUiEvents(ui: PhoneUi, words: WordTime[], offset: number, du
     const a = Math.max(0, times[0]! - 0.4), b = Math.min(duration - 0.05, times.at(-1)! + 2.6);
     if (b - a < 1.5) return undefined;
     settings(c, ui, times, a, b);
-  }
+  } else return undefined; // versus is drawn by the motion graphics only
   return c.ev;
 }

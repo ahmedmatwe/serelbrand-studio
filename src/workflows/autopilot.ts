@@ -153,7 +153,7 @@ export function longPlan(strategy: StrategyOutput | undefined, producedTitles: S
 
 const PackLLM = z.object({ topics: z.array(z.object({
   title: z.string().min(5), subject: z.string().min(2), angle: z.string(),
-  kind: z.enum(['idea', 'story', 'code', 'feature', 'trick']).default('idea'),
+  kind: z.enum(['idea', 'story', 'code', 'feature', 'trick', 'freealt']).default('idea'),
   /** Official page that documents it (support.apple.com, support.google.com, samsung.com…), when there is one. */
   sourceUrl: z.string().default(''),
 })).min(3) });

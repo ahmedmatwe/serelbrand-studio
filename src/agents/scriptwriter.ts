@@ -109,6 +109,8 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
     // Live experiments (the lab): each Short of the pack tries a version of length / open loop / closing line.
     const labPick = input.format === 'short' && topics?.length ? labAssign(this.ctx, topics.map((t) => t.subject)) : undefined;
     if (labPick) saveAssign(this.ctx, input.videoId, labPick);
+    // "Why pay?" topics (free alternatives to paid tools) have their own honesty rules.
+    const freeRule = topics?.some((t) => t.kind === 'freealt') ? { whyPayRule: 'Scenes whose topic kind is "freealt" are "why pay?" videos: hook = the paid tool/subscription people pay for and the surprise that a free one does the same job; name the paid tool at most once, neutrally (never mock or insult it, never claim it is bad); NEVER say a price or a number of pounds/dollars; say the free tool\'s real limits exactly as the entry says (daily limit, compatible phones, internet needed) — honesty builds trust; then the steps of the free tool; end with the result.' } : {};
     const lab = labPick ? { experimentsPerScene: topics!.map((t, i) => `Scene ${i + 1}: ${labPick.get(t.subject)?.instructions.join(' ') ?? ''}`), experimentsRule: 'These are live experiments: follow each scene\'s instructions exactly (they override the general rules on the same point); everything else stays as the rules say.' } : {};
     // Real sources first: facts in the script must come from them, so verification can confirm them.
     // Sequential (not parallel): Wikipedia throttles bursts from cloud IPs.
@@ -126,7 +128,7 @@ export class ScriptwriterAgent extends Agent<ScriptInput, Script> {
       task: 'script.write',
       tier: 'writing',
       system: loadPrompt('scriptwriter'),
-      prompt: JSON.stringify({ ...input, ...pack, ...lab, ...sourcing, ...this.experience(phone), brief: this.ctx.repos.artifacts.latest(input.videoId, 'brief')?.data, targetWords: target, dialect: this.ctx.config.channel.dialect }),
+      prompt: JSON.stringify({ ...input, ...pack, ...lab, ...freeRule, ...sourcing, ...this.experience(phone), brief: this.ctx.repos.artifacts.latest(input.videoId, 'brief')?.data, targetWords: target, dialect: this.ctx.config.channel.dialect }),
       schema: ScriptLLM,
       maxOutputTokens: 16000,
       videoId: input.videoId,
