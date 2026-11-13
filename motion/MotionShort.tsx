@@ -9,6 +9,7 @@ import { AbsoluteFill, Audio, Easing, Img, Sequence, cancelRender, interpolate, 
 import { fitText } from '@remotion/layout-utils';
 import { loadFont } from '@remotion/google-fonts/Cairo';
 import type { Hl, IconName, MotionPlan, MotionScene, MotionStyle, Prop, Tone, Variants } from './types';
+import { soundPlan, type Trans } from './edit';
 
 const { fontFamily } = loadFont('normal', { weights: ['600', '800', '900'], subsets: ['arabic', 'latin'] });
 export const FPS = 30;
@@ -130,7 +131,7 @@ const Particles: React.FC<{ color: string }> = ({ color }) => {
   );
 };
 
-const Shell: React.FC<{ len: number; children: React.ReactNode; instant?: boolean }> = ({ len, children, instant }) => {
+const Shell: React.FC<{ len: number; children: React.ReactNode; instant?: boolean; kind?: Trans }> = ({ len, children, instant, kind: cut }) => {
   const s = useStyle();
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -138,8 +139,9 @@ const Shell: React.FC<{ len: number; children: React.ReactNode; instant?: boolea
   const inn = instant ? 1 : spring({ frame, fps, config: { damping: 20, stiffness: 420, mass: 0.6 } });
   const out = interpolate(frame, [len - 2, len + 3], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.in(Easing.quad) });
   const op = Math.min(1, inn * 2.2) * (1 - out);
-  const kind = V(s).transition;
-  const tr = kind === 'whip'
+  const kind = cut ?? V(s).transition;
+  const tr = kind === 'punch' ? `scale(${1.28 - 0.28 * inn + out * 0.12}) rotate(${(1 - inn) * -3}deg)`
+    : kind === 'whip'
     ? `translateX(${(1 - inn) * -900 + out * 900}px) scale(${1.08 - 0.08 * inn}) skewX(${(1 - inn) * 10 - out * 10}deg)`
     : kind === 'zoom' ? `scale(${1.35 - 0.35 * inn + out * 0.5})`
     : kind === 'rise' ? `translateY(${(1 - inn) * 520 - out * 520}px) scale(${1.06 - 0.06 * inn})` : `scale(${1.12 - 0.12 * inn + out * 0.1})`;
@@ -1052,11 +1054,8 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
   const camDrift = 6 * Math.sin(t * 0.7);
   // brand-colour wipe sweeping across at every cut (≈ 0.2 s)
   const wipe = cur && curStart > 0 && sinceCut < 0.22 ? sinceCut / 0.22 : -1;
-  const sfx: [string, number, number][] = [
-    ...plan.scenes.slice(1).map((x) => ['whoosh', x.start, 0.4] as [string, number, number]),
-    ...plan.beats.map((b) => ['pop', b, 0.5] as [string, number, number]),
-    ...plan.scenes.flatMap((x) => (x.type === 'dialer' ? x.keys.map((k) => ['tap', k.at, 0.5] as [string, number, number]) : x.type === 'app' ? x.at.map((a) => ['tap', a + 0.15, 0.5] as [string, number, number]) : x.type === 'settings' ? x.at.slice(1).map((a) => ['tap', a, 0.5] as [string, number, number]) : x.type === 'mock' ? x.items.map((it) => ['tap', it.at, 0.32] as [string, number, number]) : x.type === 'alert' && x.tone === 'bad' ? [['alert', x.start + 0.1, 0.35] as [string, number, number]] : [])),
-  ];
+  // the sound & transitions team decides every cut's transition and every sound (motion/edit.ts)
+  const { trans, sfx } = soundPlan(plan.scenes);
   return (
     <StyleCtx.Provider value={s}><HeroCtx.Provider value={plan.hero}>
       <AbsoluteFill style={{ ...vars(th), background: s.bg1 }}>
@@ -1066,7 +1065,7 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
         <AbsoluteFill style={{ transform: `scale(${1 + 0.03 * kick + camPush}) translate(${camDrift}px, 0)` }}>
           {plan.scenes.map((sc, i) => (
             <Sequence key={i} from={f(sc.start)} durationInFrames={Math.max(1, f(sc.end - sc.start) + 10)}>
-              <Shell len={f(sc.end - sc.start)} instant={i === 0}><SceneView sc={sc} endCard={plan.endCard} /></Shell>
+              <Shell len={f(sc.end - sc.start)} instant={i === 0} kind={trans[i]}><SceneView sc={sc} endCard={plan.endCard} /></Shell>
             </Sequence>
           ))}
           {/* the things being talked about, alive on screen (absolute times, so not inside the scene sequences) */}
