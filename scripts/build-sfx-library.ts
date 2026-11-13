@@ -19,6 +19,15 @@ const TMP = resolve(ROOT, 'data/sfx-tmp');
 const FF = process.env.FFMPEG_PATH || (createRequire(import.meta.url)('ffmpeg-static') as string);
 
 /** What the edit needs. peakMax = latest acceptable peak (s) for sounds that must hit instantly. */
+/** Relevance: the sound's own name/tags must say it IS this kind of sound; some words always disqualify. */
+const MUST: Record<string, RegExp> = {
+  whoosh: /whoosh|swoosh|swish|whip|transition|woosh/i, 'swipe-up': /swipe|swoosh|whoosh|swish|interface|ui/i, impact: /impact|hit|boom|punch|thud|cinematic/i,
+  click: /click|button|mouse|tap|ui/i, pop: /pop|bubble|blip|ui/i, typing: /typing|keyboard|keys/i, camera: /camera|shutter|photo/i,
+  cash: /cash|register|coin|money|ching/i, notify: /notification|notify|ding|alert|message|chime/i, success: /success|correct|positive|win|complete|chime/i,
+  error: /error|wrong|fail|buzz|denied|negative/i,
+};
+const NEVER = /axe|sword|knife|gun|shot|blood|scream|fart|burp|fish|oil|boil|fry|food|animal|dog|cat|bird|kiss|sex|horror|gore|zombie|explosion|bomb|siren|church|bell tower|music|song|vocal|voice|speech|laugh/i;
+
 export const ROLES: Record<string, { q: string[]; dur: [number, number]; maxLen: number; peakMax?: number; keep: number; gainDb: number }> = {
   whoosh: { q: ['fast whoosh', 'swoosh transition', 'whip pan whoosh', 'short swish'], dur: [0.15, 1.2], maxLen: 0.6, keep: 4, gainDb: -6 },
   'swipe-up': { q: ['ui swipe', 'swoosh up', 'interface swipe'], dur: [0.1, 1.0], maxLen: 0.5, keep: 3, gainDb: -7 },
@@ -33,10 +42,10 @@ export const ROLES: Record<string, { q: string[]; dur: [number, number]; maxLen:
   error: { q: ['error buzz', 'wrong answer buzzer', 'ui error'], dur: [0.1, 1.5], maxLen: 0.8, keep: 2, gainDb: -11 },
 };
 
-type Hit = { id: number; name: string; duration: number; username: string; avg_rating: number; num_downloads: number; license: string; previews: Record<string, string> };
+type Hit = { id: number; name: string; tags?: string[]; duration: number; username: string; avg_rating: number; num_downloads: number; license: string; previews: Record<string, string> };
 
 async function search(q: string, dur: [number, number]): Promise<Hit[]> {
-  const params = new URLSearchParams({ query: q, filter: `license:"Creative Commons 0" duration:[${dur[0]} TO ${dur[1]}]`, fields: 'id,name,duration,username,avg_rating,num_downloads,license,previews', sort: 'rating_desc', page_size: '15', token: KEY! });
+  const params = new URLSearchParams({ query: q, filter: `license:"Creative Commons 0" duration:[${dur[0]} TO ${dur[1]}]`, fields: 'id,name,tags,duration,username,avg_rating,num_downloads,license,previews', sort: 'rating_desc', page_size: '15', token: KEY! });
   const r = await fetch(`https://freesound.org/apiv2/search/text/?${params}`);
   if (!r.ok) throw new Error(`Freesound search "${q}": HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
   return ((await r.json()) as { results: Hit[] }).results.filter((h) => /creativecommons\.org\/publicdomain\/zero/.test(h.license));
@@ -59,9 +68,11 @@ for (const [role, cfg] of Object.entries(ROLES)) {
   for (const q of cfg.q) {
     let hits: Hit[] = [];
     try { hits = await search(q, cfg.dur); } catch (e) { console.warn(String(e)); continue; }
-    for (const h of hits.slice(0, 8)) {
+    for (const h of hits.slice(0, 15)) {
       if (seen.has(h.id)) continue;
       seen.add(h.id);
+      const words = `${h.name} ${(h.tags ?? []).join(' ')}`;
+      if (!MUST[role]!.test(words) || NEVER.test(words)) continue;
       const url = h.previews['preview-hq-mp3'];
       if (!url) continue;
       const src = resolve(TMP, `${h.id}.mp3`);
