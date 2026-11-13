@@ -6,7 +6,11 @@ export type Tone = 'yellow' | 'green' | 'red';
 export interface Hl { text: string; accent?: string; tone?: Tone }
 export type IconName = 'call' | 'shield' | 'headset' | 'warn' | 'check' | 'lock' | 'antenna' | 'chat' | 'eye' | 'bolt' | 'image' | 'battery' | 'bell' | 'mic' | 'location' | 'trash' | 'star' | 'search' | 'phone' | 'camera' | 'tune';
 
-export type MotionScene = { start: number; end: number; headline: Hl } & (
+/** How a 3D object enters / behaves (the story told with things, not only screens). */
+export type PropAction = 'pop' | 'fly-in' | 'drop' | 'fly-away' | 'shake' | 'spin' | 'pulse' | 'no';
+/** A 3D illustration (Fluent Emoji 3D, MIT) of the exact thing the narration names, appearing when it is said. */
+export interface Prop { src: string; at: number; until: number; action: PropAction; slot: number }
+export type MotionScene = { start: number; end: number; headline: Hl; props?: Prop[] } & (
   | { type: 'hook'; icon: IconName; teaserCode?: string; revealAt?: number; question?: Hl; questionAt?: number }
   | { type: 'dialer'; code: string; keys: { k: string; at: number }[]; callAt?: number }
   | { type: 'settings'; os: 'ios' | 'android'; path: string[]; at: number[] }
@@ -15,6 +19,8 @@ export type MotionScene = { start: number; end: number; headline: Hl } & (
   | { type: 'card'; icon?: IconName; title: string; rows: { label: string; value: string; tone: 'good' | 'bad' | 'neutral'; at: number; then?: { at: number; value: string; tone: 'good' | 'bad' | 'neutral'; detail?: string } }[]; alert?: { text: string; at: number } }
   | { type: 'alert'; icon: IconName; tone: 'good' | 'bad'; action?: { text: string; accent?: string; at: number; icon: IconName } }
   | { type: 'compat'; items: string[]; code?: string; badge?: string; badgeAt?: number }
+  /** A situation told with big 3D objects (e.g. money flying out of a wallet every month). */
+  | { type: 'story' }
   /** Paid tool vs the free one that does the same job: the paid card is crossed out when the free one is named. */
   | { type: 'versus'; paid: { name: string; note: string }; free: { name: string; note: string }; freeAt: number }
   | { type: 'cta'; code?: string; icon?: IconName; sub?: Hl; subAt?: number; followAt: number }

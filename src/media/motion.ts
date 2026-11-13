@@ -11,7 +11,7 @@
  */
 import { execFile } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { AgentContext } from '../agents/base.ts';
@@ -20,6 +20,8 @@ import { normWord, scriptWords, similarity, type WordTime } from './align.ts';
 import { splitSentences } from './shots.ts';
 import { readKnowledge } from '../analytics/learner.ts';
 import { GENES } from '../../motion/types.ts';
+import { readFileSync } from 'node:fs';
+import type { Prop, PropAction } from '../../motion/types.ts';
 import type { IconName, MotionPlan, MotionScene, MotionStyle, Variants } from '../../motion/types.ts';
 
 export type { MotionPlan, MotionStyle };
@@ -171,11 +173,51 @@ export function captionsFromWords(words: WordTime[], duration: number): { a: num
   return out.map((c, i) => ({ a: Number(c.a.toFixed(2)), b: Number(Math.min(duration, out[i + 1]?.a ?? duration, c.b + 1).toFixed(2)), text: c.w.join(' ').replace(/[.!؟?،,…]+$/, '') }));
 }
 
+// ── props (3D objects of what is said) ────────────────────────────────────────────────────────────────────
+const PROPS_FILE = resolve(dirname(new URL(import.meta.url).pathname), '../../config/props.json');
+let propCat: { base: string; props: Record<string, string> } | undefined;
+function catalog() { return (propCat ??= existsSync(PROPS_FILE) ? JSON.parse(readFileSync(PROPS_FILE, 'utf8')) : { base: '', props: {} }); }
+export const propNames = () => Object.keys(catalog().props);
+
+/** The catalog name closest to what the director asked for (exact, else the most shared words), or undefined. */
+export function resolveProp(thing: string): string | undefined {
+  const names = propNames();
+  const want = thing.toLowerCase().trim();
+  if (catalog().props[want]) return want;
+  const tw = new Set(want.split(/[\s-]+/).filter((x) => x.length > 2));
+  let best: [string, number] | undefined;
+  for (const n of names) {
+    const nw = n.split(/[\s-]+/);
+    const hit = nw.filter((x) => tw.has(x)).length;
+    const sc = hit / Math.max(nw.length, tw.size);
+    if (hit && (!best || sc > best[1] || (sc === best[1] && n.length < best[0].length))) best = [n, sc];
+  }
+  return best && best[1] >= 0.5 ? best[0] : undefined;
+}
+export const propFile = (name: string) => basename(catalog().props[name] ?? '');
+export const propUrl = (name: string) => catalog().base + (catalog().props[name] ?? '').split('/').map(encodeURIComponent).join('/');
+
+/** Timed props of one scene: each appears when its word is said (else when its sentence starts). */
+function sceneProps(planned: { thing: string; word?: string; sentence: number; action: PropAction }[] | undefined, ws: WordTime[], sAt: (i: number) => number, start: number, end: number, big: boolean, hook = false): Prop[] {
+  // The hook's big headline sits in the middle: its props use the lower slots only.
+  const slots = big ? [10, 11, 12] : hook ? [1, 2] : [0, 1, 2];
+  const out: Prop[] = [];
+  for (const x of (planned ?? []).slice(0, slots.length)) {
+    const name = resolveProp(x.thing);
+    if (!name || out.some((o) => o.src === `props/${propFile(name)}`)) continue;
+    const s0 = Math.max(start, Math.min(end - 0.5, sAt(x.sentence)));
+    const w = x.word ? ws.find((v) => v.start >= s0 - 0.05 && similarity(normWord(v.w), normWord(x.word!)) >= 0.7) : undefined;
+    const at = Number(Math.min(end - 0.4, Math.max(start + 0.15, w ? w.start - 0.1 : s0 + 0.25)).toFixed(2));
+    out.push({ src: `props/${propFile(name)}`, at, until: Number(end.toFixed(2)), action: x.action, slot: slots[out.length]! });
+  }
+  return out;
+}
+
 // ── planner ──────────────────────────────────────────────────────────────────────────────────────────────
 const Hl = z.object({ text: z.string().min(2).max(60), accent: z.string().max(30).optional(), tone: z.enum(['yellow', 'green', 'red']).optional() });
 const Planned = z.object({
   scenes: z.array(z.object({
-    type: z.enum(['hook', 'dialer', 'settings', 'app', 'card', 'alert', 'compat', 'cta', 'statement', 'versus']),
+    type: z.enum(['hook', 'dialer', 'settings', 'app', 'card', 'alert', 'compat', 'cta', 'statement', 'versus', 'story']),
     from: z.number().int().min(0), to: z.number().int().min(0),
     headline: Hl,
     icon: z.enum(ICONS).optional(),
@@ -189,6 +231,7 @@ const Planned = z.object({
     badge: z.string().max(30).optional(),
     sub: Hl.optional(),
     lines: z.array(z.string().max(30)).max(3).optional(),
+    props: z.array(z.object({ thing: z.string().max(40), word: z.string().max(30).optional(), sentence: z.number().int(), action: z.enum(['pop', 'fly-in', 'drop', 'fly-away', 'shake', 'spin', 'pulse', 'no']).default('pop') })).max(3).optional(),
   })).min(2).max(8),
 });
 type PlannedScene = z.infer<typeof Planned>['scenes'][number];
@@ -227,8 +270,11 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
         'from/to = inclusive sentence indexes; scenes must cover every sentence in order with no gaps or overlaps; 4–7 scenes. Headlines: 2–4 words (≤ 24 characters, they are drawn on ONE big line), natural Egyptian Arabic, readable in 1 second, accent = one word of the headline to colour. ' +
         'Use ONLY what the narration and the library entry say (no invented numbers, apps or results); a code must be written exactly as entry.ui.code. ' +
         'Never widen a claim: keep every condition the narration states (e.g. "iPhone and Android on GSM networks" must NOT become "all phones"; a version, network or setting stays). ' +
+        'BRING IT TO LIFE — never just a screen with information: in EVERY scene add 1–3 props = 3D objects of the concrete things the sentences name or picture (a shoe when a shoe is mentioned, money with wings when money is wasted every month, a robot for AI, a locked padlock for privacy, a camera for photos, a hourglass for waiting…). ' +
+        'thing = a name from propNames (exact); word = the Arabic word in that sentence that names or evokes it (it appears exactly when that word is said); sentence = its index; action: pop (appears), fly-in, drop (falls in), fly-away (leaves: money spent, data lost), shake (alarm, danger), spin (magic, transformation), pulse (important), no (crossed out: what you no longer need). ' +
+        'story = a scene for a SITUATION the narration describes (paying every month, someone reading your messages, a crowded photo, a long lecture): told with 1–3 big props and their actions instead of a screen — use it for at least one situation sentence when the video has one. ' +
         'Make the opening stop the scroll. Apply criticNotes (what the editing critic disliked in recent videos) and rules (learned from view counts) so this video is better than the last. JSON only.',
-      prompt: JSON.stringify({ title: inp.title, sentences: sentences.map((s, i) => ({ i, text: s })), entry: inp.entry ? { ui: inp.entry.ui, steps: inp.entry.steps, result: inp.entry.result, use: inp.entry.use, platforms: inp.entry.platforms } : undefined, criticNotes: lessons.criticNotes, rules: lessons.rules, ...(criticOnThis ? { criticOnThisVideo: criticOnThis } : {}) }),
+      prompt: JSON.stringify({ propNames: propNames().join('|'), title: inp.title, sentences: sentences.map((s, i) => ({ i, text: s })), entry: inp.entry ? { ui: inp.entry.ui, steps: inp.entry.steps, result: inp.entry.result, use: inp.entry.use, platforms: inp.entry.platforms } : undefined, criticNotes: lessons.criticNotes, rules: lessons.rules, ...(criticOnThis ? { criticOnThisVideo: criticOnThis } : {}) }),
       schema: Planned,
       videoId,
       maxOutputTokens: 8000,
@@ -246,7 +292,8 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
     if (end - start < 0.6) continue;
     const ws = inp.words.filter((w) => w.start >= start - 0.05 && w.start < end);
     const headline = { ...p.headline, ...(p.headline.accent && !p.headline.text.includes(p.headline.accent) ? { accent: undefined } : {}) };
-    const base = { start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), headline };
+    const props = sceneProps(p.props, ws, sAt, start, end, p.type === 'story', p.type === 'hook');
+    const base = { start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), headline, ...(props.length ? { props } : {}) };
     const at = (i: number | undefined, frac: number) => (i !== undefined && i >= p.from && i <= p.to ? sAt(i) : start + (end - start) * frac);
     switch (p.type) {
       case 'hook': {
@@ -303,6 +350,12 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
         beats.push(freeAt);
         break;
       }
+      case 'story':
+        // No drawable object found → a plain statement keeps the time covered (never an empty gap).
+        if (!props.length) { scenes.push({ ...base, type: 'statement', icon: p.icon ?? 'star', lines: [] }); break; }
+        scenes.push({ ...base, type: 'story' });
+        props.forEach((x) => beats.push(x.at));
+        break;
       case 'compat':
         scenes.push({ ...base, type: 'compat', items: p.items?.length ? p.items : ['آيفون', 'أندرويد'], ...(ui?.type === 'dialer' ? { code: ui.code } : {}), ...(p.badge ? { badge: p.badge, badgeAt: Number((start + (end - start) * 0.6).toFixed(2)) } : {}) });
         break;
@@ -388,12 +441,47 @@ export async function renderMotion(rootDir: string, plan: MotionPlan, audio: str
   mkdirSync(pub, { recursive: true });
   try {
     cpSync(resolve(rootDir, 'motion/public/sfx'), resolve(pub, 'sfx'), { recursive: true });
+    await stageProps(rootDir, plan, pub);
     copyFileSync(audio, resolve(pub, plan.audio));
     const props = resolve(pub, 'props.json');
     writeFileSync(props, JSON.stringify(plan));
     // Standard limited-range yuv420p/bt709: Instagram rejected Remotion's default full-range (yuvj420p) uploads.
     await promisify(execFile)(resolve(rootDir, 'node_modules/.bin/remotion'), ['render', 'motion/index.ts', 'MotionShort', out, `--props=${props}`, `--public-dir=${pub}`, '--codec=h264', '--crf=20', '--pixel-format=yuv420p', '--color-space=bt709', '--log=error'], { cwd: rootDir, timeout: 20 * 60_000, maxBuffer: 32 * 1024 * 1024 });
   } finally { rmSync(pub, { recursive: true, force: true }); }
+}
+
+/**
+ * Puts every 3D prop the plan uses into the render's public dir (downloaded once into data/prop-cache). A prop
+ * that can't be fetched is removed from the plan — the video never fails because of an illustration.
+ */
+async function stageProps(rootDir: string, plan: MotionPlan, pub: string) {
+  const cache = resolve(rootDir, 'data/prop-cache');
+  mkdirSync(cache, { recursive: true }); mkdirSync(resolve(pub, 'props'), { recursive: true });
+  const byFile = new Map(propNames().map((n) => [propFile(n), n]));
+  const ok = new Set<string>();
+  for (const src of new Set(plan.scenes.flatMap((sc) => sc.props ?? []).map((x) => x.src))) {
+    const file = src.replace(/^props\//, '');
+    const local = resolve(cache, file);
+    try {
+      if (!existsSync(local)) {
+        const name = byFile.get(file);
+        if (!name) continue;
+        // CDN first, then GitHub itself; each with its own timeout.
+        const path = propUrl(name).replace(catalog().base, '');
+        let buf: Buffer | undefined;
+        for (const url of [propUrl(name), `https://raw.githubusercontent.com/microsoft/fluentui-emoji/main/${path}`, propUrl(name)]) {
+          const r = await fetch(url, { signal: AbortSignal.timeout(25_000) }).catch(() => undefined);
+          if (r?.ok) { buf = Buffer.from(await r.arrayBuffer()); break; }
+        }
+        if (!buf || buf.length < 1000) continue;
+        writeFileSync(local, buf);
+      }
+      copyFileSync(local, resolve(pub, src));
+      ok.add(src);
+    } catch { /* skip this prop */ }
+  }
+  for (const sc of plan.scenes) if (sc.props) sc.props = sc.props.filter((x) => ok.has(x.src));
+  writeFileSync(resolve(pub, 'props.json'), JSON.stringify(plan));
 }
 
 export type { IconName };

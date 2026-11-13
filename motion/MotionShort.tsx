@@ -5,10 +5,10 @@
  * the plan, so the team can tune it over time.
  */
 import React from 'react';
-import { AbsoluteFill, Audio, Easing, Sequence, cancelRender, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Audio, Easing, Img, Sequence, cancelRender, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { fitText } from '@remotion/layout-utils';
 import { loadFont } from '@remotion/google-fonts/Cairo';
-import type { Hl, IconName, MotionPlan, MotionScene, MotionStyle, Tone, Variants } from './types';
+import type { Hl, IconName, MotionPlan, MotionScene, MotionStyle, Prop, Tone, Variants } from './types';
 
 const { fontFamily } = loadFont('normal', { weights: ['600', '800', '900'], subsets: ['arabic', 'latin'] });
 export const FPS = 30;
@@ -638,6 +638,57 @@ const StatementScene: React.FC<{ sc: Of<'statement'> }> = ({ sc }) => {
   );
 };
 
+// ── props: 3D objects of what is said, alive (enter, float, act, leave) ──────────────────────────────────────
+/** Where props sit: beside the main content in normal scenes (0–2), big and central in story scenes (10–12). */
+const SLOTS: Record<number, { x: number; y: number; size: number; side: 1 | -1 }> = {
+  0: { x: 820, y: 470, size: 240, side: 1 }, 1: { x: 20, y: 880, size: 230, side: -1 }, 2: { x: 830, y: 1150, size: 220, side: 1 },
+  10: { x: 290, y: 470, size: 500, side: 1 }, 11: { x: 80, y: 1000, size: 320, side: -1 }, 12: { x: 680, y: 1000, size: 320, side: 1 },
+};
+const PropView: React.FC<{ p: Prop }> = ({ p }) => {
+  const s = useStyle();
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const t = frame / FPS;
+  if (t < p.at - 0.05 || t > p.until + 0.4) return null;
+  const sl = SLOTS[p.slot] ?? SLOTS[0]!;
+  const inP = pop(frame, fps, f(p.at));
+  const out = ease(t, p.until - 0.05, p.until + 0.35);
+  const live = t - p.at;
+  let x = 0, y = 0, rot = 0, scale = inP, ry = 0, op = Math.min(1, inP * 1.5) * (1 - out);
+  if (p.action === 'fly-in') x = (1 - inP) * 700 * sl.side;
+  if (p.action === 'drop') y = (1 - inP) * -900;
+  if (p.action === 'fly-away') { const k = ease(t, p.at + 1.1, p.at + 2.1); y -= 1100 * k; x += 120 * sl.side * k; rot += 25 * k; op *= 1 - k; }
+  if (p.action === 'shake' && live < 1.2) rot += 14 * Math.sin(live * 28) * (1 - live / 1.2);
+  if (p.action === 'spin') ry = 360 * ease(t, p.at, p.at + 0.9);
+  if (p.action === 'pulse') scale *= 1 + 0.07 * Math.sin(live * 6);
+  // always alive: a slow float and sway
+  y += 14 * Math.sin(t * 2.1 + p.slot); rot += 4 * Math.sin(t * 1.3 + p.slot * 2);
+  const no = p.action === 'no' ? pop(frame, fps, f(p.at + 0.45)) : 0;
+  return (
+    <div style={{ position: 'absolute', left: sl.x, top: sl.y, width: sl.size, height: sl.size, opacity: op, transform: `translate(${x}px, ${y}px) rotate(${rot}deg) perspective(900px) rotateY(${ry}deg) scale(${scale})` }}>
+      <Img src={staticFile(p.src)} style={{ width: '100%', height: '100%', objectFit: 'contain', filter: `drop-shadow(0 ${sl.size * 0.08}px ${sl.size * 0.1}px rgba(0,0,0,.45))` }} />
+      {no > 0 && (
+        <div style={{ position: 'absolute', inset: '-6%', borderRadius: '50%', border: `${sl.size * 0.07}px solid ${s.bad}`, transform: `scale(${no})` }}>
+          <div style={{ position: 'absolute', left: '-4%', right: '-4%', top: '46%', height: sl.size * 0.07, background: s.bad, transform: 'rotate(-45deg)' }} />
+        </div>
+      )}
+    </div>
+  );
+};
+const PropLayer: React.FC<{ props?: Prop[] }> = ({ props }) => <>{(props ?? []).map((p, i) => <PropView key={i} p={p} />)}</>;
+
+/** A situation told with big 3D objects (the props are the scene); a soft spotlight behind the hero object. */
+const StoryScene: React.FC<{ sc: Of<'story'> }> = ({ sc }) => {
+  const s = useStyle();
+  const t = useAbsT(sc.start);
+  return (
+    <>
+      <AbsoluteFill style={{ background: `radial-gradient(circle at 50% 38%, ${s.accent}33 0%, transparent ${40 + 4 * Math.sin(t * 2)}%)` }} />
+      <Headline hl={sc.headline} size={88} top={190} />
+    </>
+  );
+};
+
 const SceneView: React.FC<{ sc: MotionScene; endCard: string }> = ({ sc, endCard }) => {
   switch (sc.type) {
     case 'hook': return <HookScene sc={sc} />;
@@ -648,6 +699,7 @@ const SceneView: React.FC<{ sc: MotionScene; endCard: string }> = ({ sc, endCard
     case 'alert': return <AlertScene sc={sc} />;
     case 'compat': return <CompatScene sc={sc} />;
     case 'versus': return <VersusScene sc={sc} />;
+    case 'story': return <StoryScene sc={sc} />;
     case 'cta': return <CtaScene sc={sc} endCard={endCard} />;
     default: return <StatementScene sc={sc as Of<'statement'>} />;
   }
@@ -705,6 +757,8 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
               <Shell len={f(sc.end - sc.start)} instant={i === 0}><SceneView sc={sc} endCard={plan.endCard} /></Shell>
             </Sequence>
           ))}
+          {/* the things being talked about, alive on screen (absolute times, so not inside the scene sequences) */}
+          {plan.scenes.map((sc, i) => <PropLayer key={`p${i}`} props={sc.props} />)}
         </AbsoluteFill>
         <AbsoluteFill style={{ background: '#fff', opacity: s.flash * flash }} />
         <Captions caps={plan.captions} />
