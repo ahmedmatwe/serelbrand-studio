@@ -10,7 +10,8 @@
  * Drawn by motion/MotionShort.tsx (Remotion).
  */
 import { execFile } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { ffmpegPath as ffmpegBin } from './ffmpeg.ts';
 import { basename, dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
@@ -528,6 +529,18 @@ export async function renderMotion(rootDir: string, plan: MotionPlan, audio: str
   try {
     cpSync(resolve(rootDir, 'motion/public/sfx'), resolve(pub, 'sfx'), { recursive: true });
     await stageProps(rootDir, plan, pub);
+    // background music: a calm / uplifting licensed track (never the suspense ones for tips), ducked in the composition
+    const musicDir = resolve(rootDir, 'music');
+    if (existsSync(musicDir)) {
+      const tracks = readdirSync(musicDir).filter((f) => /^(calm|inspiring)-.*\.(mp3|m4a|wav)$/i.test(f)).sort();
+      if (tracks.length) {
+        const pickT = tracks[Math.round(plan.duration * 100) % tracks.length]!;
+        const ext = pickT.split('.').pop();
+        copyFileSync(resolve(musicDir, pickT), resolve(pub, `music.${ext}`));
+        plan.music = `music.${ext}`;
+        writeFileSync(resolve(pub, 'props.json'), JSON.stringify(plan));
+      }
+    }
     // the sound-effects team's professional library (if built): its variants + peak times go with the plan
     const lib = resolve(rootDir, 'motion/public/sfx/lib/manifest.json');
     if (existsSync(lib)) { plan.sfxLib = JSON.parse(readFileSync(lib, 'utf8')); writeFileSync(resolve(pub, 'props.json'), JSON.stringify(plan)); }
@@ -536,6 +549,12 @@ export async function renderMotion(rootDir: string, plan: MotionPlan, audio: str
     writeFileSync(props, JSON.stringify(plan));
     // Standard limited-range yuv420p/bt709: Instagram rejected Remotion's default full-range (yuvj420p) uploads.
     await promisify(execFile)(resolve(rootDir, 'node_modules/.bin/remotion'), ['render', 'motion/index.ts', 'MotionShort', out, `--props=${props}`, `--public-dir=${pub}`, '--codec=h264', '--crf=20', '--pixel-format=yuv420p', '--color-space=bt709', '--log=error'], { cwd: rootDir, timeout: 20 * 60_000, maxBuffer: 32 * 1024 * 1024 });
+    // Mastering: the platforms play everything at about -14 LUFS — loudness-normalise the final mix (two-pass
+    // feel with a true-peak ceiling) so the voice is as loud as the videos around it; the picture is copied as is.
+    const tmp = out.replace(/\.mp4$/, '.premaster.mp4');
+    renameSync(out, tmp);
+    await promisify(execFile)(ffmpegBin(), ['-y', '-v', 'error', '-i', tmp, '-c:v', 'copy', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=9', '-ar', '48000', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', out], { timeout: 5 * 60_000 });
+    rmSync(tmp, { force: true });
   } finally { rmSync(pub, { recursive: true, force: true }); }
 }
 

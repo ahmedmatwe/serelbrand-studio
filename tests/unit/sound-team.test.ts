@@ -18,7 +18,7 @@ test('sound team: each cut gets the fitting transition, sounds land on the cut a
   const { trans, sfx } = soundPlan(scenes);
   assert.deepEqual(trans, ['punch', 'punch', 'rise', 'whip', 'punch']);
   for (const cut of [2, 5, 7, 9]) assert.ok(sfx.some(([, at]) => Math.abs(at - (cut - 0.02)) < 1e-9), `a sound whose peak lands on the cut at ${cut}`);
-  for (let i = 1; i < sfx.length; i++) assert.ok(sfx[i]![1] - sfx[i - 1]![1] >= 0.1, 'no two sounds within 0.1 s');
+  for (let i = 1; i < sfx.length; i++) assert.ok(sfx[i]![1] - sfx[i - 1]![1] >= 0.12, 'no two sounds within 0.12 s');
   assert.ok(!sfx.some(([n, at]) => n.includes('tick') && Math.abs(at - 5.04) < 1e-9), 'the cut sound wins over a click at the same moment');
 });
 
@@ -31,8 +31,12 @@ test('sound team: with the library, each cut sound is placed so its PEAK hits th
   ] as never;
   const { sfx } = soundPlan(sc, lib);
   assert.ok(sfx.some(([f, at]) => f === 'sfx/lib/whoosh-1.wav' && Math.abs(at - 1.8) < 1e-9), 'peak 0.2 s → starts 0.2 s before the cut');
-  assert.ok(sfx.some(([f, at]) => f === 'sfx/lib/whoosh-2.wav' && Math.abs(at - 3.9) < 1e-9), 'the next cut uses the other variant');
+  assert.ok(sfx.some(([f, at]) => f === 'sfx/lib/whoosh-1.wav' && Math.abs(at - 3.8) < 1e-9), 'one consistent family: the same whoosh on every cut of this video');
+  assert.ok(soundPlan(sc, lib, [], 1).sfx.some(([f]) => f === 'sfx/lib/whoosh-2.wav'), 'another video gets the other family');
   assert.ok(sfx.some(([f]) => f === 'sfx/lib/camera-1.wav'), 'a camera on screen → the shutter');
+  assert.ok(!sfx.some(([f]) => /pop/.test(f)), 'no cartoon pops');
+  const under = soundPlan(sc, lib, [{ a: 4.9, b: 5.5 }]).sfx.find(([f]) => f === 'sfx/lib/camera-1.wav')!;
+  assert.ok(under[2] < 0.2, 'a sound under a spoken word is lowered');
 });
 
 test('sound team: every effect is short (≤ 0.18 s, the alert ≤ 0.35 s) so it never drags behind the picture', async () => {

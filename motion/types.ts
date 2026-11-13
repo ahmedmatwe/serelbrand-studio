@@ -70,6 +70,8 @@ export interface MotionStyle {
 
 export interface MotionPlan {
   duration: number;
+  /** Background music file in the public dir (licensed, soft, ducked under the voice). */
+  music?: string;
   /** The sound-effects team's professional library (role → variants with where each one peaks). */
   sfxLib?: Record<string, { file: string; peak: number; dur: number }[]>;
   /** THE main object of the video (3D, e.g. a PDF page for a PDF tip): drawn instead of generic icons. */
