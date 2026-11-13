@@ -30,6 +30,15 @@ const vars = (t: Theme) => ({ '--text': t.text, '--dim': t.dim, '--card': t.card
 /** Inside a drawn phone the screen is always dark, whatever the theme. */
 const DARK = vars(THEMES.night!);
 const StyleCtx = React.createContext<MotionStyle>(null as unknown as MotionStyle);
+/** The video's main object (3D image path) — drawn wherever a generic icon used to be. */
+const HeroCtx = React.createContext<string | undefined>(undefined);
+/** The main object (3D, floating) when there is one, else the scene's icon. */
+const Hero: React.FC<{ icon?: IconName; size: number; color: string; style?: React.CSSProperties }> = ({ icon, size, color, style }) => {
+  const hero = React.useContext(HeroCtx);
+  const t = useCurrentFrame() / FPS;
+  if (hero) return <Img src={staticFile(hero)} style={{ width: size * 1.35, height: size * 1.35, objectFit: 'contain', transform: `translateY(${8 * Math.sin(t * 2.2)}px) rotate(${3 * Math.sin(t * 1.4)}deg)`, filter: 'drop-shadow(0 18px 26px rgba(0,0,0,.45))', ...style }} />;
+  return icon ? <Icon name={icon} size={size} color={color} style={style} /> : null;
+};
 const useStyle = () => React.useContext(StyleCtx);
 const V = (s: MotionStyle): Variants => ({ theme: 'studio', bg: 'dots', caption: 'highlight', transition: s.transition, hook: 'rings', headline: 'pop', phone: 'flat', ...(s.variants ?? {}) });
 const toneColor = (s: MotionStyle, t?: Tone | 'good' | 'bad' | 'neutral') => (t === 'green' || t === 'good' ? s.good : t === 'red' || t === 'bad' ? s.bad : t === 'neutral' ? DIM : s.accent);
@@ -243,7 +252,7 @@ const HookSlam: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
   return (
     <>
       <div style={{ position: 'absolute', top: 210, left: 0, right: 0, display: 'flex', justifyContent: 'center', opacity: pop(frame, fps, 0) }}>
-        <div style={{ width: 150, height: 150, borderRadius: 44, background: s.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 70px ${s.accent}`, transform: `rotate(${Math.sin(t * 3) * 6}deg)` }}><Icon name={sc.icon} size={96} color="#111" /></div>
+        <div style={{ width: 150, height: 150, borderRadius: 44, background: s.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 70px ${s.accent}`, transform: `rotate(${Math.sin(t * 3) * 6}deg)` }}><Hero icon={sc.icon} size={96} color="#111" /></div>
       </div>
       <div style={{ position: 'absolute', top: 470, left: 50, right: 50, textAlign: 'center', direction: 'rtl', fontFamily, fontWeight: 900, fontSize: size, lineHeight: 1.15, transform: `translate(${shake * Math.sin(frame)}px, ${shake * Math.cos(frame)}px)` }}>
         <span data-qa="slam">{words.map((w, i) => {
@@ -276,7 +285,7 @@ const HookPhone3d: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
       <Headline hl={sc.headline} instant />
       <div style={{ position: 'absolute', inset: 0, perspective: 1400 }}>
         <div style={{ position: 'absolute', top: 470, left: '50%', width: 460, height: 860, marginLeft: -230, borderRadius: 66, background: `linear-gradient(160deg, #18224A, #0A0F22)`, border: '12px solid #2B3760', boxShadow: `0 0 ${60 + 60 * Math.sin(t * 4) ** 2}px ${s.accent}88`, transform: `translateZ(${(1 - p) * -1600}px) rotateY(${(1 - p) * 70 + 6 * Math.sin(t * 1.2)}deg) rotateX(${(1 - p) * 25}deg)`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 50 }}>
-          <div style={{ width: 230, height: 230, borderRadius: '50%', background: s.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 90px ${s.accent}` }}><Icon name={sc.icon} size={140} color="#111" /></div>
+          <div style={{ width: 230, height: 230, borderRadius: '50%', background: s.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 90px ${s.accent}` }}><Hero icon={sc.icon} size={140} color="#111" /></div>
           {sc.teaserCode && <Code style={{ fontSize: 70, color: s.accent, filter: `blur(${(1 - ease(t, reveal, reveal + 0.3)) * 9}px)` }}>{sc.teaserCode}</Code>}
         </div>
       </div>
@@ -303,7 +312,7 @@ const HookRings: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
       <div style={{ position: 'absolute', top: 800, left: 0, right: 0, height: 520, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {[0, 1, 2].map((k) => <div key={k} style={{ position: 'absolute', width: 220 + 380 * ring(k), height: 220 + 380 * ring(k), borderRadius: '50%', border: `5px solid ${s.accent}`, opacity: 0.8 * (1 - ring(k)) }} />)}
         <div style={{ width: 260, height: 260, borderRadius: '50%', background: `radial-gradient(circle, ${s.accent}, ${s.accent}AA)`, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: `scale(${1 + 0.06 * Math.sin(t * 6)})`, boxShadow: `0 0 90px ${s.accent}` }}>
-          <Icon name={sc.icon} size={150} color="#111" />
+          <Hero icon={sc.icon} size={150} color="#111" />
         </div>
       </div>
       {sc.question && <Headline hl={sc.question} delay={f((sc.questionAt ?? sc.start + 1.5) - sc.start)} top={sc.teaserCode ? 560 : 330} size={80} />}
@@ -471,7 +480,7 @@ const CardScene: React.FC<{ sc: Of<'card'> }> = ({ sc }) => {
   return (
     <>
       <Headline hl={sc.headline} size={80} top={150} />
-      {sc.icon && <div style={{ position: 'absolute', top: 290, left: 0, right: 0, display: 'flex', justifyContent: 'center', opacity: ease(t, sc.start + 0.4, sc.start + 0.9) }}><Icon name={sc.icon} size={84} color={s.accent} /></div>}
+      {sc.icon && <div style={{ position: 'absolute', top: 290, left: 0, right: 0, display: 'flex', justifyContent: 'center', opacity: ease(t, sc.start + 0.4, sc.start + 0.9) }}><Hero icon={sc.icon} size={84} color={s.accent} /></div>}
       <Camera t={t} a={sc.start + 0.3} b={sc.end + 0.6} origin="540px 900px">
       <Phone glow={flipped ? s.bad : s.good}>
         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(#0F1736, #0A0F22)' }} />
@@ -595,14 +604,22 @@ const CtaScene: React.FC<{ sc: Of<'cta'>; endCard: string }> = ({ sc, endCard })
   const sh = pop(frame, fps, 2);
   const glow = 0.6 + 0.4 * Math.sin(t * 5);
   const follow = pop(frame, fps, f(sc.followAt - sc.start));
+  const hero = React.useContext(HeroCtx);
   return (
     <>
       <Headline hl={sc.headline} size={90} top={190} />
       <div style={{ position: 'absolute', top: 430, left: 0, right: 0, display: 'flex', justifyContent: 'center', transform: `scale(${sh})` }}>
         <div style={{ position: 'relative', width: 460, height: 460, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="shield" size={460} color={s.good} style={{ position: 'absolute', filter: `drop-shadow(0 0 ${40 * glow}px ${s.good})`, opacity: sc.code ? 0.25 : 0.9 }} />
-          {sc.code && <Code style={{ fontSize: sc.code.length > 7 ? 84 : 120, color: s.accent, textShadow: `0 0 ${50 * glow}px ${s.accent}` }}>{sc.code}</Code>}
-          {!sc.code && sc.icon && <Icon name={sc.icon} size={160} color="#111" style={{ position: 'relative' }} />}
+          {/* the video's main object, big and glowing (a generic shield only when there is none) */}
+          {hero && !sc.code ? (
+            <><div style={{ position: 'absolute', width: 420, height: 420, borderRadius: '50%', background: `radial-gradient(circle, ${s.accent}55 0%, transparent 70%)`, opacity: glow }} /><Hero size={300} color="#111" style={{ position: 'relative' }} /></>
+          ) : (
+            <>
+              <Icon name="shield" size={460} color={s.good} style={{ position: 'absolute', filter: `drop-shadow(0 0 ${40 * glow}px ${s.good})`, opacity: sc.code ? 0.25 : 0.9 }} />
+              {sc.code && <Code style={{ fontSize: sc.code.length > 7 ? 84 : 120, color: s.accent, textShadow: `0 0 ${50 * glow}px ${s.accent}` }}>{sc.code}</Code>}
+              {!sc.code && sc.icon && <Icon name={sc.icon} size={160} color="#111" style={{ position: 'relative' }} />}
+            </>
+          )}
         </div>
       </div>
       {sc.sub && <Headline hl={sc.sub} size={70} top={960} delay={f((sc.subAt ?? sc.start + 1) - sc.start)} />}
@@ -623,7 +640,7 @@ const StatementScene: React.FC<{ sc: Of<'statement'> }> = ({ sc }) => {
     <>
       <Headline hl={sc.headline} size={84} top={180} />
       <div style={{ position: 'absolute', top: 430, left: 0, right: 0, display: 'flex', justifyContent: 'center', transform: `scale(${a}) rotate(${Math.sin(t * 2) * 3}deg)` }}>
-        <div style={{ width: 300, height: 300, borderRadius: 80, background: `linear-gradient(135deg, ${s.accent}, ${s.accent}99)`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 90px ${s.accent}88` }}><Icon name={sc.icon} size={180} color="#111" /></div>
+        <div style={{ width: 300, height: 300, borderRadius: 80, background: `linear-gradient(135deg, ${s.accent}, ${s.accent}99)`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 90px ${s.accent}88` }}><Hero icon={sc.icon} size={180} color="#111" /></div>
       </div>
       <div style={{ position: 'absolute', top: 820, left: 90, right: 90, display: 'flex', flexDirection: 'column', gap: 26, direction: 'rtl' }}>
         {sc.lines.slice(0, 3).map((l, i) => {
@@ -853,10 +870,16 @@ const MockScene: React.FC<{ sc: Of<'mock'> }> = ({ sc }) => {
   const inP = pop(frame, fps, 2);
   const fin = sc.final ? pop(frame, fps, f(sc.final.at - sc.start)) : 0;
   const header = sc.title && !['search', 'video'].includes(sc.kind);
+  // Like the reference, the screen fills the middle: few items → bigger content, a little lower.
+  const n = sc.items.length;
+  const fixedSize = ['bars', 'video', 'timer'].includes(sc.kind);
+  const zoom = fixedSize ? 1 : n <= 1 ? 1.4 : n === 2 ? 1.25 : n === 3 ? 1.1 : 1;
+  const top = fixedSize || n >= 4 ? MOCK_TOP : n <= 2 ? 540 : 480;
   return (
     <>
       <Headline hl={sc.headline} size={84} top={190} />
-      <div data-qa="mock" style={{ position: 'absolute', top: MOCK_TOP, left: 80, right: 80, maxHeight: MOCK_MAX, overflow: 'hidden', borderRadius: 44, background: CARD, border: `3px solid ${LINE}`, padding: sc.kind === 'video' ? 18 : '34px 40px', boxShadow: '0 30px 80px rgba(0,0,0,0.45)', opacity: Math.min(1, inP * 1.3), transform: `translateY(${(1 - inP) * 80}px) scale(${0.94 + 0.06 * inP})` }}>
+      {/* CSS zoom also scales the box's own offsets, so they are divided back to screen pixels */}
+      <div data-qa="mock" style={{ position: 'absolute', top: top / zoom, zoom, left: 80 / zoom, right: 80 / zoom, maxHeight: MOCK_MAX / zoom, overflow: 'hidden', borderRadius: 44, background: CARD, border: `3px solid ${LINE}`, padding: sc.kind === 'video' ? 18 : '34px 40px', boxShadow: '0 30px 80px rgba(0,0,0,0.45)', opacity: Math.min(1, inP * 1.3), transform: `translateY(${(1 - inP) * 80}px) scale(${0.94 + 0.06 * inP})` }}>
         {header && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 18, direction: 'rtl', marginBottom: 30, paddingBottom: 22, borderBottom: `2px solid ${LINE}` }}>
             <div style={{ width: 58, height: 58, borderRadius: sc.kind === 'chat' || sc.kind === 'link' ? '50%' : 16, background: s.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={sc.kind === 'chat' || sc.kind === 'link' ? 'chat' : sc.kind === 'notify' ? 'bell' : sc.kind === 'bars' ? 'bolt' : 'check'} size={36} color="#111" /></div>
@@ -984,7 +1007,7 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
     ...plan.scenes.flatMap((x) => (x.type === 'dialer' ? x.keys.map((k) => ['tap', k.at, 0.5] as [string, number, number]) : x.type === 'app' ? x.at.map((a) => ['tap', a + 0.15, 0.5] as [string, number, number]) : x.type === 'settings' ? x.at.slice(1).map((a) => ['tap', a, 0.5] as [string, number, number]) : x.type === 'mock' ? x.items.map((it) => ['tap', it.at, 0.32] as [string, number, number]) : x.type === 'alert' && x.tone === 'bad' ? [['alert', x.start + 0.1, 0.35] as [string, number, number]] : [])),
   ];
   return (
-    <StyleCtx.Provider value={s}>
+    <StyleCtx.Provider value={s}><HeroCtx.Provider value={plan.hero}>
       <AbsoluteFill style={{ ...vars(th), background: s.bg1 }}>
         <Background tint={tint} />
         {s.particles && <Particles color={tint} />}
@@ -1005,6 +1028,6 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
         {plan.audio && <Audio src={staticFile(plan.audio)} />}
         {sfx.map(([n, at, vol], i) => <Sequence key={`s${i}`} from={Math.max(0, f(at))}><Audio src={staticFile(`sfx/${n}.wav`)} volume={vol} /></Sequence>)}
       </AbsoluteFill>
-    </StyleCtx.Provider>
+    </HeroCtx.Provider></StyleCtx.Provider>
   );
 };

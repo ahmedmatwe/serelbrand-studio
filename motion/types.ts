@@ -70,6 +70,8 @@ export interface MotionStyle {
 
 export interface MotionPlan {
   duration: number;
+  /** THE main object of the video (3D, e.g. a PDF page for a PDF tip): drawn instead of generic icons. */
+  hero?: string;
   /** Narration file name inside the public dir. */
   audio: string;
   style: MotionStyle;

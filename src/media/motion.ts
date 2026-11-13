@@ -200,6 +200,19 @@ export function resolveProp(thing: string): string | undefined {
 export const propFile = (name: string) => basename(catalog().props[name] ?? '');
 export const propUrl = (name: string) => catalog().base + (catalog().props[name] ?? '').split('/').map(encodeURIComponent).join('/');
 
+/** The topic's main object from its words (first match wins: the most specific topics first). */
+const HERO_WORDS: [RegExp, string][] = [
+  [/pdf|ملف|مستند|ورق|سكان|مسح ضوئي/i, 'page facing up'], [/ذكاء اصطناعي|\bai\b|جيميناي|gemini|روبوت/i, 'robot'], [/واتساب|رسايل|رسالة|شات|محادث/i, 'speech balloon'], [/مكالم|اتصال|كول/i, 'telephone receiver'],
+  [/صور|صورة|الكاميرا|كاميرا|سيلفي/i, 'camera with flash'], [/فيديو|ريلز|يوتيوب|تيك توك/i, 'clapper board'], [/بطاري|شحن|شاحن/i, 'battery'],
+  [/باسورد|كلمة سر|قفل|خصوصي|تقيي?د|بلوك/i, 'locked'], [/واي فاي|الإنترنت|النت\b|شبكة/i, 'antenna bars'], [/ترجم/i, 'globe showing europe-africa'],
+  [/صوت|بودكاست|ميكروفون|تسجيل/i, 'studio microphone'], [/لوكيشن|خريطة|مكان/i, 'world map'],
+  [/فلوس|اشتراك|ادفع|بفلوس|مجان/i, 'money bag'], [/إشعار|اشعار|تنبيه/i, 'bell'], [/نوم|تنام/i, 'sleeping face'], [/موبايل|تليفون|الهاتف/i, 'mobile phone'],
+];
+export function heroFromWords(text: string): string | undefined {
+  for (const [re, name] of HERO_WORDS) if (re.test(text) && catalog().props[name]) return name;
+  return undefined;
+}
+
 /** Timed props of one scene: each appears when its word is said (else when its sentence starts). */
 function sceneProps(planned: { thing: string; word?: string; sentence: number; action: PropAction }[] | undefined, ws: WordTime[], sAt: (i: number) => number, start: number, end: number, big: boolean, hook = false, under = false): Prop[] {
   // The hook's big headline sits in the middle: its props use the lower slots only; under a screen, the low corners.
@@ -219,6 +232,7 @@ function sceneProps(planned: { thing: string; word?: string; sentence: number; a
 // ── planner ──────────────────────────────────────────────────────────────────────────────────────────────
 const Hl = z.object({ text: z.string().min(2).transform((x) => x.slice(0, 60)), accent: z.string().max(30).optional().catch(undefined), tone: z.enum(['yellow', 'green', 'red']).optional().catch(undefined) });
 const Planned = z.object({
+  hero: z.string().max(40).optional().catch(undefined),
   scenes: z.array(z.object({
     type: z.enum(['hook', 'dialer', 'settings', 'app', 'card', 'alert', 'compat', 'cta', 'statement', 'versus', 'story', 'mock']),
     from: z.number().int().min(0), to: z.number().int().min(0),
@@ -241,7 +255,7 @@ const Planned = z.object({
       final: z.object({ text: z.string().max(30), sentence: z.number().int(), tone: z.enum(['good', 'bad']) }).optional().catch(undefined),
     }).optional().catch(undefined),
     props: z.array(z.object({ thing: z.string().max(40), word: z.string().max(30).optional(), sentence: z.number().int(), action: z.enum(['pop', 'fly-in', 'drop', 'fly-away', 'shake', 'spin', 'pulse', 'no']).default('pop').catch('pop') })).optional().catch(undefined),
-  })).min(2).max(8),
+  })).min(2).max(16),
 });
 type PlannedScene = z.infer<typeof Planned>['scenes'][number];
 
@@ -266,6 +280,7 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
   const ui = inp.entry?.ui;
   const lessons = motionLessons(ctx);
   let planned: PlannedScene[] | undefined;
+  let heroThing: string | undefined;
   if (!ctx.providers.llm.name.startsWith('mock')) {
     const r = await ctx.providers.llm.generateJson({
       task: 'motion.plan',
@@ -276,10 +291,11 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
         'versus (only if ui.type is versus: the paid tool vs the free one — covers the sentences that compare them; it MUST appear right after the hook), ' +
         'alert (warning or reassurance with an action card, e.g. "call customer service"), compat (which phones it works on: items like "آيفون","أندرويد" + an optional badge), statement (generic: icon + up to 3 short check lines), cta (last: try it now + follow). ' +
         'SHOW THE CLOSEST THING TO WHAT IS SAID: the steps always get a dialer/settings/app scene; the result gets a card; use "statement" only when nothing else fits (at most once); never two scenes of the same type in a row; "compat" only if the narration names which phones. ' +
-        'from/to = inclusive sentence indexes; scenes must cover every sentence in order with no gaps or overlaps; 4–7 scenes. Headlines: 2–4 words (≤ 24 characters, they are drawn on ONE big line), natural Egyptian Arabic, readable in 1 second, accent = one word of the headline to colour. ' +
+        'THE CHANNEL\'S REFERENCE STYLE: the picture changes with EVERY sentence (every 2–3 seconds) — ONE scene per sentence (two sentences only when they are one idea), and each scene shows exactly what ITS sentence says (an acted-out mock screen, the steps on the phone, or a story with objects). Never one scene over many sentences. ' +
+        'from/to = inclusive sentence indexes; scenes must cover every sentence in order with no gaps or overlaps. Headlines: 2–4 words (≤ 24 characters, they are drawn on ONE big line), natural Egyptian Arabic, readable in 1 second, accent = one word of the headline to colour. ' +
         'Use ONLY what the narration and the library entry say (no invented numbers, apps or results); a code must be written exactly as entry.ui.code. ' +
         'Never widen a claim: keep every condition the narration states (e.g. "iPhone and Android on GSM networks" must NOT become "all phones"; a version, network or setting stays). ' +
-        'mock = ACT THE IDEA OUT with a small realistic screen — THE CHANNEL\'S SIGNATURE STYLE: every video has 2–3 mock scenes of DIFFERENT kinds (the problem, the result, the limits/warning…); statement and card only when no mock fits. A mock scene has type "mock" and its content in "mock": ' +
+        'mock = ACT THE IDEA OUT with a small realistic screen — THE CHANNEL\'S SIGNATURE STYLE: MOST scenes are mock screens of VARIED kinds (never the same kind twice in a row): the problem, each benefit, the result, the limits…; statement and card only when no mock fits. A mock scene has type "mock" and its content in "mock": ' +
         'chat (messages; value 1 = mine; mark cross/check on a message), bars (a chart: value = height, label like "×5.0", mark win = the winner), checklist (items ticked one by one), ranked (numbered list, mark win = first), ' +
         'search (title = the query being typed, items = results with label as subtitle), link (title = sender; items[0] = url, items[1] = page title — "it sends you the link"), video (REC frame: title = label, items = chips), ' +
         'doc (text lines; highlight = the exact words to mark, mark cross = words removed), timer (items[0].value = seconds, text = what takes that long), notify (stacked notifications; label = app), price (rows: text + label like "مجاناً"/"اشتراك", mark cross/win). ' +
@@ -288,6 +304,7 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
         'BRING IT TO LIFE — never just a screen with information: in EVERY scene add 1–3 props = 3D objects of the concrete things the sentences name or picture (a shoe when a shoe is mentioned, money with wings when money is wasted every month, a robot for AI, a locked padlock for privacy, a camera for photos, a hourglass for waiting…). ' +
         'thing = a name from propNames (exact); word = the Arabic word in that sentence that names or evokes it (it appears exactly when that word is said); sentence = its index; action: pop (appears), fly-in, drop (falls in), fly-away (leaves: money spent, data lost), shake (alarm, danger), spin (magic, transformation), pulse (important), no (crossed out: what you no longer need). ' +
         'story = a scene for a SITUATION the narration describes (paying every month, someone reading your messages, a crowded photo, a long lecture): told with 1–3 big props and their actions instead of a screen — use it for at least one situation sentence when the video has one. ' +
+        'hero = THE main object of the whole video from propNames (exact), the thing the topic is about — e.g. "page facing up" for a PDF, "framed picture" for photos, "speech balloon" for WhatsApp messages, "battery" for battery, "locked" for privacy; it is drawn big in the opening and the ending instead of any generic icon. ' +
         'Make the opening stop the scroll. Apply criticNotes (what the editing critic disliked in recent videos) and rules (learned from view counts) so this video is better than the last. JSON only.',
       prompt: JSON.stringify({ propNames: propNames().join('|'), title: inp.title, sentences: sentences.map((s, i) => ({ i, text: s })), entry: inp.entry ? { ui: inp.entry.ui, steps: inp.entry.steps, result: inp.entry.result, use: inp.entry.use, platforms: inp.entry.platforms } : undefined, criticNotes: lessons.criticNotes, rules: lessons.rules, ...(criticOnThis ? { criticOnThisVideo: criticOnThis } : {}) }),
       schema: Planned,
@@ -295,6 +312,7 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
       maxOutputTokens: 20000,
     }).catch(() => undefined);
     planned = (r?.data as z.infer<typeof Planned> | undefined)?.scenes;
+    heroThing = (r?.data as z.infer<typeof Planned> | undefined)?.hero;
   }
   // Small sentence-range slips are repaired instead of throwing the director's plan away: an overlap shortens the
   // previous scene, a gap stretches it, a scene swallowed by the previous one is dropped.
@@ -417,8 +435,11 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
   // a scene dropped above (wrong ui type…) → stretch its neighbour so the timeline has no holes
   for (let i = 1; i < scenes.length; i++) scenes[i - 1]!.end = scenes[i]!.start;
   if (scenes.length) { scenes[0]!.start = 0; scenes.at(-1)!.end = inp.duration; }
+  // THE main object: the director's pick, else the topic's own words, else the first object it drew.
+  const heroName = (heroThing && resolveProp(heroThing)) || heroFromWords(`${inp.title} ${inp.entry?.onScreen ?? ''} ${inp.narration}`);
+  const hero = heroName ? `props/${propFile(heroName)}` : scenes.flatMap((x) => x.props ?? [])[0]?.src;
   return {
-    duration: Number(inp.duration.toFixed(2)), audio: 'narration.m4a', style: { ...motionStyle(ctx), variants: chooseVariants(ctx, explore || Boolean(criticOnThis)) }, brand: inp.brand, endCard: inp.endCard,
+    duration: Number(inp.duration.toFixed(2)), audio: 'narration.m4a', ...(hero ? { hero } : {}), style: { ...motionStyle(ctx), variants: chooseVariants(ctx, explore || Boolean(criticOnThis)) }, brand: inp.brand, endCard: inp.endCard,
     captions: captionsFromWords(inp.words, inp.duration), beats: [...new Set(beats.map((b) => Number(b.toFixed(2))))].sort((a, b) => a - b), scenes,
   };
 }
@@ -524,7 +545,7 @@ async function stageProps(rootDir: string, plan: MotionPlan, pub: string) {
   mkdirSync(cache, { recursive: true }); mkdirSync(resolve(pub, 'props'), { recursive: true });
   const byFile = new Map(propNames().map((n) => [propFile(n), n]));
   const ok = new Set<string>();
-  for (const src of new Set(plan.scenes.flatMap((sc) => sc.props ?? []).map((x) => x.src))) {
+  for (const src of new Set([...plan.scenes.flatMap((sc) => sc.props ?? []).map((x) => x.src), ...(plan.hero ? [plan.hero] : [])])) {
     const file = src.replace(/^props\//, '');
     const local = resolve(cache, file);
     try {
@@ -546,6 +567,7 @@ async function stageProps(rootDir: string, plan: MotionPlan, pub: string) {
     } catch { /* skip this prop */ }
   }
   for (const sc of plan.scenes) if (sc.props) sc.props = sc.props.filter((x) => ok.has(x.src));
+  if (plan.hero && !ok.has(plan.hero)) delete plan.hero;
   writeFileSync(resolve(pub, 'props.json'), JSON.stringify(plan));
 }
 
