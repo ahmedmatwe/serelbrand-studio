@@ -1,32 +1,30 @@
 # Sound effects (Freesound, CC0 — no attribution required, credited anyway)
 
-- sfx/lib/whoosh-1.wav: "Swinging axe.mp3" by ZHRØ (CC0) — https://freesound.org/s/514162/
-- sfx/lib/whoosh-2.wav: "FX - Swoosh - Oil boiling" by bolkmar (CC0) — https://freesound.org/s/475138/
-- sfx/lib/whoosh-3.wav: "FX - Swoosh - Fried Fish" by bolkmar (CC0) — https://freesound.org/s/475140/
-- sfx/lib/whoosh-4.wav: "Whoosh #1" by Kinoton (CC0) — https://freesound.org/s/427823/
+- sfx/lib/whoosh-1.wav: "Whoosh #1" by Kinoton (CC0) — https://freesound.org/s/427823/
+- sfx/lib/whoosh-2.wav: "Fast Page Turn - 3" by SpaceJoe (CC0) — https://freesound.org/s/484909/
+- sfx/lib/whoosh-3.wav: "Fast Page Turn - 2" by SpaceJoe (CC0) — https://freesound.org/s/484908/
+- sfx/lib/whoosh-4.wav: "swoosh_bamboo_05" by Evan_McLoud (CC0) — https://freesound.org/s/850168/
 - sfx/lib/swipe-up-1.wav: "swoop2g.flac" by Streety (CC0) — https://freesound.org/s/30241/
-- sfx/lib/swipe-up-2.wav: "skewer1.flac" by Streety (CC0) — https://freesound.org/s/30242/
-- sfx/lib/swipe-up-3.wav: "swoop1.flac" by Streety (CC0) — https://freesound.org/s/30240/
-- sfx/lib/impact-1.wav: "Fist + shoulder_01.wav" by deleted_user_2104797 (CC0) — https://freesound.org/s/346700/
-- sfx/lib/impact-2.wav: ""Kamen Rider" style smack punch impact" by G40X (CC0) — https://freesound.org/s/770176/
-- sfx/lib/impact-3.wav: "Plastic_Tap_Single.wav" by mickyman5000 (CC0) — https://freesound.org/s/340604/
-- sfx/lib/impact-4.wav: "Hit 5" by NearTheAtmoshphere (CC0) — https://freesound.org/s/676465/
+- sfx/lib/swipe-up-2.wav: "swoop1.flac" by Streety (CC0) — https://freesound.org/s/30240/
+- sfx/lib/swipe-up-3.wav: "Swoosh test C" by cabled_mess (CC0) — https://freesound.org/s/352975/
+- sfx/lib/impact-1.wav: "PUNCH-BOXING-02.wav" by newagesoup (CC0) — https://freesound.org/s/348243/
+- sfx/lib/impact-2.wav: "Big Pillow Hit.wav" by saturdaysoundguy (CC0) — https://freesound.org/s/388021/
+- sfx/lib/impact-3.wav: "Fist + shoulder_01.wav" by deleted_user_2104797 (CC0) — https://freesound.org/s/346700/
+- sfx/lib/impact-4.wav: ""Kamen Rider" style smack punch impact" by G40X (CC0) — https://freesound.org/s/770176/
 - sfx/lib/click-1.wav: "UIHover1.wav" by wobesound (CC0) — https://freesound.org/s/488381/
-- sfx/lib/click-2.wav: "Classic Click" by adh.dreaming (CC0) — https://freesound.org/s/671105/
-- sfx/lib/click-3.wav: "CLICK.wav" by alparbalazs (CC0) — https://freesound.org/s/153504/
-- sfx/lib/click-4.wav: "Selection Selected!" by adh.dreaming (CC0) — https://freesound.org/s/668358/
-- sfx/lib/pop-1.wav: "UI Series: Hollow pop" by brandondelehoy (CC0) — https://freesound.org/s/333428/
-- sfx/lib/pop-2.wav: "Click Pop" by GameAudio (CC0) — https://freesound.org/s/220180/
-- sfx/lib/pop-3.wav: "cccrack.wav" by Reitanna (CC0) — https://freesound.org/s/217760/
+- sfx/lib/click-2.wav: "Button Click" by michorvath (CC0) — https://freesound.org/s/269504/
+- sfx/lib/click-3.wav: "Classic Click" by adh.dreaming (CC0) — https://freesound.org/s/671105/
+- sfx/lib/click-4.wav: "Click.wav" by conleycreative (CC0) — https://freesound.org/s/608629/
+- sfx/lib/pop-1.wav: "Cartoon Pop (Clean)" by unfa (CC0) — https://freesound.org/s/245645/
+- sfx/lib/pop-2.wav: "Bubble Pop" by YehawSnail (CC0) — https://freesound.org/s/683587/
+- sfx/lib/pop-3.wav: "UI Series: Hollow pop" by brandondelehoy (CC0) — https://freesound.org/s/333428/
 - sfx/lib/typing-1.wav: "Bouncing Power Up 1_4" by Joao_Janz (CC0) — https://freesound.org/s/478343/
 - sfx/lib/typing-2.wav: "Typing On A Keyboard" by lnab (CC0) — https://freesound.org/s/527726/
 - sfx/lib/camera-1.wav: "Nice Camera click.wav" by mmaruska (CC0) — https://freesound.org/s/167556/
-- sfx/lib/camera-2.wav: "Camera shutter click" by JoMungus (CC0) — https://freesound.org/s/718021/
+- sfx/lib/camera-2.wav: "Camera shutter in Sony A55" by matthiastidlund (CC0) — https://freesound.org/s/249750/
 - sfx/lib/cash-1.wav: "Cash Register Fake.wav" by CapsLok (CC0) — https://freesound.org/s/184438/
 - sfx/lib/cash-2.wav: "Store Scanner Beep" by zerolagtime (CC0) — https://freesound.org/s/144418/
 - sfx/lib/notify-1.wav: "GASP_UI_Alert_2.wav" by Rob_Marion (CC0) — https://freesound.org/s/542042/
-- sfx/lib/notify-2.wav: "Quiz Gameshow Correct Ping 02.mp3" by craigscottuk (CC0) — https://freesound.org/s/644947/
-- sfx/lib/notify-3.wav: "Quiz Gameshow Correct Ping 04.mp3" by craigscottuk (CC0) — https://freesound.org/s/644951/
 - sfx/lib/success-1.wav: "Beep 2" by CogFireStudios (CC0) — https://freesound.org/s/528864/
 - sfx/lib/success-2.wav: "Beep 4" by CogFireStudios (CC0) — https://freesound.org/s/528862/
 - sfx/lib/error-1.wav: "ui-mistake.wav" by StavSounds (CC0) — https://freesound.org/s/701703/

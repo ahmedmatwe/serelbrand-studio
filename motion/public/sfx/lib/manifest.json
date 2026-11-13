@@ -2,31 +2,31 @@
  "whoosh": [
   {
    "file": "sfx/lib/whoosh-1.wav",
-   "peak": 0.034,
-   "dur": 0.293,
-   "credit": "\"Swinging axe.mp3\" by ZHRØ (CC0)",
-   "url": "https://freesound.org/s/514162/"
-  },
-  {
-   "file": "sfx/lib/whoosh-2.wav",
-   "peak": 0.081,
-   "dur": 0.6,
-   "credit": "\"FX - Swoosh - Oil boiling\" by bolkmar (CC0)",
-   "url": "https://freesound.org/s/475138/"
-  },
-  {
-   "file": "sfx/lib/whoosh-3.wav",
-   "peak": 0.206,
-   "dur": 0.6,
-   "credit": "\"FX - Swoosh - Fried Fish\" by bolkmar (CC0)",
-   "url": "https://freesound.org/s/475140/"
-  },
-  {
-   "file": "sfx/lib/whoosh-4.wav",
    "peak": 0.059,
    "dur": 0.6,
    "credit": "\"Whoosh #1\" by Kinoton (CC0)",
    "url": "https://freesound.org/s/427823/"
+  },
+  {
+   "file": "sfx/lib/whoosh-2.wav",
+   "peak": 0.236,
+   "dur": 0.6,
+   "credit": "\"Fast Page Turn - 3\" by SpaceJoe (CC0)",
+   "url": "https://freesound.org/s/484909/"
+  },
+  {
+   "file": "sfx/lib/whoosh-3.wav",
+   "peak": 0.052,
+   "dur": 0.491,
+   "credit": "\"Fast Page Turn - 2\" by SpaceJoe (CC0)",
+   "url": "https://freesound.org/s/484908/"
+  },
+  {
+   "file": "sfx/lib/whoosh-4.wav",
+   "peak": 0.027,
+   "dur": 0.6,
+   "credit": "\"swoosh_bamboo_05\" by Evan_McLoud (CC0)",
+   "url": "https://freesound.org/s/850168/"
   }
  ],
  "swipe-up": [
@@ -39,47 +39,47 @@
   },
   {
    "file": "sfx/lib/swipe-up-2.wav",
-   "peak": 0.189,
-   "dur": 0.476,
-   "credit": "\"skewer1.flac\" by Streety (CC0)",
-   "url": "https://freesound.org/s/30242/"
-  },
-  {
-   "file": "sfx/lib/swipe-up-3.wav",
    "peak": 0.13,
    "dur": 0.5,
    "credit": "\"swoop1.flac\" by Streety (CC0)",
    "url": "https://freesound.org/s/30240/"
+  },
+  {
+   "file": "sfx/lib/swipe-up-3.wav",
+   "peak": 0.368,
+   "dur": 0.5,
+   "credit": "\"Swoosh test C\" by cabled_mess (CC0)",
+   "url": "https://freesound.org/s/352975/"
   }
  ],
  "impact": [
   {
    "file": "sfx/lib/impact-1.wav",
+   "peak": 0.021,
+   "dur": 1.2,
+   "credit": "\"PUNCH-BOXING-02.wav\" by newagesoup (CC0)",
+   "url": "https://freesound.org/s/348243/"
+  },
+  {
+   "file": "sfx/lib/impact-2.wav",
+   "peak": 0.018,
+   "dur": 1.133,
+   "credit": "\"Big Pillow Hit.wav\" by saturdaysoundguy (CC0)",
+   "url": "https://freesound.org/s/388021/"
+  },
+  {
+   "file": "sfx/lib/impact-3.wav",
    "peak": 0.025,
    "dur": 0.501,
    "credit": "\"Fist + shoulder_01.wav\" by deleted_user_2104797 (CC0)",
    "url": "https://freesound.org/s/346700/"
   },
   {
-   "file": "sfx/lib/impact-2.wav",
+   "file": "sfx/lib/impact-4.wav",
    "peak": 0.003,
    "dur": 0.255,
    "credit": "\"\"Kamen Rider\" style smack punch impact\" by G40X (CC0)",
    "url": "https://freesound.org/s/770176/"
-  },
-  {
-   "file": "sfx/lib/impact-3.wav",
-   "peak": 0.001,
-   "dur": 0.154,
-   "credit": "\"Plastic_Tap_Single.wav\" by mickyman5000 (CC0)",
-   "url": "https://freesound.org/s/340604/"
-  },
-  {
-   "file": "sfx/lib/impact-4.wav",
-   "peak": 0,
-   "dur": 0.308,
-   "credit": "\"Hit 5\" by NearTheAtmoshphere (CC0)",
-   "url": "https://freesound.org/s/676465/"
   }
  ],
  "click": [
@@ -92,47 +92,47 @@
   },
   {
    "file": "sfx/lib/click-2.wav",
+   "peak": 0.001,
+   "dur": 0.2,
+   "credit": "\"Button Click\" by michorvath (CC0)",
+   "url": "https://freesound.org/s/269504/"
+  },
+  {
+   "file": "sfx/lib/click-3.wav",
    "peak": 0.002,
    "dur": 0.092,
    "credit": "\"Classic Click\" by adh.dreaming (CC0)",
    "url": "https://freesound.org/s/671105/"
   },
   {
-   "file": "sfx/lib/click-3.wav",
-   "peak": 0.004,
-   "dur": 0.2,
-   "credit": "\"CLICK.wav\" by alparbalazs (CC0)",
-   "url": "https://freesound.org/s/153504/"
-  },
-  {
    "file": "sfx/lib/click-4.wav",
-   "peak": 0.006,
-   "dur": 0.182,
-   "credit": "\"Selection Selected!\" by adh.dreaming (CC0)",
-   "url": "https://freesound.org/s/668358/"
+   "peak": 0.019,
+   "dur": 0.084,
+   "credit": "\"Click.wav\" by conleycreative (CC0)",
+   "url": "https://freesound.org/s/608629/"
   }
  ],
  "pop": [
   {
    "file": "sfx/lib/pop-1.wav",
+   "peak": 0.002,
+   "dur": 0.167,
+   "credit": "\"Cartoon Pop (Clean)\" by unfa (CC0)",
+   "url": "https://freesound.org/s/245645/"
+  },
+  {
+   "file": "sfx/lib/pop-2.wav",
+   "peak": 0.005,
+   "dur": 0.3,
+   "credit": "\"Bubble Pop\" by YehawSnail (CC0)",
+   "url": "https://freesound.org/s/683587/"
+  },
+  {
+   "file": "sfx/lib/pop-3.wav",
    "peak": 0.018,
    "dur": 0.3,
    "credit": "\"UI Series: Hollow pop\" by brandondelehoy (CC0)",
    "url": "https://freesound.org/s/333428/"
-  },
-  {
-   "file": "sfx/lib/pop-2.wav",
-   "peak": 0.001,
-   "dur": 0.3,
-   "credit": "\"Click Pop\" by GameAudio (CC0)",
-   "url": "https://freesound.org/s/220180/"
-  },
-  {
-   "file": "sfx/lib/pop-3.wav",
-   "peak": 0.032,
-   "dur": 0.3,
-   "credit": "\"cccrack.wav\" by Reitanna (CC0)",
-   "url": "https://freesound.org/s/217760/"
   }
  ],
  "typing": [
@@ -161,10 +161,10 @@
   },
   {
    "file": "sfx/lib/camera-2.wav",
-   "peak": 0.017,
-   "dur": 0.7,
-   "credit": "\"Camera shutter click\" by JoMungus (CC0)",
-   "url": "https://freesound.org/s/718021/"
+   "peak": 0.001,
+   "dur": 0.464,
+   "credit": "\"Camera shutter in Sony A55\" by matthiastidlund (CC0)",
+   "url": "https://freesound.org/s/249750/"
   }
  ],
  "cash": [
@@ -190,20 +190,6 @@
    "dur": 1,
    "credit": "\"GASP_UI_Alert_2.wav\" by Rob_Marion (CC0)",
    "url": "https://freesound.org/s/542042/"
-  },
-  {
-   "file": "sfx/lib/notify-2.wav",
-   "peak": 0.001,
-   "dur": 0.812,
-   "credit": "\"Quiz Gameshow Correct Ping 02.mp3\" by craigscottuk (CC0)",
-   "url": "https://freesound.org/s/644947/"
-  },
-  {
-   "file": "sfx/lib/notify-3.wav",
-   "peak": 0.001,
-   "dur": 1,
-   "credit": "\"Quiz Gameshow Correct Ping 04.mp3\" by craigscottuk (CC0)",
-   "url": "https://freesound.org/s/644951/"
   }
  ],
  "success": [
