@@ -36,7 +36,7 @@ const ICONS = ['call', 'shield', 'headset', 'warn', 'check', 'lock', 'antenna', 
 export function motionStyle(ctx: AgentContext): MotionStyle {
   try { return { ...DEFAULT_STYLE, ...(JSON.parse(readKnowledge(ctx, 'motion_style=') ?? '{}') as Partial<MotionStyle>) }; } catch { return DEFAULT_STYLE; }
 }
-const DEFAULT_VARIANTS: Variants = { theme: 'night', bg: 'dots', caption: 'highlight', transition: 'whip', hook: 'rings', headline: 'pop', phone: 'flat' };
+const DEFAULT_VARIANTS: Variants = { theme: 'studio', bg: 'dots', caption: 'highlight', transition: 'whip', hook: 'rings', headline: 'pop', phone: 'flat' };
 /** Critic quality of one review (0–10, opening and match weigh double). */
 export const reviewScore = (r: { hook: number; visualMatch: number; pacing: number; captions: number }) => (r.hook * 2 + r.visualMatch * 2 + r.pacing + r.captions) / 6;
 
@@ -77,7 +77,10 @@ export function chooseVariants(ctx: AgentContext, explore: boolean, rnd: () => n
     const c = Object.fromEntries(genes.map((g) => [g, pick(pools[g])])) as Variants;
     if (varied(c) || k === 39) out = c;
   }
-  return { ...DEFAULT_VARIANTS, ...out };
+  // The colour theme is the channel's identity (owner's choice: the calm "studio" look); the other genes vary.
+  // calm like the reference: a dotted or grid background only (no waves / colour blobs)
+  const bg = out?.bg === 'grid' ? 'grid' : 'dots';
+  return { ...DEFAULT_VARIANTS, ...out, theme: 'studio', bg };
 }
 
 /** Share of Shorts drawn as motion graphics (the rest use stock footage), tuned by the analyst. Default 0.5. */
@@ -198,9 +201,9 @@ export const propFile = (name: string) => basename(catalog().props[name] ?? '');
 export const propUrl = (name: string) => catalog().base + (catalog().props[name] ?? '').split('/').map(encodeURIComponent).join('/');
 
 /** Timed props of one scene: each appears when its word is said (else when its sentence starts). */
-function sceneProps(planned: { thing: string; word?: string; sentence: number; action: PropAction }[] | undefined, ws: WordTime[], sAt: (i: number) => number, start: number, end: number, big: boolean, hook = false): Prop[] {
-  // The hook's big headline sits in the middle: its props use the lower slots only.
-  const slots = big ? [10, 11, 12] : hook ? [1, 2] : [0, 1, 2];
+function sceneProps(planned: { thing: string; word?: string; sentence: number; action: PropAction }[] | undefined, ws: WordTime[], sAt: (i: number) => number, start: number, end: number, big: boolean, hook = false, under = false): Prop[] {
+  // The hook's big headline sits in the middle: its props use the lower slots only; under a screen, the low corners.
+  const slots = big ? [10, 11, 12] : under ? [2, 3] : hook ? [1, 2] : [0, 1, 2];
   const out: Prop[] = [];
   for (const x of (planned ?? []).slice(0, slots.length)) {
     const name = resolveProp(x.thing);
@@ -214,13 +217,13 @@ function sceneProps(planned: { thing: string; word?: string; sentence: number; a
 }
 
 // ── planner ──────────────────────────────────────────────────────────────────────────────────────────────
-const Hl = z.object({ text: z.string().min(2).max(60), accent: z.string().max(30).optional(), tone: z.enum(['yellow', 'green', 'red']).optional() });
+const Hl = z.object({ text: z.string().min(2).transform((x) => x.slice(0, 60)), accent: z.string().max(30).optional().catch(undefined), tone: z.enum(['yellow', 'green', 'red']).optional().catch(undefined) });
 const Planned = z.object({
   scenes: z.array(z.object({
-    type: z.enum(['hook', 'dialer', 'settings', 'app', 'card', 'alert', 'compat', 'cta', 'statement', 'versus', 'story']),
+    type: z.enum(['hook', 'dialer', 'settings', 'app', 'card', 'alert', 'compat', 'cta', 'statement', 'versus', 'story', 'mock']),
     from: z.number().int().min(0), to: z.number().int().min(0),
     headline: Hl,
-    icon: z.enum(ICONS).optional(),
+    icon: z.enum(ICONS).optional().catch(undefined),
     question: Hl.optional(), questionSentence: z.number().int().optional(),
     title: z.string().max(40).optional(),
     rows: z.array(z.object({ label: z.string().max(24), value: z.string().max(24), tone: z.enum(['good', 'bad', 'neutral']), then: z.object({ value: z.string().max(24), tone: z.enum(['good', 'bad', 'neutral']), detail: z.string().max(24).optional(), sentence: z.number().int() }).optional() })).max(4).optional(),
@@ -231,7 +234,13 @@ const Planned = z.object({
     badge: z.string().max(30).optional(),
     sub: Hl.optional(),
     lines: z.array(z.string().max(30)).max(3).optional(),
-    props: z.array(z.object({ thing: z.string().max(40), word: z.string().max(30).optional(), sentence: z.number().int(), action: z.enum(['pop', 'fly-in', 'drop', 'fly-away', 'shake', 'spin', 'pulse', 'no']).default('pop') })).max(3).optional(),
+    mock: z.object({
+      kind: z.enum(['chat', 'bars', 'checklist', 'ranked', 'search', 'link', 'video', 'doc', 'timer', 'notify', 'price']),
+      title: z.string().max(40).optional(),
+      items: z.array(z.object({ text: z.string().transform((x) => x.slice(0, 44)), sentence: z.number().int(), word: z.string().max(30).optional(), value: z.number().optional(), label: z.string().max(18).optional(), mark: z.enum(['check', 'cross', 'win']).optional().catch(undefined), highlight: z.array(z.string()).optional().catch(undefined) })).min(1).transform((x) => x.slice(0, 6)),
+      final: z.object({ text: z.string().max(30), sentence: z.number().int(), tone: z.enum(['good', 'bad']) }).optional().catch(undefined),
+    }).optional().catch(undefined),
+    props: z.array(z.object({ thing: z.string().max(40), word: z.string().max(30).optional(), sentence: z.number().int(), action: z.enum(['pop', 'fly-in', 'drop', 'fly-away', 'shake', 'spin', 'pulse', 'no']).default('pop').catch('pop') })).optional().catch(undefined),
   })).min(2).max(8),
 });
 type PlannedScene = z.infer<typeof Planned>['scenes'][number];
@@ -270,6 +279,12 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
         'from/to = inclusive sentence indexes; scenes must cover every sentence in order with no gaps or overlaps; 4–7 scenes. Headlines: 2–4 words (≤ 24 characters, they are drawn on ONE big line), natural Egyptian Arabic, readable in 1 second, accent = one word of the headline to colour. ' +
         'Use ONLY what the narration and the library entry say (no invented numbers, apps or results); a code must be written exactly as entry.ui.code. ' +
         'Never widen a claim: keep every condition the narration states (e.g. "iPhone and Android on GSM networks" must NOT become "all phones"; a version, network or setting stays). ' +
+        'mock = ACT THE IDEA OUT with a small realistic screen — THE CHANNEL\'S SIGNATURE STYLE: every video has 2–3 mock scenes of DIFFERENT kinds (the problem, the result, the limits/warning…); statement and card only when no mock fits. A mock scene has type "mock" and its content in "mock": ' +
+        'chat (messages; value 1 = mine; mark cross/check on a message), bars (a chart: value = height, label like "×5.0", mark win = the winner), checklist (items ticked one by one), ranked (numbered list, mark win = first), ' +
+        'search (title = the query being typed, items = results with label as subtitle), link (title = sender; items[0] = url, items[1] = page title — "it sends you the link"), video (REC frame: title = label, items = chips), ' +
+        'doc (text lines; highlight = the exact words to mark, mark cross = words removed), timer (items[0].value = seconds, text = what takes that long), notify (stacked notifications; label = app), price (rows: text + label like "مجاناً"/"اشتراك", mark cross/win). ' +
+        'Example: {"type":"mock","from":3,"to":4,"headline":{"text":"الحشو بيتشال","accent":"الحشو"},"mock":{"kind":"doc","items":[{"text":"يعني بصراحة الفكرة دي","sentence":3,"highlight":["يعني","بصراحة"],"mark":"cross"},{"text":"والنتيجة جت أسرع","sentence":4}]}}. ' +
+        'Fill it with the narration\'s own words (short, ≤ 6 words per item), each item timed by sentence + word; final = an optional result tag under it (e.g. "اتحفظ ✓"). Never invent numbers: bars/ranked values only from the narration or entry, else relative heights with no number labels. ' +
         'BRING IT TO LIFE — never just a screen with information: in EVERY scene add 1–3 props = 3D objects of the concrete things the sentences name or picture (a shoe when a shoe is mentioned, money with wings when money is wasted every month, a robot for AI, a locked padlock for privacy, a camera for photos, a hourglass for waiting…). ' +
         'thing = a name from propNames (exact); word = the Arabic word in that sentence that names or evokes it (it appears exactly when that word is said); sentence = its index; action: pop (appears), fly-in, drop (falls in), fly-away (leaves: money spent, data lost), shake (alarm, danger), spin (magic, transformation), pulse (important), no (crossed out: what you no longer need). ' +
         'story = a scene for a SITUATION the narration describes (paying every month, someone reading your messages, a crowded photo, a long lecture): told with 1–3 big props and their actions instead of a screen — use it for at least one situation sentence when the video has one. ' +
@@ -277,10 +292,25 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
       prompt: JSON.stringify({ propNames: propNames().join('|'), title: inp.title, sentences: sentences.map((s, i) => ({ i, text: s })), entry: inp.entry ? { ui: inp.entry.ui, steps: inp.entry.steps, result: inp.entry.result, use: inp.entry.use, platforms: inp.entry.platforms } : undefined, criticNotes: lessons.criticNotes, rules: lessons.rules, ...(criticOnThis ? { criticOnThisVideo: criticOnThis } : {}) }),
       schema: Planned,
       videoId,
-      maxOutputTokens: 8000,
+      maxOutputTokens: 20000,
     }).catch(() => undefined);
     planned = (r?.data as z.infer<typeof Planned> | undefined)?.scenes;
   }
+  // Small sentence-range slips are repaired instead of throwing the director's plan away: an overlap shortens the
+  // previous scene, a gap stretches it, a scene swallowed by the previous one is dropped.
+  if (planned?.length) {
+    const fixed: PlannedScene[] = [];
+    for (const p of planned) {
+      const prev = fixed.at(-1);
+      if (!prev) { fixed.push({ ...p, from: 0 }); continue; }
+      if (p.from > prev.to + 1) prev.to = p.from - 1;
+      else if (p.from <= prev.to) { if (p.from > prev.from) prev.to = p.from - 1; else if (p.to > prev.to) { fixed.push({ ...p, from: prev.to + 1 }); continue; } else continue; }
+      fixed.push({ ...p });
+    }
+    planned = fixed.filter((p) => p.to >= p.from);
+  }
+  // A plan that stops before the last sentence is extended to the end (instead of throwing the whole plan away).
+  if (planned?.length && planned.at(-1)!.to < sentences.length - 1 && planned.at(-1)!.to >= sentences.length - 4) planned.at(-1)!.to = sentences.length - 1;
   const valid = planned && planned.length >= 2 && planned[0]!.from === 0 && planned.every((p, i) => p.to >= p.from && (i === 0 || p.from === planned![i - 1]!.to + 1)) && planned.at(-1)!.to === sentences.length - 1
     && planned.every((p) => (p.type !== 'dialer' || ui?.type === 'dialer') && (p.type !== 'settings' || ui?.type === 'settings') && (p.type !== 'app' || Boolean(inp.entry?.steps.length)) && (p.type !== 'versus' || ui?.type === 'versus'));
   const plan = normalizePlan(valid ? planned! : fallbackPlan(sentences.length, inp.entry), inp.entry);
@@ -292,7 +322,8 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
     if (end - start < 0.6) continue;
     const ws = inp.words.filter((w) => w.start >= start - 0.05 && w.start < end);
     const headline = { ...p.headline, ...(p.headline.accent && !p.headline.text.includes(p.headline.accent) ? { accent: undefined } : {}) };
-    const props = sceneProps(p.props, ws, sAt, start, end, p.type === 'story', p.type === 'hook');
+    // Props never cover the main thing: beside the content, under an acted-out screen, none on the comparison.
+    const props = p.type === 'versus' ? [] : sceneProps(p.props, ws, sAt, start, end, p.type === 'story', p.type === 'hook', p.type === 'mock');
     const base = { start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), headline, ...(props.length ? { props } : {}) };
     const at = (i: number | undefined, frac: number) => (i !== undefined && i >= p.from && i <= p.to ? sAt(i) : start + (end - start) * frac);
     switch (p.type) {
@@ -350,6 +381,20 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
         beats.push(freeAt);
         break;
       }
+      case 'mock': {
+        if (!p.mock) { scenes.push({ ...base, type: 'statement', icon: p.icon ?? 'star', lines: [] }); break; }
+        const tAt = (sentence: number, word: string | undefined, d: number) => {
+          const s0 = Math.max(start, Math.min(end - 0.5, sAt(sentence)));
+          const w = word ? ws.find((v) => v.start >= s0 - 0.05 && similarity(normWord(v.w), normWord(word)) >= 0.7) : undefined;
+          return Number(Math.min(end - 0.35, Math.max(start + 0.3, w ? w.start - 0.05 : s0 + d)).toFixed(2));
+        };
+        // items in narration order, each a little after the previous so they never pop all at once
+        let last = start + 0.2;
+        const items = p.mock.items.map((it, i) => { const a = Math.max(last + 0.25, tAt(it.sentence, it.word, 0.2 + i * 0.05)); last = a; return { text: it.text, at: Number(Math.min(end - 0.3, a).toFixed(2)), value: it.value, label: it.label, mark: it.mark, highlight: it.highlight }; });
+        // calm like the reference: items animate in without the flash/camera kick of beats
+        scenes.push({ ...base, type: 'mock', kind: p.mock.kind, ...(p.mock.title ? { title: p.mock.title } : {}), items, ...(p.mock.final ? { final: { text: p.mock.final.text, tone: p.mock.final.tone, at: tAt(p.mock.final.sentence, undefined, 0.5) } } : {}) });
+        break;
+      }
       case 'story':
         // No drawable object found → a plain statement keeps the time covered (never an empty gap).
         if (!props.length) { scenes.push({ ...base, type: 'statement', icon: p.icon ?? 'star', lines: [] }); break; }
@@ -394,11 +439,30 @@ const APP_BRAND: Record<string, [string, string, string]> = {
 export function normalizePlan(plan: PlannedScene[], entry?: PhoneSecret): PlannedScene[] {
   const out = plan.map((p) => ({ ...p }));
   const stepsType = entry?.ui?.type === 'dialer' ? 'dialer' : entry?.ui?.type === 'settings' && !APP_BRAND[entry.source] ? 'settings' : entry?.steps.length ? 'app' : undefined;
-  if (stepsType && !out.some((p) => p.type === 'dialer' || p.type === 'settings' || p.type === 'app')) {
+  // (an acted-out screen may already show the app steps — then no extra steps screen is forced in)
+  if (stepsType && !out.some((p) => p.type === 'dialer' || p.type === 'settings' || p.type === 'app' || (stepsType === 'app' && p.type === 'mock'))) {
     const i = out.findIndex((p, j) => j > 0 && j < out.length - 1 && (p.type === 'statement' || p.type === 'card' || p.type === 'compat'));
     if (i > 0) out[i]!.type = stepsType;
   }
   if (entry && APP_BRAND[entry.source]) for (const p of out) if (p.type === 'settings') p.type = 'app';
+  // A plain statement (icon + sentence) is the weakest picture: with objects it becomes a story (the objects big),
+  // with lines an acted-out checklist.
+  // (an acted-out screen the director left empty is treated the same way)
+  for (const p of out.filter((x) => x.type === 'statement' || (x.type === 'mock' && !x.mock))) {
+    if (p.props?.length) p.type = 'story';
+    else if (p.type === 'mock') p.type = 'statement';
+    else if (p.lines?.length) { p.mock = { kind: 'checklist', items: p.lines.slice(0, 4).map((text, i) => ({ text, sentence: Math.min(p.to, p.from + i) })) }; p.type = 'mock'; }
+  }
+  // The signature look: if the director drew no acted-out screen, its cards / statements become checklists
+  // (each row or line ticked when its sentence is said) — never a video of plain info screens only.
+  if (!out.some((p) => p.type === 'mock')) {
+    for (const p of out.filter((x) => x.type === 'card' || x.type === 'statement')) {
+      const rows = (p.rows ?? []).map((r) => `${r.label}: ${r.value}`.slice(0, 44)).concat(p.lines ?? []).slice(0, 4);
+      const texts = rows.length ? rows : [p.headline.text];
+      p.mock = { kind: 'checklist', items: texts.map((text, i) => ({ text, sentence: Math.min(p.to, p.from + Math.floor((i * (p.to - p.from + 1)) / texts.length)) })) };
+      p.type = 'mock';
+    }
+  }
   // "Why pay?" topics: the paid-vs-free comparison is the point of the video — it must be on screen.
   if (entry?.ui?.type === 'versus' && !out.some((p) => p.type === 'versus')) {
     const i = out.findIndex((p, j) => j > 0 && j < out.length - 1 && (p.type === 'statement' || p.type === 'compat' || p.type === 'alert' || p.type === 'card'));
@@ -407,7 +471,8 @@ export function normalizePlan(plan: PlannedScene[], entry?: PhoneSecret): Planne
   const merged: PlannedScene[] = [];
   for (const p of out) {
     const prev = merged.at(-1);
-    if (prev && prev.type === p.type && p.type !== 'hook' && p.type !== 'cta') { prev.to = p.to; continue; }
+    // acted-out screens / stories carry their own content: two in a row are two different screens, never merged
+    if (prev && prev.type === p.type && !['hook', 'cta', 'mock', 'story'].includes(p.type)) { prev.to = p.to; continue; }
     merged.push(p);
   }
   return merged;

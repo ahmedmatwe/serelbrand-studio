@@ -18,6 +18,8 @@ const WHITE = 'var(--text)', DIM = 'var(--dim)', CARD = 'var(--card)', LINE = 'v
 interface Theme { bg1: string; bg2: string; text: string; dim: string; card: string; line: string; chip: string; dot: string; accent: string; good: string; bad: string }
 /** Colour themes (a design gene): every Short can look different. */
 const THEMES: Record<string, Theme> = {
+  // The channel's identity (owner's reference): calm charcoal, white text, ONE orange accent.
+  studio: { bg1: '#111216', bg2: '#1B1D24', text: '#FFFFFF', dim: '#9EA2AD', card: '#1C1E25', line: '#2F323C', chip: '#25272F', dot: 'rgba(255,255,255,0.055)', accent: '#FF9F1C', good: '#2BD576', bad: '#FF5A4E' },
   night: { bg1: '#070B1A', bg2: '#12204A', text: '#FFFFFF', dim: '#9AA6C8', card: '#141C36', line: '#26335E', chip: '#1E2A55', dot: 'rgba(255,255,255,0.07)', accent: '#FFD23F', good: '#22C55E', bad: '#FF4D4D' },
   light: { bg1: '#F4F6FB', bg2: '#D9E2F7', text: '#0E1430', dim: '#56607F', card: '#FFFFFF', line: '#D3DAEA', chip: '#E3E9F7', dot: 'rgba(14,20,48,0.08)', accent: '#EA580C', good: '#16A34A', bad: '#E11D48' },
   pop: { bg1: '#1E0745', bg2: '#6D28D9', text: '#FFFFFF', dim: '#D8CCFF', card: '#33126B', line: '#5B2BA8', chip: '#45198F', dot: 'rgba(255,255,255,0.09)', accent: '#22E3FF', good: '#2EE59D', bad: '#FF4D6D' },
@@ -29,7 +31,7 @@ const vars = (t: Theme) => ({ '--text': t.text, '--dim': t.dim, '--card': t.card
 const DARK = vars(THEMES.night!);
 const StyleCtx = React.createContext<MotionStyle>(null as unknown as MotionStyle);
 const useStyle = () => React.useContext(StyleCtx);
-const V = (s: MotionStyle): Variants => ({ theme: 'night', bg: 'dots', caption: 'highlight', transition: s.transition, hook: 'rings', headline: 'pop', phone: 'flat', ...(s.variants ?? {}) });
+const V = (s: MotionStyle): Variants => ({ theme: 'studio', bg: 'dots', caption: 'highlight', transition: s.transition, hook: 'rings', headline: 'pop', phone: 'flat', ...(s.variants ?? {}) });
 const toneColor = (s: MotionStyle, t?: Tone | 'good' | 'bad' | 'neutral') => (t === 'green' || t === 'good' ? s.good : t === 'red' || t === 'bad' ? s.bad : t === 'neutral' ? DIM : s.accent);
 
 const f = (s: number) => Math.round(s * FPS);
@@ -638,10 +640,244 @@ const StatementScene: React.FC<{ sc: Of<'statement'> }> = ({ sc }) => {
   );
 };
 
+// ── acted-out screens (owner's reference style): each idea shown as a realistic mini UI ──────────────────────
+const MOCK_TOP = 430, MOCK_MAX = 800;
+const mmss = (s: number) => `${String(Math.floor(Math.max(0, s) / 60)).padStart(2, '0')}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
+const Mark: React.FC<{ kind: 'check' | 'cross'; p: number; size?: number }> = ({ kind, p, size = 56 }) => {
+  const s = useStyle();
+  return <div style={{ width: size, height: size, flex: 'none', borderRadius: '50%', background: kind === 'check' ? s.good : s.bad, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: `scale(${p})`, fontFamily, fontWeight: 900, fontSize: size * 0.62, color: '#fff' }}>{kind === 'check' ? <Icon name="check" size={size * 0.7} color="#fff" /> : '✕'}</div>;
+};
+const Row: React.FC<{ p: number; children: React.ReactNode; style?: React.CSSProperties }> = ({ p, children, style }) => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 24, direction: 'rtl', opacity: Math.min(1, p * 1.4), transform: `translateY(${(1 - p) * 40}px)`, ...style }}>{children}</div>
+);
+const txt = (size: number, color: string = WHITE, weight = 800): React.CSSProperties => ({ fontFamily, fontWeight: weight, fontSize: size, color, lineHeight: 1.3 });
+
+const MockBody: React.FC<{ sc: Of<'mock'> }> = ({ sc }) => {
+  const s = useStyle();
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const t = frame / FPS + sc.start;
+  const P = (at: number, d = 0) => pop(frame, fps, f(at - sc.start) + d);
+  const seen = (at: number) => t >= at - 0.05;
+  const items = sc.items.slice(0, sc.kind === 'bars' ? 6 : 5);
+  switch (sc.kind) {
+    case 'chat':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+          {items.map((m, i) => {
+            const mine = m.value === 1;
+            const p = P(m.at);
+            if (!seen(m.at)) return null;
+            return (
+              <div key={i} style={{ display: 'flex', justifyContent: mine ? 'flex-start' : 'flex-end', alignItems: 'center', gap: 18, direction: 'rtl', opacity: Math.min(1, p * 1.4), transform: `translateY(${(1 - p) * 30}px) scale(${0.9 + 0.1 * p})` }}>
+                <div style={{ maxWidth: 640, padding: '22px 30px', borderRadius: 30, background: mine ? `${s.accent}26` : CHIP, border: `2px solid ${mine ? s.accent : LINE}`, ...txt(42), direction: 'rtl' }}>{m.text}</div>
+                {m.mark && m.mark !== 'win' && <Mark kind={m.mark} p={P(m.at + 0.45)} />}
+              </div>
+            );
+          })}
+        </div>
+      );
+    case 'bars': {
+      const max = Math.max(1, ...items.map((b) => b.value ?? 1));
+      return (
+        <div style={{ height: 520, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-around', direction: 'rtl', borderBottom: `3px solid ${LINE}`, paddingBottom: 6 }}>
+          {items.map((b, i) => {
+            const g = ease(t, b.at, b.at + 0.6);
+            const win = b.mark === 'win';
+            const h = 40 + 380 * ((b.value ?? 1) / max) * g;
+            return (
+              <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, width: 120 }}>
+                {b.label && <div style={{ ...txt(win ? 44 : 34, win ? s.accent : WHITE, 900), opacity: g, transform: `scale(${win ? 0.8 + 0.25 * P(b.at + 0.5) : 1})` }}>{b.label}</div>}
+                <div style={{ width: 92, height: h, borderRadius: '18px 18px 6px 6px', background: win ? s.accent : '#3A3D48', boxShadow: win ? `0 0 ${40 * g}px ${s.accent}` : undefined }} />
+                <div style={{ ...txt(28, DIM, 700), textAlign: 'center', height: 40, whiteSpace: 'nowrap' }}>{b.text}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    case 'checklist':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
+          {items.map((it, i) => {
+            const done = P(it.at);
+            const cross = it.mark === 'cross';
+            return (
+              <Row key={i} p={Math.max(P(sc.start + 0.2 + i * 0.12), 0)}>
+                <div style={{ width: 60, height: 60, flex: 'none', borderRadius: 16, border: `4px solid ${done > 0.05 ? (cross ? s.bad : s.good) : LINE}`, background: done > 0.05 ? (cross ? s.bad : s.good) : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {done > 0.05 && (cross ? <span style={{ ...txt(40, '#fff', 900), transform: `scale(${done})` }}>✕</span> : <Icon name="check" size={46} color="#fff" style={{ transform: `scale(${done})` }} />)}
+                </div>
+                <div style={{ ...txt(44, done > 0.5 ? WHITE : DIM), textDecoration: cross && done > 0.5 ? 'line-through' : undefined }}>{it.text}</div>
+              </Row>
+            );
+          })}
+        </div>
+      );
+    case 'ranked':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {items.map((it, i) => (
+            <Row key={i} p={P(it.at)} style={{ padding: '18px 24px', borderRadius: 24, background: it.mark === 'win' ? `${s.accent}22` : CHIP, border: `2px solid ${it.mark === 'win' ? s.accent : 'transparent'}` }}>
+              <div style={{ width: 60, height: 60, flex: 'none', borderRadius: '50%', background: it.mark === 'win' ? s.accent : '#3A3D48', ...txt(36, it.mark === 'win' ? '#111' : WHITE, 900), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</div>
+              <div style={{ ...txt(40), flex: 1 }}>{it.text}</div>
+              {it.value !== undefined && <div style={{ ...txt(40, s.accent, 900) }}>{it.value}</div>}
+            </Row>
+          ))}
+        </div>
+      );
+    case 'search': {
+      const q = sc.title ?? '';
+      const end = Math.max(sc.start + 0.8, (items[0]?.at ?? sc.start + 1.6) - 0.15);
+      const n = Math.round(q.length * ease(t, sc.start + 0.25, end));
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '22px 30px', borderRadius: 60, background: CHIP, border: `3px solid ${s.accent}`, direction: 'rtl' }}>
+            <Icon name="search" size={50} color={s.accent} />
+            <div style={{ ...txt(44) }}>{q.slice(0, n)}<span style={{ opacity: Math.sin(t * 10) > 0 ? 1 : 0, color: s.accent }}>|</span></div>
+          </div>
+          {items.map((it, i) => (
+            <Row key={i} p={P(it.at)} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 8, paddingRight: 10 }}>
+              <div style={{ ...txt(42, s.accent, 900) }}>{it.text}</div>
+              {it.label && <div style={{ ...txt(30, DIM, 600) }}>{it.label}</div>}
+            </Row>
+          ))}
+        </div>
+      );
+    }
+    case 'link': {
+      const [url, title] = items;
+      const p = url ? P(url.at) : 0;
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+          {url && seen(url.at) && (
+            <div style={{ alignSelf: 'flex-end', width: 720, borderRadius: 30, background: CHIP, border: `2px solid ${LINE}`, overflow: 'hidden', opacity: Math.min(1, p * 1.4), transform: `translateY(${(1 - p) * 40}px)` }}>
+              <div style={{ height: 150, background: `linear-gradient(135deg, ${s.accent}55, ${s.accent}11)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="search" size={80} color={s.accent} /></div>
+              <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: 8, direction: 'rtl' }}>
+                <div style={{ ...txt(30, DIM, 600), direction: 'ltr', textAlign: 'right' }}>{url.text}</div>
+                {title && <div style={{ ...txt(42, WHITE, 900), opacity: ease(t, title.at, title.at + 0.4) }}>{title.text}</div>}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+    case 'video': {
+      const blink = Math.sin(t * 6) > 0 ? 1 : 0.25;
+      const corner = (pos: React.CSSProperties) => <div style={{ position: 'absolute', width: 80, height: 80, borderColor: WHITE, borderStyle: 'solid', borderWidth: 0, ...pos }} />;
+      return (
+        <div style={{ position: 'relative', height: 560, borderRadius: 24, background: 'radial-gradient(circle at 50% 45%, #2A2D36 0%, #15161B 75%)', overflow: 'hidden' }}>
+          {corner({ top: 30, left: 30, borderTopWidth: 8, borderLeftWidth: 8 })}{corner({ top: 30, right: 30, borderTopWidth: 8, borderRightWidth: 8 })}
+          {corner({ bottom: 30, left: 30, borderBottomWidth: 8, borderLeftWidth: 8 })}{corner({ bottom: 30, right: 30, borderBottomWidth: 8, borderRightWidth: 8 })}
+          <div style={{ position: 'absolute', top: 56, left: 70, display: 'flex', alignItems: 'center', gap: 14 }}><div style={{ width: 26, height: 26, borderRadius: '50%', background: s.bad, opacity: blink }} /><span style={txt(34, WHITE, 900)}>{sc.title ?? 'REC'}</span></div>
+          <div style={{ position: 'absolute', top: 56, right: 70, ...txt(34, WHITE, 800), fontVariantNumeric: 'tabular-nums' }}>{mmss((t - sc.start) * 7 + 12)}</div>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="camera" size={170} color={`${WHITE}`} style={{ opacity: 0.18 }} /></div>
+          <div style={{ position: 'absolute', bottom: 60, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 18, flexWrap: 'wrap', direction: 'rtl' }}>
+            {items.map((it, i) => seen(it.at) && <div key={i} style={{ padding: '12px 26px', borderRadius: 40, background: `${s.accent}`, ...txt(34, '#111', 900), transform: `scale(${P(it.at)})` }}>{it.text}</div>)}
+          </div>
+        </div>
+      );
+    }
+    case 'doc':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+          {items.map((it, i) => {
+            const mark = ease(t, it.at + 0.15, it.at + 0.55);
+            const hl = new Set((it.highlight ?? []).flatMap((w) => w.split(/\s+/)));
+            return (
+              <Row key={i} p={P(sc.start + 0.2 + i * 0.15)} style={{ flexWrap: 'wrap', gap: 12 }}>
+                {it.text.split(/\s+/).map((w, k) => (
+                  <span key={k} style={{ ...txt(42, hl.has(w) ? (it.mark === 'cross' ? s.bad : s.accent) : WHITE), padding: '2px 8px', borderRadius: 10, background: hl.has(w) ? `rgba(255,159,28,${0.22 * mark})` : 'transparent', textDecoration: hl.has(w) && it.mark === 'cross' && mark > 0.6 ? 'line-through' : undefined }}>{w}</span>
+                ))}
+              </Row>
+            );
+          })}
+        </div>
+      );
+    case 'timer': {
+      const total = Math.max(1, items[0]?.value ?? 30);
+      const k = ease(t, items[0]?.at ?? sc.start, sc.end - 0.3);
+      const R = 210, C = 2 * Math.PI * R;
+      return (
+        <div style={{ height: 560, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
+          <div style={{ position: 'relative', width: 2 * R + 40, height: 2 * R + 40 }}>
+            <svg width={2 * R + 40} height={2 * R + 40} style={{ position: 'absolute', inset: 0, transform: 'rotate(-90deg)' }}>
+              <circle cx={R + 20} cy={R + 20} r={R} fill="none" stroke={LINE} strokeWidth={24} />
+              <circle cx={R + 20} cy={R + 20} r={R} fill="none" stroke={s.accent} strokeWidth={24} strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - k)} />
+            </svg>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', ...txt(110, WHITE, 900), fontVariantNumeric: 'tabular-nums' }}>{mmss(total * k)}</div>
+          </div>
+          {items[0] && <div style={txt(40, DIM, 800)}>{items[0].text}</div>}
+        </div>
+      );
+    }
+    case 'notify':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+          {items.map((it, i) => seen(it.at) && (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 22, padding: '22px 26px', borderRadius: 30, background: CHIP, border: `2px solid ${LINE}`, direction: 'rtl', transform: `translateY(${(1 - P(it.at)) * -120}px)`, opacity: Math.min(1, P(it.at) * 1.5) }}>
+              <div style={{ width: 76, height: 76, flex: 'none', borderRadius: 20, background: s.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="bell" size={46} color="#111" /></div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={txt(30, DIM, 700)}>{it.label ?? sc.title ?? ''}</div>
+                <div style={txt(40)}>{it.text}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    case 'price':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+          {items.map((it, i) => {
+            const m = P(it.at + 0.35);
+            const win = it.mark === 'win', cross = it.mark === 'cross';
+            return (
+              <Row key={i} p={P(it.at)} style={{ justifyContent: 'space-between', padding: '26px 30px', borderRadius: 28, background: win ? `${s.good}22` : CHIP, border: `3px solid ${win ? s.good : cross ? s.bad : LINE}`, opacity: cross && m > 0.5 ? 0.55 : undefined }}>
+                <div style={{ ...txt(44), textDecoration: cross && m > 0.5 ? 'line-through' : undefined }}>{it.text}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  {it.label && <div style={txt(40, win ? s.good : cross ? s.bad : s.accent, 900)}>{it.label}</div>}
+                  {(win || cross) && <Mark kind={win ? 'check' : 'cross'} p={m} size={52} />}
+                </div>
+              </Row>
+            );
+          })}
+        </div>
+      );
+  }
+};
+
+const MockScene: React.FC<{ sc: Of<'mock'> }> = ({ sc }) => {
+  const s = useStyle();
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const t = frame / FPS + sc.start;
+  const inP = pop(frame, fps, 2);
+  const fin = sc.final ? pop(frame, fps, f(sc.final.at - sc.start)) : 0;
+  const header = sc.title && !['search', 'video'].includes(sc.kind);
+  return (
+    <>
+      <Headline hl={sc.headline} size={84} top={190} />
+      <div data-qa="mock" style={{ position: 'absolute', top: MOCK_TOP, left: 80, right: 80, maxHeight: MOCK_MAX, overflow: 'hidden', borderRadius: 44, background: CARD, border: `3px solid ${LINE}`, padding: sc.kind === 'video' ? 18 : '34px 40px', boxShadow: '0 30px 80px rgba(0,0,0,0.45)', opacity: Math.min(1, inP * 1.3), transform: `translateY(${(1 - inP) * 80}px) scale(${0.94 + 0.06 * inP})` }}>
+        {header && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18, direction: 'rtl', marginBottom: 30, paddingBottom: 22, borderBottom: `2px solid ${LINE}` }}>
+            <div style={{ width: 58, height: 58, borderRadius: sc.kind === 'chat' || sc.kind === 'link' ? '50%' : 16, background: s.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={sc.kind === 'chat' || sc.kind === 'link' ? 'chat' : sc.kind === 'notify' ? 'bell' : sc.kind === 'bars' ? 'bolt' : 'check'} size={36} color="#111" /></div>
+            <div style={txt(40, WHITE, 900)}>{sc.title}</div>
+          </div>
+        )}
+        <MockBody sc={sc} />
+      </div>
+      {sc.final && t >= sc.final.at - 0.05 && (
+        <div style={{ position: 'absolute', top: 1290, left: 0, right: 0, textAlign: 'center', transform: `scale(${fin})` }}>
+          <span data-qa="final" style={{ display: 'inline-block', padding: '16px 44px', borderRadius: 60, background: sc.final.tone === 'good' ? s.good : s.bad, ...txt(44, '#fff', 900), direction: 'rtl' }}>{sc.final.text}</span>
+        </div>
+      )}
+    </>
+  );
+};
+
 // ── props: 3D objects of what is said, alive (enter, float, act, leave) ──────────────────────────────────────
 /** Where props sit: beside the main content in normal scenes (0–2), big and central in story scenes (10–12). */
 const SLOTS: Record<number, { x: number; y: number; size: number; side: 1 | -1 }> = {
-  0: { x: 820, y: 470, size: 240, side: 1 }, 1: { x: 20, y: 880, size: 230, side: -1 }, 2: { x: 830, y: 1150, size: 220, side: 1 },
+  0: { x: 820, y: 470, size: 240, side: 1 }, 1: { x: 20, y: 880, size: 230, side: -1 }, 2: { x: 830, y: 1150, size: 220, side: 1 }, 3: { x: 30, y: 1160, size: 200, side: -1 },
   10: { x: 290, y: 470, size: 500, side: 1 }, 11: { x: 80, y: 1000, size: 320, side: -1 }, 12: { x: 680, y: 1000, size: 320, side: 1 },
 };
 const PropView: React.FC<{ p: Prop }> = ({ p }) => {
@@ -700,6 +936,7 @@ const SceneView: React.FC<{ sc: MotionScene; endCard: string }> = ({ sc, endCard
     case 'compat': return <CompatScene sc={sc} />;
     case 'versus': return <VersusScene sc={sc} />;
     case 'story': return <StoryScene sc={sc} />;
+    case 'mock': return <MockScene sc={sc} />;
     case 'cta': return <CtaScene sc={sc} endCard={endCard} />;
     default: return <StatementScene sc={sc as Of<'statement'>} />;
   }
@@ -744,7 +981,7 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
   const sfx: [string, number, number][] = [
     ...plan.scenes.slice(1).map((x) => ['whoosh', x.start, 0.4] as [string, number, number]),
     ...plan.beats.map((b) => ['pop', b, 0.5] as [string, number, number]),
-    ...plan.scenes.flatMap((x) => (x.type === 'dialer' ? x.keys.map((k) => ['tap', k.at, 0.5] as [string, number, number]) : x.type === 'app' ? x.at.map((a) => ['tap', a + 0.15, 0.5] as [string, number, number]) : x.type === 'settings' ? x.at.slice(1).map((a) => ['tap', a, 0.5] as [string, number, number]) : x.type === 'alert' && x.tone === 'bad' ? [['alert', x.start + 0.1, 0.35] as [string, number, number]] : [])),
+    ...plan.scenes.flatMap((x) => (x.type === 'dialer' ? x.keys.map((k) => ['tap', k.at, 0.5] as [string, number, number]) : x.type === 'app' ? x.at.map((a) => ['tap', a + 0.15, 0.5] as [string, number, number]) : x.type === 'settings' ? x.at.slice(1).map((a) => ['tap', a, 0.5] as [string, number, number]) : x.type === 'mock' ? x.items.map((it) => ['tap', it.at, 0.32] as [string, number, number]) : x.type === 'alert' && x.tone === 'bad' ? [['alert', x.start + 0.1, 0.35] as [string, number, number]] : [])),
   ];
   return (
     <StyleCtx.Provider value={s}>

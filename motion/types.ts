@@ -6,6 +6,16 @@ export type Tone = 'yellow' | 'green' | 'red';
 export interface Hl { text: string; accent?: string; tone?: Tone }
 export type IconName = 'call' | 'shield' | 'headset' | 'warn' | 'check' | 'lock' | 'antenna' | 'chat' | 'eye' | 'bolt' | 'image' | 'battery' | 'bell' | 'mic' | 'location' | 'trash' | 'star' | 'search' | 'phone' | 'camera' | 'tune';
 
+/**
+ * The acted-out screens (owner's reference style): each sentence's idea shown as a realistic mini UI.
+ * chat = messages (value 1 = mine) · bars = chart (value = height, text = label like "×5.0", mark win = the winner)
+ * checklist = items ticked one by one · ranked = numbered list (value = score) · search = title typed, items = results
+ * link = message with a link preview (title = sender, items: url, page title) · video = REC frame (title = label, items = chips)
+ * doc = text lines with highlighted words · timer = clock counting (items[0].value = seconds) · notify = stacked notifications
+ * price = plan rows (text, value as price text in label) with cross/win marks.
+ */
+export type MockKind = 'chat' | 'bars' | 'checklist' | 'ranked' | 'search' | 'link' | 'video' | 'doc' | 'timer' | 'notify' | 'price';
+export interface MockItem { text: string; at: number; value?: number; label?: string; mark?: 'check' | 'cross' | 'win'; highlight?: string[] }
 /** How a 3D object enters / behaves (the story told with things, not only screens). */
 export type PropAction = 'pop' | 'fly-in' | 'drop' | 'fly-away' | 'shake' | 'spin' | 'pulse' | 'no';
 /** A 3D illustration (Fluent Emoji 3D, MIT) of the exact thing the narration names, appearing when it is said. */
@@ -19,6 +29,8 @@ export type MotionScene = { start: number; end: number; headline: Hl; props?: Pr
   | { type: 'card'; icon?: IconName; title: string; rows: { label: string; value: string; tone: 'good' | 'bad' | 'neutral'; at: number; then?: { at: number; value: string; tone: 'good' | 'bad' | 'neutral'; detail?: string } }[]; alert?: { text: string; at: number } }
   | { type: 'alert'; icon: IconName; tone: 'good' | 'bad'; action?: { text: string; accent?: string; at: number; icon: IconName } }
   | { type: 'compat'; items: string[]; code?: string; badge?: string; badgeAt?: number }
+  /** An idea ACTED OUT by a small realistic screen (chat, chart, checklist, search, link, video frame…). */
+  | { type: 'mock'; kind: MockKind; title?: string; items: MockItem[]; final?: { text: string; at: number; tone: 'good' | 'bad' } }
   /** A situation told with big 3D objects (e.g. money flying out of a wallet every month). */
   | { type: 'story' }
   /** Paid tool vs the free one that does the same job: the paid card is crossed out when the free one is named. */
@@ -32,7 +44,7 @@ export type MotionScene = { start: number; end: number; headline: Hl; props?: Pr
  * sometimes a different one to try (exploration) — and the critic's scores + view counts decide which survive.
  */
 export const GENES = {
-  theme: ['night', 'light', 'pop', 'teal', 'sunset'],
+  theme: ['studio', 'night', 'light', 'pop', 'teal', 'sunset'],
   bg: ['dots', 'grid', 'waves', 'blobs'],
   caption: ['highlight', 'underline', 'boxed'],
   transition: ['whip', 'zoom', 'fade', 'rise'],
