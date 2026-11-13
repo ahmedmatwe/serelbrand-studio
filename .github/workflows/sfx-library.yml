@@ -1,0 +1,31 @@
+# The sound-effects team builds / refreshes the professional SFX library from Freesound (CC0 only) and commits it.
+name: sfx-library
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 4 1 * *'   # monthly refresh
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - name: Search, check, pick and normalise the effects
+        env:
+          FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
+        run: node --no-warnings scripts/build-sfx-library.ts
+      - name: Save the library in the repo
+        run: |
+          git config user.name "serelbrand-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add motion/public/sfx/lib
+          git diff --cached --quiet && { echo "no change"; exit 0; }
+          git commit -qm "Sound-effects library (Freesound CC0, checked + normalised)"
+          git pull -q --rebase && git push -q
+      - uses: actions/upload-artifact@v4
+        with: { name: sfx-library, path: motion/public/sfx/lib, retention-days: 7 }

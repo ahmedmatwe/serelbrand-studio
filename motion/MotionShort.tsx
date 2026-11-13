@@ -1055,7 +1055,7 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
   // brand-colour wipe sweeping across at every cut (≈ 0.2 s)
   const wipe = cur && curStart > 0 && sinceCut < 0.22 ? sinceCut / 0.22 : -1;
   // the sound & transitions team decides every cut's transition and every sound (motion/edit.ts)
-  const { trans, sfx } = soundPlan(plan.scenes);
+  const { trans, sfx } = soundPlan(plan.scenes, plan.sfxLib);
   return (
     <StyleCtx.Provider value={s}><HeroCtx.Provider value={plan.hero}>
       <AbsoluteFill style={{ ...vars(th), background: s.bg1 }}>
@@ -1078,7 +1078,7 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
         <div style={{ position: 'absolute', top: 0, left: 0, height: 10, width: `${(frame / durationInFrames) * 100}%`, background: s.accent, boxShadow: `0 0 20px ${s.accent}` }} />
         <div style={{ position: 'absolute', top: 60, right: 60, fontFamily, fontWeight: 800, fontSize: 34, color: DIM, direction: 'rtl' }}>{plan.brand}</div>
         {plan.audio && <Audio src={staticFile(plan.audio)} />}
-        {sfx.map(([n, at, vol], i) => <Sequence key={`s${i}`} from={Math.max(0, f(at))}><Audio src={staticFile(`sfx/${n}.wav`)} volume={vol} /></Sequence>)}
+        {sfx.map(([file, at, vol, max], i) => <Sequence key={`s${i}`} from={Math.max(0, f(at))} {...(max ? { durationInFrames: Math.max(1, f(max)) } : {})}><Audio src={staticFile(file)} volume={vol} /></Sequence>)}
       </AbsoluteFill>
     </HeroCtx.Provider></StyleCtx.Provider>
   );

@@ -528,6 +528,9 @@ export async function renderMotion(rootDir: string, plan: MotionPlan, audio: str
   try {
     cpSync(resolve(rootDir, 'motion/public/sfx'), resolve(pub, 'sfx'), { recursive: true });
     await stageProps(rootDir, plan, pub);
+    // the sound-effects team's professional library (if built): its variants + peak times go with the plan
+    const lib = resolve(rootDir, 'motion/public/sfx/lib/manifest.json');
+    if (existsSync(lib)) { plan.sfxLib = JSON.parse(readFileSync(lib, 'utf8')); writeFileSync(resolve(pub, 'props.json'), JSON.stringify(plan)); }
     copyFileSync(audio, resolve(pub, plan.audio));
     const props = resolve(pub, 'props.json');
     writeFileSync(props, JSON.stringify(plan));
