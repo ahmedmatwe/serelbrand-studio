@@ -115,22 +115,38 @@ jobs:
           node_modules/ffmpeg-static/ffmpeg -loglevel error -f lavfi -i "sine=f=440:d=2" -ar 24000 -ac 1 /tmp/align-smoke.wav
           $WHISPER_PYTHON scripts/align.py /tmp/align-smoke.wav ar | tail -c 300; echo
 
-      - name: Restore state (private repo serelbrand-state)
+      - name: Restore state (private repo serelbrand-state — never stops the run)
         env:
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         run: |
-          mkdir -p data reports/daily
+          mkdir -p data reports/daily music
           touch data/studio.db.start   # renders newer than this are this run's
-          # The channel's memory lives in a PRIVATE repo. Never start "fresh" by accident: a failed clone stops
-          # the run (a fresh DB saved over the real one would wipe the channel's history).
-          [ -n "$STATE_REPO_TOKEN" ] || { echo "::error::STATE_REPO_TOKEN secret is missing"; exit 1; }
-          rm -rf /tmp/state-repo
-          git clone -q --depth 1 "https://x-access-token:${STATE_REPO_TOKEN}@github.com/ahmedmatwe/serelbrand-state.git" /tmp/state-repo
-          cp /tmp/state-repo/studio.db data/studio.db
-          mkdir -p reports music
-          cp -r /tmp/state-repo/reports/. reports/ 2>/dev/null || true
-          cp -r /tmp/state-repo/music/. music/ 2>/dev/null || true
-          echo "state restored ($(du -h data/studio.db | cut -f1), $(ls music | wc -l) music files)"
+          got=""
+          # 1) the private repo (3 tries)
+          if [ -n "$STATE_REPO_TOKEN" ]; then
+            for i in 1 2 3; do
+              rm -rf /tmp/state-repo
+              git clone -q --depth 1 "https://x-access-token:${STATE_REPO_TOKEN}@github.com/ahmedmatwe/serelbrand-state.git" /tmp/state-repo && { got=private; break; }
+              sleep $((i * 10))
+            done
+          fi
+          if [ "$got" = private ]; then
+            cp /tmp/state-repo/studio.db data/studio.db
+            cp -r /tmp/state-repo/reports/. reports/ 2>/dev/null || true
+            cp -r /tmp/state-repo/music/. music/ 2>/dev/null || true
+          # 2) the old state branch, while it exists
+          elif git ls-remote --exit-code --heads origin state > /dev/null 2>&1; then
+            git fetch -q origin state && git show origin/state:studio.db > data/studio.db && got=branch
+            git archive origin/state reports | tar -x 2>/dev/null || true
+          fi
+          # 3) nothing reachable: keep producing and publishing with a temporary memory, never saved over the real one
+          if [ -z "$got" ]; then
+            echo "STATE_DEGRADED=1" >> "$GITHUB_ENV"
+            echo "::warning::state store unreachable — running with a temporary memory (saved separately, not over the real data)"
+            printf '⚠️ مخزن بيانات القناة ما اتوصلش في التشغيل ده — الإنتاج والنشر كمّلوا عادي بذاكرة مؤقتة، والبيانات الأصلية ما اتلمستش.\n' >> data/notify.md
+          fi
+          echo "STATE_SOURCE=${got:-temporary}" >> "$GITHUB_ENV"
+          echo "state: ${got:-temporary} ($(du -h data/studio.db 2>/dev/null | cut -f1))"
 
       - name: The week's Shorts (Friday evening, for the weekly compilation)
         env:
@@ -153,15 +169,25 @@ jobs:
 
       - name: Save state (private repo serelbrand-state)
         if: always()
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         run: |
-          [ -f data/studio.db ] && [ -d /tmp/state-repo/.git ] || exit 0
-          cd /tmp/state-repo
-          git config user.name "serelbrand-bot"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          cp "$GITHUB_WORKSPACE/data/studio.db" studio.db
-          mkdir -p reports && cp -r "$GITHUB_WORKSPACE/reports/daily" "$GITHUB_WORKSPACE/reports/packages" reports/ 2>/dev/null || true
-          git add -A && (git diff --cached --quiet || git commit -qm "state: $(date -u +%FT%H:%MZ)")
-          for i in 1 2 3; do git push -q origin HEAD:main && break; git pull -q --rebase -X theirs origin main || true; done
+          [ -f data/studio.db ] || exit 0
+          git config --global user.name "serelbrand-bot"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$STATE_SOURCE" = private ]; then
+            cd /tmp/state-repo
+            cp "$GITHUB_WORKSPACE/data/studio.db" studio.db
+            mkdir -p reports && cp -r "$GITHUB_WORKSPACE/reports/daily" "$GITHUB_WORKSPACE/reports/packages" reports/ 2>/dev/null || true
+            git add -A && (git diff --cached --quiet || git commit -qm "state: $(date -u +%FT%H:%MZ)")
+            for i in 1 2 3; do git push -q origin HEAD:main && exit 0; sleep $((i * 10)); git pull -q --rebase -X theirs origin main || true; done
+            echo "::warning::could not push the state this time — the next run keeps going from the last saved copy"
+          elif [ -n "$STATE_REPO_TOKEN" ] && git clone -q --depth 1 "https://x-access-token:${STATE_REPO_TOKEN}@github.com/ahmedmatwe/serelbrand-state.git" /tmp/state-save; then
+            # came from the old branch (first run) → this becomes the private state; a temporary memory is kept aside
+            cd /tmp/state-save
+            if [ "$STATE_SOURCE" = branch ]; then cp "$GITHUB_WORKSPACE/data/studio.db" studio.db; else mkdir -p recovered && cp "$GITHUB_WORKSPACE/data/studio.db" "recovered/studio-$(date -u +%FT%H%MZ).db"; fi
+            git add -A && git commit -qm "state ($STATE_SOURCE): $(date -u +%FT%H:%MZ)" && git push -q origin HEAD:main || true
+          fi
 
       - name: Notify
         if: always()
