@@ -18,6 +18,7 @@ import { cuesFor, mixSoundtrackSafe, pickMusic } from './sound.ts';
 import { z } from 'zod';
 import { learnedMaxShot } from '../analytics/learner.ts';
 import { tightenNarration } from './tighten.ts';
+import { egyptianize, formalWords } from '../agents/egyptian.ts';
 import { motionAvailable, motionShare, planMotion, renderMotion, type MotionPlan } from './motion.ts';
 
 export type RenderSize = 'full' | 'preview';
@@ -532,6 +533,18 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
     let voiceName = '';
     const voicesUsed: string[] = [];
     const root = this.ctx.config.rootDir;
+    // The Egyptian editor: no formal Arabic ever reaches the narrator (checked + rewritten right before the voice).
+    {
+      const fixed = await egyptianize(this.ctx, bp.scenes.map((x) => x.voiceover), videoId).catch(() => undefined);
+      if (fixed) bp.scenes.forEach((x, i) => {
+        if (fixed[i] && fixed[i] !== x.voiceover) {
+          notes.push(`Scene ${x.n}: formal Arabic rewritten in Egyptian (${formalWords(x.voiceover).slice(0, 5).join('، ')})`);
+          const sc = script.scenes.find((y) => y.n === x.n);
+          if (sc) sc.voiceover = fixed[i]!;
+          x.voiceover = fixed[i]!;
+        }
+      });
+    }
     const voiceAll = async (provider: TTSProvider) => {
       const out: TimedScene[] = [];
       let start = 0;

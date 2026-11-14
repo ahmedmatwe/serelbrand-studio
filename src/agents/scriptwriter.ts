@@ -33,6 +33,7 @@ export function spokenText(s: Pick<Script, 'opening' | 'scenes' | 'cta' | 'endin
 
 /** How every phone-secrets Short is written (used for the pack and for repairing a single Short). */
 export const PHONE_SHORT_RULES = 'Each scene is a complete, independent YouTube Short of 30–45 seconds (70–100 spoken words) in natural EGYPTIAN Arabic, like a friend showing you a secret or a really useful feature on his phone — fast, warm, excited, never formal. ' +
+          'ONLY Egyptian colloquial (عامية مصرية) — never formal Arabic: write ده/دي not ذلك/هذا، تقدر not يمكنك، هـ not سوف/ستـ، كمان not أيضاً، بدل ما not بدلاً من، اللي not الذي/التي، عشان not لكي، لما not عندما، لو not إذا، بس not فقط، دلوقتي not الآن، دوس not اضغط/انقر، وبعدين not ثم. ' +
           'Written to be watched TO THE END. Structure of every scene: (1) HOOK in the first sentence (≤ 12 words, no greeting, no "النهارده هقولك"): the surprising benefit or a warning, e.g. "فيه كود لو كتبته في موبايلك هيقولك…", "الآيفون بتاعك فيه زرار سري ورا الضهر!"; ' +
           '(1b) OPEN LOOP in the second sentence: promise something true that only comes at the END (e.g. "وآخر حاجة هتقولك هي أهم حاجة", "واستنى لحد الآخر عشان تعرف تستخدمها في إيه") — and really deliver it last; ' +
           'one short re-hook in the middle (e.g. "ودي لسه مش أهم حاجة…") — never more than one; '

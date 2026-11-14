@@ -18,7 +18,7 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npx remotion browser ensure
-      - run: npx remotion render motion/index.ts MotionShort sample.mp4 --codec=h264 --log=error
+      - run: npx remotion render motion/index.ts MotionShort sample.mp4 --public-dir=motion/public --codec=h264 --log=error
       - run: ls -la sample.mp4
       - uses: actions/upload-artifact@v4
         with:

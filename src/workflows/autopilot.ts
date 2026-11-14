@@ -232,6 +232,16 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
 
   // 1) Approved → upload (private).
   for (const v of ctx.repos.videos.list('approved')) {
+    // Every GitHub run starts on a clean machine: an approved video whose rendered files are gone can never be
+    // uploaded — retrying it every cycle was an endless error. It is closed once, with the reason.
+    const rd = ctx.repos.artifacts.latest<{ videoPath?: string; shorts?: { path: string }[]; packOnly?: boolean }>(v.id, 'render')?.data;
+    const files = rd ? (rd.shorts?.length ? rd.shorts.map((x) => x.path) : rd.videoPath ? [rd.videoPath] : []) : [];
+    if (!ctx.config.env.DRY_RUN && files.length && !files.some((f) => existsSync(f))) {
+      ctx.repos.videos.update(v.id, { status: 'rejected' });
+      ctx.repos.artifacts.save({ videoId: v.id, kind: 'render_lost', agent: 'autopilot', data: { at: now.toISOString(), files } });
+      rep.errors.push(`publish ${v.id}: its rendered files are gone (made in an earlier run) — closed, not retried`);
+      continue;
+    }
     const r = await publish(ctx, v.id);
     if (r.status === 'succeeded') rep.published.push(v.id);
     else rep.errors.push(`publish ${v.id}: ${r.error}`);

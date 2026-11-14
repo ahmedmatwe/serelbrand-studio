@@ -14,5 +14,5 @@ npx tsc --noEmit -p .
 # the heavy full-render test times out on CI runners; the real motion render below covers rendering
 node --no-warnings=ExperimentalWarning --test --test-skip-pattern="long video always yields" "tests/**/*.test.ts"
 npx remotion browser ensure
-npx remotion render motion/index.ts MotionShort /tmp/rnd-sample.mp4 --codec=h264 --log=error
+npx remotion render motion/index.ts MotionShort /tmp/rnd-sample.mp4 --public-dir=motion/public --codec=h264 --log=error
 echo "UPGRADED remotion $cur → $latest"
