@@ -37,6 +37,7 @@ import { weeklyReportArabic } from '../reports/weekly.ts';
 import { weeklyCompilation } from './weekly-compilation.ts';
 import { learnFromErrors, rememberErrors } from '../lab/errors.ts';
 import { labEvolve } from '../lab/lab.ts';
+import { motionResearch } from '../agents/rnd.ts';
 import { checkRecords, checkRuns, healStuckTickets, newFindings, pendingTitles, watchdogMessage, type Finding } from '../agents/watchdog.ts';
 import { tmpdir } from 'node:os';
 
@@ -476,6 +477,11 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   if (tg && now.getUTCDay() === 5 && now.getUTCHours() >= 19 && ctx.repos.artifacts.latest<{ week: string }>(null, 'telegram_weekly')?.data.week !== isoWeek) {
     const subs = await liveStats(ctx).youtubeChannel?.().then((c) => c?.subscribers, () => undefined).catch(() => undefined);
     await tg.send((await weeklyReportArabic(ctx, now, subs)).slice(0, 4000)).then(() => ctx.repos.artifacts.save({ videoId: null, kind: 'telegram_weekly', agent: 'autopilot', data: { week: isoWeek } })).catch(() => {});
+  }
+  // R&D: the motion researcher's weekly proposals (Friday evening, with the weekly report).
+  if (tg && now.getUTCDay() === 5 && now.getUTCHours() >= 19) {
+    const msg = await motionResearch(ctx, now).catch((e: Error) => { rep.errors.push(`rnd: ${e.message.slice(0, 120)}`); return undefined; });
+    if (msg) await tg.send(msg.slice(0, 4000)).catch(() => {});
   }
   // Weekly long video (Friday evening): the week's Shorts stitched into one widescreen video with chapters.
   const weeklyIn = resolve(ctx.config.rootDir, 'data', 'weekly-in');

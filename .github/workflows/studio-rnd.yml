@@ -1,0 +1,35 @@
+# The R&D team: keeps the motion libraries and the visual assets up to date, safely.
+name: studio-rnd
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 0'   # every Sunday
+permissions:
+  contents: write
+jobs:
+  rnd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - name: Asset collector (3D objects + animated emoji)
+        run: python3 scripts/build-props-catalog.py | tee rnd.log
+      - name: Library engineer (upgrade only if tests + a real render pass)
+        id: lib
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          bash scripts/update-libraries.sh 2>&1 | tail -20 | tee -a rnd.log
+      - name: Save
+        run: |
+          git config user.name "serelbrand-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # a failed upgrade is never saved (the previous, working versions stay)
+          if [ "${{ steps.lib.outcome }}" != "success" ]; then git checkout -- package.json package-lock.json; echo "upgrade rejected (tests or render failed)" >> rnd.log; fi
+          git add config/props.json package.json package-lock.json
+          git diff --cached --quiet && { echo "nothing new"; exit 0; }
+          git commit -qm "R&D: $(grep -E 'objects|UPGRADED' rnd.log | tr '\n' ' ' | cut -c1-120)"
+          git pull -q --rebase && git push -q
