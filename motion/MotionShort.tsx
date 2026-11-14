@@ -38,7 +38,7 @@ const HeroCtx = React.createContext<string | undefined>(undefined);
 const Hero: React.FC<{ icon?: IconName; size: number; color: string; style?: React.CSSProperties }> = ({ icon, size, color, style }) => {
   const hero = React.useContext(HeroCtx);
   const t = useCurrentFrame() / FPS;
-  if (hero) return <Img src={staticFile(hero)} style={{ width: size * 1.35, height: size * 1.35, objectFit: 'contain', transform: `translateY(${8 * Math.sin(t * 2.2)}px) rotate(${3 * Math.sin(t * 1.4)}deg)`, filter: 'drop-shadow(0 18px 26px rgba(0,0,0,.45))', ...style }} />;
+  if (hero) return <Img data-avoid="hero" src={staticFile(hero)} style={{ width: size * 1.35, height: size * 1.35, objectFit: 'contain', transform: `translateY(${8 * Math.sin(t * 2.2)}px) rotate(${3 * Math.sin(t * 1.4)}deg)`, filter: 'drop-shadow(0 18px 26px rgba(0,0,0,.45))', ...style }} />;
   return icon ? <Icon name={icon} size={size} color={color} style={style} /> : null;
 };
 const useStyle = () => React.useContext(StyleCtx);
@@ -961,11 +961,38 @@ const LottieThing: React.FC<{ src: string; size: number }> = ({ src, size }) => 
   return <Lottie animationData={data} loop style={{ width: size, height: size }} />;
 };
 
+/** Visible text on screen right now (headlines, captions, cards, screens, buttons…) as rectangles. */
+function visibleTextRects(): DOMRect[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-qa],[data-avoid]')].filter((el) => {
+    let o = 1;
+    for (let n: HTMLElement | null = el; n; n = n.parentElement) { const cs = getComputedStyle(n); o *= Number(cs.opacity); if (cs.display === 'none' || cs.visibility === 'hidden') return false; }
+    return o > 0.25;
+  }).map((el) => el.getBoundingClientRect()).filter((r) => r.width > 2 && r.height > 2);
+}
+const overlaps = (a: { left: number; right: number; top: number; bottom: number }, b: DOMRect) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 8 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 8;
+
 const PropView: React.FC<{ p: Prop }> = ({ p }) => {
   const s = useStyle();
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / FPS;
+  const ref = React.useRef<HTMLDivElement>(null);
+  // An object must NEVER cover text: if it sits on any visible text, it moves to the nearest free spot inside the
+  // frame; with no free spot it hides for that frame.
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.translate = '0px 0px'; el.style.visibility = 'visible';
+    const r = el.getBoundingClientRect();
+    if (r.width < 2) return;
+    const texts = visibleTextRects();
+    for (const [dx, dy] of [[0, 0], [0, -230], [0, 230], [-220, 0], [220, 0], [0, -460], [0, 460]] as const) {
+      const m = { left: r.left + dx, right: r.right + dx, top: r.top + dy, bottom: r.bottom + dy };
+      if (m.left < 0 || m.right > 1080 || m.top < 90 || m.bottom > 1900) continue;
+      if (!texts.some((x) => overlaps(m, x))) { el.style.translate = `${dx}px ${dy}px`; return; }
+    }
+    el.style.visibility = 'hidden';
+  }, [frame]);
   if (t < p.at - 0.05 || t > p.until + 0.4) return null;
   const sl = SLOTS[p.slot] ?? SLOTS[0]!;
   const inP = pop(frame, fps, f(p.at));
@@ -982,7 +1009,7 @@ const PropView: React.FC<{ p: Prop }> = ({ p }) => {
   y += 14 * Math.sin(t * 2.1 + p.slot); rot += 4 * Math.sin(t * 1.3 + p.slot * 2);
   const no = p.action === 'no' ? pop(frame, fps, f(p.at + 0.45)) : 0;
   return (
-    <div style={{ position: 'absolute', left: sl.x, top: sl.y, width: sl.size, height: sl.size, opacity: op, transform: `translate(${x}px, ${y}px) rotate(${rot}deg) perspective(900px) rotateY(${ry}deg) scale(${scale})` }}>
+    <div ref={ref} data-prop="1" style={{ position: 'absolute', left: sl.x, top: sl.y, width: sl.size, height: sl.size, opacity: op, transform: `translate(${x}px, ${y}px) rotate(${rot}deg) perspective(900px) rotateY(${ry}deg) scale(${scale})` }}>
       {p.lottie
         ? <div style={{ width: '100%', height: '100%', filter: `drop-shadow(0 ${sl.size * 0.08}px ${sl.size * 0.1}px rgba(0,0,0,.45))` }}><LottieThing src={p.lottie} size={sl.size} /></div>
         : <Img src={staticFile(p.src)} style={{ width: '100%', height: '100%', objectFit: 'contain', filter: `drop-shadow(0 ${sl.size * 0.08}px ${sl.size * 0.1}px rgba(0,0,0,.45))` }} />}

@@ -487,6 +487,8 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
   // THE main object: the director's pick, else the topic's own words, else the first object it drew.
   const heroName = (heroThing && resolveProp(heroThing)) || heroFromWords(`${inp.title} ${inp.entry?.onScreen ?? ''} ${inp.narration}`);
   const hero = heroName ? `props/${propFile(heroName)}` : scenes.flatMap((x) => x.props ?? [])[0]?.src;
+  // never the same object twice on screen: no side object that duplicates the big main object
+  if (hero) for (const sc of scenes) if (sc.props) { sc.props = sc.props.filter((p) => p.src !== hero); if (!sc.props.length) delete sc.props; }
   return {
     duration: Number(inp.duration.toFixed(2)), audio: 'narration.m4a', ...(hero ? { hero } : {}), style: { ...motionStyle(ctx), variants: chooseVariants(ctx, explore || Boolean(criticOnThis)) }, brand: inp.brand, endCard: inp.endCard,
     captions: captionsFromWords(inp.words, inp.duration), beats: [...new Set(beats.map((b) => Number(b.toFixed(2))))].sort((a, b) => a - b), scenes,
