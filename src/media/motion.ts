@@ -282,7 +282,8 @@ const Hl = z.object({ text: z.string().min(2).transform((x) => x.slice(0, 60)), 
 const Planned = z.object({
   hero: z.string().max(40).optional().catch(undefined),
   scenes: z.array(z.object({
-    type: z.enum(['hook', 'dialer', 'settings', 'app', 'card', 'alert', 'compat', 'cta', 'statement', 'versus', 'story', 'mock']),
+    type: z.enum(['hook', 'dialer', 'settings', 'app', 'card', 'alert', 'compat', 'cta', 'statement', 'versus', 'story', 'mock', 'real']),
+    footage: z.string().max(60).optional().catch(undefined),
     from: z.number().int().min(0), to: z.number().int().min(0),
     headline: Hl,
     icon: z.enum(ICONS).optional().catch(undefined),
@@ -351,6 +352,7 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
         'Fill it with the narration\'s own words (short, ≤ 6 words per item), each item timed by sentence + word; final = an optional result tag under it (e.g. "اتحفظ ✓"). Never invent numbers: bars/ranked values only from the narration or entry, else relative heights with no number labels. ' +
         'BRING IT TO LIFE — never just a screen with information: in EVERY scene add 1–3 props = 3D objects of the concrete things the sentences name or picture (a shoe when a shoe is mentioned, money with wings when money is wasted every month, a robot for AI, a locked padlock for privacy, a camera for photos, a hourglass for waiting…). ' +
         'thing = a name from propNames (exact); word = the Arabic word in that sentence that names or evokes it (it appears exactly when that word is said); sentence = its index; action: pop (appears), fly-in, drop (falls in), fly-away (leaves: money spent, data lost), shake (alarm, danger), spin (magic, transformation), pulse (important), no (crossed out: what you no longer need). ' +
+        'real = MIX IN REAL FOOTAGE: a real video clip / photo of a life situation a sentence describes (a student with a long PDF, people at a café, hands typing on a phone, a crowded street, an office meeting) — 1–2 per video, never two in a row; footage = a 2–5 word English stock search for exactly that situation (family-friendly: objects, hands, phones, places, fully dressed people; never bed, swimwear, parties). ' +
         'story = a scene for a SITUATION the narration describes (paying every month, someone reading your messages, a crowded photo, a long lecture): told with 1–3 big props and their actions instead of a screen — use it for at least one situation sentence when the video has one. ' +
         'hero = THE main object of the whole video from propNames (exact), the thing the topic is about — e.g. "page facing up" for a PDF, "framed picture" for photos, "speech balloon" for WhatsApp messages, "battery" for battery, "locked" for privacy; it is drawn big in the opening and the ending instead of any generic icon. ' +
         'Make the opening stop the scroll. Apply criticNotes (what the editing critic disliked in recent videos) and rules (learned from view counts) so this video is better than the last. JSON only.',
@@ -461,6 +463,10 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
         scenes.push({ ...base, type: 'mock', kind: p.mock.kind, ...(p.mock.title ? { title: p.mock.title } : {}), items, ...(p.mock.final ? { final: { text: p.mock.final.text, tone: p.mock.final.tone, at: tAt(p.mock.final.sentence, undefined, 0.5) } } : {}) });
         break;
       }
+      case 'real':
+        // filled with a real clip / photo below (after the scenes are timed); placeholder until then
+        scenes.push({ ...base, type: 'real', media: 'image', src: '', ...(p.footage ? { credit: `q:${p.footage}` } : {}) });
+        break;
       case 'story':
         // No drawable object found → a plain statement keeps the time covered (never an empty gap).
         if (!props.length) { scenes.push({ ...base, type: 'statement', icon: p.icon ?? 'star', lines: [] }); break; }
@@ -484,6 +490,7 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
   for (let i = 1; i < scenes.length; i++) scenes[i - 1]!.end = scenes[i]!.start;
   if (scenes.length) { scenes[0]!.start = 0; scenes.at(-1)!.end = inp.duration; }
   wordProps(scenes, inp.words);
+  await fillRealFootage(ctx, scenes, inp, videoId);
   // THE main object: the director's pick, else the topic's own words, else the first object it drew.
   const heroName = (heroThing && resolveProp(heroThing)) || heroFromWords(`${inp.title} ${inp.entry?.onScreen ?? ''} ${inp.narration}`);
   const hero = heroName ? `props/${propFile(heroName)}` : scenes.flatMap((x) => x.props ?? [])[0]?.src;
@@ -493,6 +500,30 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
     duration: Number(inp.duration.toFixed(2)), audio: 'narration.m4a', ...(hero ? { hero } : {}), style: { ...motionStyle(ctx), variants: chooseVariants(ctx, explore || Boolean(criticOnThis)) }, brand: inp.brand, endCard: inp.endCard,
     captions: captionsFromWords(inp.words, inp.duration), beats: [...new Set(beats.map((b) => Number(b.toFixed(2))))].sort((a, b) => a - b), scenes,
   };
+}
+
+/**
+ * Real footage inside the motion: each 'real' scene gets a vertical stock clip or photo of its situation — searched
+ * on Pexels / Pixabay, chosen by vision against what is said, modesty-checked (the same pipeline as the stock
+ * videos). Nothing suitable → the scene becomes a motion story / statement (never an empty frame).
+ */
+async function fillRealFootage(ctx: AgentContext, scenes: MotionScene[], inp: MotionInput, videoId?: string) {
+  const real = scenes.filter((s): s is Extract<MotionScene, { type: 'real' }> => s.type === 'real');
+  if (!real.length) return;
+  const { fetchShotVisuals } = await import('./shots.ts');
+  const shots = real.map((sc) => ({
+    text: inp.words.filter((w) => w.start >= sc.start && w.start < sc.end).map((w) => w.w).join(' ') || sc.headline.text,
+    query: (sc.credit ?? '').replace(/^q:/, '') || 'smartphone in hands',
+    start: sc.start, duration: Math.max(1, sc.end - sc.start), variant: 0,
+  }));
+  const notes: string[] = [];
+  if (!ctx.providers.llm.name.startsWith('mock')) await fetchShotVisuals(ctx, shots, { targetWidth: 1080, orientation: 'portrait', cacheDir: resolve(ctx.config.rootDir, 'data/stock-cache'), used: new Set(), notes, videoId }).catch(() => undefined);
+  real.forEach((sc, i) => {
+    const v = (shots[i] as { visual?: { kind: 'video' | 'image'; path: string; asset: { attribution?: string; source: string } } }).visual;
+    const m = sc as unknown as Record<string, unknown>;
+    if (v?.path) { m.media = v.kind; m.src = v.path; m.credit = v.asset.attribution ?? v.asset.source; }
+    else { m.type = sc.props?.length ? 'story' : 'statement'; m.icon = 'star'; m.lines = []; delete m.media; delete m.src; delete m.credit; }
+  });
 }
 
 /** App colours (a coloured header + name, no logos) for drawn app screens. */
@@ -544,7 +575,7 @@ export function normalizePlan(plan: PlannedScene[], entry?: PhoneSecret): Planne
   for (const p of out) {
     const prev = merged.at(-1);
     // acted-out screens / stories carry their own content: two in a row are two different screens, never merged
-    if (prev && prev.type === p.type && !['hook', 'cta', 'mock', 'story'].includes(p.type)) { prev.to = p.to; continue; }
+    if (prev && prev.type === p.type && !['hook', 'cta', 'mock', 'story', 'real'].includes(p.type)) { prev.to = p.to; continue; }
     merged.push(p);
   }
   return merged;
@@ -579,6 +610,10 @@ export async function renderMotion(rootDir: string, plan: MotionPlan, audio: str
   try {
     cpSync(resolve(rootDir, 'motion/public/sfx'), resolve(pub, 'sfx'), { recursive: true });
     await stageProps(rootDir, plan, pub);
+    // real clips / photos into the public dir
+    mkdirSync(resolve(pub, 'real'), { recursive: true });
+    for (const sc of plan.scenes) if (sc.type === 'real' && sc.src && existsSync(sc.src)) { const name = `real/${basename(sc.src)}`; copyFileSync(sc.src, resolve(pub, name)); sc.src = name; }
+    writeFileSync(resolve(pub, 'props.json'), JSON.stringify(plan));
     // background music: a calm / uplifting licensed track (never the suspense ones for tips), ducked in the composition
     const musicDir = resolve(rootDir, 'music');
     if (existsSync(musicDir)) {

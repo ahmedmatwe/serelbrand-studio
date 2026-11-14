@@ -354,6 +354,16 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
         const review2 = drawn ? await this.editReview(alt, o.dir, `motion-${o.n}-b`, said(plan2), o.videoId) : undefined;
         if (score(review2) > score(review)) { renameSync(alt, o.path); plan = plan2; review = review2; o.notes.push(`Short ${o.n}: motion re-planned after the critic's notes (${review?.hook}/10 hook)`); } else rmSync(alt, { force: true });
       }
+      // Real footage inside the motion → the same frame-by-frame modesty audit as stock videos; a failing clip is
+      // replaced by a drawn scene and the Short is drawn again (never published with it).
+      if (plan.scenes.some((x) => x.type === 'real')) {
+        const audit = await this.modestyAudit(o.path, o.dir, `motion-${o.n}`, o.videoId);
+        if (audit) {
+          o.notes.push(`Short ${o.n}: real footage failed the modesty audit (${audit.reason.slice(0, 80)}) — replaced by drawn scenes`);
+          for (const x of plan.scenes) if (x.type === 'real') Object.assign(x as unknown as Record<string, unknown>, { type: x.props?.length ? 'story' : 'statement', icon: 'star', lines: [], media: undefined, src: undefined });
+          await renderMotion(root, plan, o.audio, o.path);
+        }
+      }
       if (review) this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'edit_review', agent: 'editing-critic', data: { n: o.n, look: 'motion', variants: plan.style.variants, ...review } });
       this.ctx.repos.artifacts.save({ videoId: o.videoId, kind: 'motion_plan', agent: 'motion-director', data: { n: o.n, plan } });
       o.notes.push(`Short ${o.n}: motion graphics (${plan.scenes.map((x) => x.type).join(' → ')})`);

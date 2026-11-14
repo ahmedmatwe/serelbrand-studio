@@ -31,6 +31,8 @@ export type MotionScene = { start: number; end: number; headline: Hl; props?: Pr
   | { type: 'compat'; items: string[]; code?: string; badge?: string; badgeAt?: number }
   /** An idea ACTED OUT by a small realistic screen (chat, chart, checklist, search, link, video frame…). */
   | { type: 'mock'; kind: MockKind; title?: string; items: MockItem[]; final?: { text: string; at: number; tone: 'good' | 'bad' } }
+  /** A REAL photo or video clip of the situation the sentence describes (mixes real footage into the motion). */
+  | { type: 'real'; media: 'video' | 'image'; src: string; credit?: string }
   /** A situation told with big 3D objects (e.g. money flying out of a wallet every month). */
   | { type: 'story' }
   /** Paid tool vs the free one that does the same job: the paid card is crossed out when the free one is named. */

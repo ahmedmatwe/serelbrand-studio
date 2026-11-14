@@ -5,7 +5,7 @@
  * the plan, so the team can tune it over time.
  */
 import React from 'react';
-import { AbsoluteFill, Audio, Easing, Img, Sequence, cancelRender, continueRender, delayRender, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Audio, Easing, Img, OffthreadVideo, Sequence, cancelRender, continueRender, delayRender, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { Lottie, type LottieAnimationData } from '@remotion/lottie';
 import { fitText } from '@remotion/layout-utils';
 import { loadFont } from '@remotion/google-fonts/Cairo';
@@ -1023,6 +1023,27 @@ const PropView: React.FC<{ p: Prop }> = ({ p }) => {
 };
 const PropLayer: React.FC<{ props?: Prop[] }> = ({ props }) => <>{(props ?? []).map((p, i) => <PropView key={i} p={p} />)}</>;
 
+/**
+ * Real footage (a stock clip or photo of the situation), full frame, with a slow cinematic push-in, dark gradients
+ * for the headline / captions to stay readable, and the studio accent as a thin frame line.
+ */
+const RealScene: React.FC<{ sc: Of<'real'> }> = ({ sc }) => {
+  const s = useStyle();
+  const t = useAbsT(sc.start);
+  const k = (t - sc.start) / Math.max(0.5, sc.end - sc.start);
+  const media: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'cover', transform: `scale(${1.06 + 0.1 * k}) translateY(${-14 * k}px)` };
+  return (
+    <>
+      <AbsoluteFill style={{ overflow: 'hidden' }}>
+        {sc.media === 'video' ? <OffthreadVideo src={staticFile(sc.src)} muted style={media} /> : <Img src={staticFile(sc.src)} style={media} />}
+      </AbsoluteFill>
+      <AbsoluteFill style={{ background: 'linear-gradient(180deg, rgba(10,10,14,.82) 0%, rgba(10,10,14,.15) 26%, rgba(10,10,14,.1) 62%, rgba(10,10,14,.85) 100%)' }} />
+      <AbsoluteFill style={{ boxShadow: `inset 0 0 0 10px ${s.accent}55` }} />
+      <Headline hl={sc.headline} size={84} top={190} />
+    </>
+  );
+};
+
 /** A situation told with big 3D objects (the props are the scene); a soft spotlight behind the hero object. */
 const StoryScene: React.FC<{ sc: Of<'story'> }> = ({ sc }) => {
   const s = useStyle();
@@ -1046,6 +1067,7 @@ const SceneView: React.FC<{ sc: MotionScene; endCard: string }> = ({ sc, endCard
     case 'compat': return <CompatScene sc={sc} />;
     case 'versus': return <VersusScene sc={sc} />;
     case 'story': return <StoryScene sc={sc} />;
+    case 'real': return <RealScene sc={sc} />;
     case 'mock': return <MockScene sc={sc} />;
     case 'cta': return <CtaScene sc={sc} endCard={endCard} />;
     default: return <StatementScene sc={sc as Of<'statement'>} />;
