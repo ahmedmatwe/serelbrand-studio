@@ -50,9 +50,12 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund --ignore-scripts
       - name: Latest state (read-only)
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         run: |
           mkdir -p data
-          git fetch -q origin state && git show origin/state:studio.db > data/studio.db || true
+          [ -n "$STATE_REPO_TOKEN" ] && git clone -q --depth 1 "https://x-access-token:${STATE_REPO_TOKEN}@github.com/ahmedmatwe/serelbrand-state.git" /tmp/state-repo && cp /tmp/state-repo/studio.db data/studio.db || true
+
       - name: Chosen videos → Telegram
         if: inputs.videos != ''
         # The input is passed as data (env), never pasted into the shell command.

@@ -115,19 +115,22 @@ jobs:
           node_modules/ffmpeg-static/ffmpeg -loglevel error -f lavfi -i "sine=f=440:d=2" -ar 24000 -ac 1 /tmp/align-smoke.wav
           $WHISPER_PYTHON scripts/align.py /tmp/align-smoke.wav ar | tail -c 300; echo
 
-      - name: Restore state
+      - name: Restore state (private repo serelbrand-state)
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         run: |
           mkdir -p data reports/daily
           touch data/studio.db.start   # renders newer than this are this run's
-          if git ls-remote --exit-code --heads origin state > /dev/null; then
-            git fetch -q origin state
-            git show origin/state:studio.db > data/studio.db
-            git archive origin/state reports | tar -x 2>/dev/null || true
-            mkdir -p music && git archive origin/state music 2>/dev/null | tar -x 2>/dev/null || true
-            echo "state restored ($(du -h data/studio.db | cut -f1))"
-          else
-            echo "no state yet — starting fresh"
-          fi
+          # The channel's memory lives in a PRIVATE repo. Never start "fresh" by accident: a failed clone stops
+          # the run (a fresh DB saved over the real one would wipe the channel's history).
+          [ -n "$STATE_REPO_TOKEN" ] || { echo "::error::STATE_REPO_TOKEN secret is missing"; exit 1; }
+          rm -rf /tmp/state-repo
+          git clone -q --depth 1 "https://x-access-token:${STATE_REPO_TOKEN}@github.com/ahmedmatwe/serelbrand-state.git" /tmp/state-repo
+          cp /tmp/state-repo/studio.db data/studio.db
+          mkdir -p reports music
+          cp -r /tmp/state-repo/reports/. reports/ 2>/dev/null || true
+          cp -r /tmp/state-repo/music/. music/ 2>/dev/null || true
+          echo "state restored ($(du -h data/studio.db | cut -f1), $(ls music | wc -l) music files)"
 
       - name: The week's Shorts (Friday evening, for the weekly compilation)
         env:
@@ -148,22 +151,17 @@ jobs:
           FORCE_FORMAT: ${{ inputs.format || '' }}
         run: node --no-warnings src/cli/index.ts autopilot
 
-      - name: Save state
+      - name: Save state (private repo serelbrand-state)
         if: always()
         run: |
-          [ -f data/studio.db ] || exit 0
+          [ -f data/studio.db ] && [ -d /tmp/state-repo/.git ] || exit 0
+          cd /tmp/state-repo
           git config user.name "serelbrand-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -rf /tmp/state
-          if git ls-remote --exit-code --heads origin state > /dev/null; then
-            git worktree add -q /tmp/state origin/state && cd /tmp/state && git checkout -q -B state
-          else
-            git worktree add -q --orphan -b state /tmp/state && cd /tmp/state
-          fi
           cp "$GITHUB_WORKSPACE/data/studio.db" studio.db
           mkdir -p reports && cp -r "$GITHUB_WORKSPACE/reports/daily" "$GITHUB_WORKSPACE/reports/packages" reports/ 2>/dev/null || true
           git add -A && (git diff --cached --quiet || git commit -qm "state: $(date -u +%FT%H:%MZ)")
-          git push -q origin state
+          for i in 1 2 3; do git push -q origin HEAD:main && break; git pull -q --rebase -X theirs origin main || true; done
 
       - name: Notify
         if: always()
