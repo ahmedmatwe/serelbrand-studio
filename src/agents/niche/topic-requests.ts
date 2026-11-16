@@ -121,10 +121,10 @@ export function requestedEntries(ctx: AgentContext): Requested[] {
   for (const a of ctx.repos.artifacts.listKind<Requested>('topic_request')) by.set(a.data.request.id, a.data);
   return [...by.values()];
 }
-export function writeRequestedLibrary(ctx: AgentContext): void {
+export function writeRequestedLibrary(ctx: AgentContext, now = new Date()): void {
   const file = resolve(ctx.config.rootDir, REQUESTED_FILE);
   // A trend topic nobody made within its window is dropped: its hook would talk about yesterday's news.
-  const stale = (r: Requested) => r.status === 'approved' && r.entry?.trend && Date.now() - Date.parse(r.entry.trend.at) > 60 * 3_600_000;
+  const stale = (r: Requested) => r.status === 'approved' && r.entry?.trend && now.getTime() - Date.parse(r.entry.trend.at) > 60 * 3_600_000;
   const entries = requestedEntries(ctx).filter((r) => r.entry && (r.status === 'approved' || r.status === 'produced') && !stale(r)).map((r) => r.entry!);
   if (!entries.length && !existsSync(file)) return;
   mkdirSync(dirname(file), { recursive: true });

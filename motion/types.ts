@@ -47,7 +47,11 @@ export type MotionScene = { start: number; end: number; headline: Hl; props?: Pr
  */
 export const GENES = {
   theme: ['studio', 'night', 'light', 'pop', 'teal', 'sunset'],
-  bg: ['dots', 'grid', 'waves', 'blobs'],
+  bg: ['dots', 'grid', 'noise', 'mesh', 'rays', 'shapes', 'photo', 'waves', 'blobs'],
+  /** Variety (owner: videos must not look alike): font, accent colour and card style change between videos. */
+  font: ['cairo', 'tajawal', 'almarai', 'changa', 'rubik', 'lalezar'],
+  accent: ['orange', 'cyan', 'lime', 'pink', 'violet', 'gold'],
+  card: ['solid', 'glass', 'outline'],
   caption: ['highlight', 'underline', 'boxed'],
   transition: ['whip', 'zoom', 'fade', 'rise'],
   hook: ['rings', 'slam', 'phone3d'],
@@ -76,6 +80,8 @@ export interface MotionPlan {
   music?: string;
   /** The sound-effects team's professional library (role → variants with where each one peaks). */
   sfxLib?: Record<string, { file: string; peak: number; dur: number }[]>;
+  /** Background media (blurred real photo / clip of the topic) when the bg gene is 'photo'. */
+  bgMedia?: { kind: 'image' | 'video'; src: string };
   /** THE main object of the video (3D, e.g. a PDF page for a PDF tip): drawn instead of generic icons. */
   hero?: string;
   /** Narration file name inside the public dir. */

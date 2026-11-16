@@ -18,6 +18,7 @@
     "@remotion/layout-utils": "^4.0.300",
     "@remotion/lottie": "^4.0.300",
     "@remotion/motion-blur": "^4.0.300",
+    "@remotion/noise": "^4.0.300",
     "@remotion/paths": "^4.0.300",
     "@remotion/shapes": "^4.0.300",
     "@remotion/transitions": "^4.0.300",

@@ -103,6 +103,6 @@ export async function scoutTrends(ctx: AgentContext, used: Set<string>, now = ne
     ctx.repos.artifacts.save({ videoId: null, kind: 'topic_request', agent: 'trend-scout', data: { ...v, auto: true, entry: { ...v.entry, trend } } });
     msgs.push(`📈 تريند في مصر: «${p.trend}»\n🎬 هعمل عليه فيديو: «${v.entry.title}»\n🔗 الربط: ${p.link}\n${p.urgency === 'now' ? '⚡ هيتعمل النهارده قبل ما التريند يبرد.' : '🗓️ هيتعمل أول واحد في الإنتاج الجاي.'}`);
   }
-  writeRequestedLibrary(ctx);
+  writeRequestedLibrary(ctx, now);
   return msgs;
 }

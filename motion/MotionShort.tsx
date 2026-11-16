@@ -9,10 +9,37 @@ import { AbsoluteFill, Audio, Easing, Img, OffthreadVideo, Sequence, cancelRende
 import { Lottie, type LottieAnimationData } from '@remotion/lottie';
 import { fitText } from '@remotion/layout-utils';
 import { loadFont } from '@remotion/google-fonts/Cairo';
+import { loadFont as loadTajawal } from '@remotion/google-fonts/Tajawal';
+import { loadFont as loadAlmarai } from '@remotion/google-fonts/Almarai';
+import { loadFont as loadChanga } from '@remotion/google-fonts/Changa';
+import { loadFont as loadRubik } from '@remotion/google-fonts/Rubik';
+import { loadFont as loadLalezar } from '@remotion/google-fonts/Lalezar';
+import { noise3D } from '@remotion/noise';
 import type { Hl, IconName, MotionPlan, MotionScene, MotionStyle, Prop, Tone, Variants } from './types';
 import { soundPlan, type Trans } from './edit';
 
-const { fontFamily } = loadFont('normal', { weights: ['600', '800', '900'], subsets: ['arabic', 'latin'] });
+const CAIRO = loadFont('normal', { weights: ['600', '800', '900'], subsets: ['arabic', 'latin'] }).fontFamily;
+/** Variety of Arabic typefaces (Google Fonts, OFL) — one per video, chosen by the font gene. */
+const tryFont = (f: () => { fontFamily: string }) => { try { return f().fontFamily; } catch { return CAIRO; } };
+const FONTS: Record<string, string> = {
+  cairo: CAIRO,
+  tajawal: tryFont(() => loadTajawal('normal', { weights: ['500', '700', '800', '900'], subsets: ['arabic', 'latin'] })),
+  almarai: tryFont(() => loadAlmarai('normal', { weights: ['700', '800'], subsets: ['arabic'] })),
+  changa: tryFont(() => loadChanga('normal', { weights: ['600', '700', '800'], subsets: ['arabic', 'latin'] })),
+  rubik: tryFont(() => loadRubik('normal', { weights: ['600', '700', '800', '900'], subsets: ['arabic', 'latin'] })),
+  lalezar: tryFont(() => loadLalezar('normal', { weights: ['400'], subsets: ['arabic', 'latin'] })),
+};
+// The whole video uses one typeface: set once per frame from the plan's font gene (before anything renders).
+let fontFamily = CAIRO;
+/** Accent colours (variety between videos) with a matching dark base. */
+const ACCENTS: Record<string, { accent: string; bg1: string; bg2: string }> = {
+  orange: { accent: '#FF9F1C', bg1: '#111216', bg2: '#1B1D24' },
+  cyan: { accent: '#22D3EE', bg1: '#0B1220', bg2: '#13203A' },
+  lime: { accent: '#A3E635', bg1: '#0F1410', bg2: '#18221A' },
+  pink: { accent: '#F472B6', bg1: '#160F17', bg2: '#251828' },
+  violet: { accent: '#A78BFA', bg1: '#110F1C', bg2: '#1D1830' },
+  gold: { accent: '#FACC15', bg1: '#14120B', bg2: '#221E12' },
+};
 export const FPS = 30;
 
 // Colours of text/cards come from the theme (CSS variables), so the same scenes work on dark and light looks.
@@ -42,7 +69,7 @@ const Hero: React.FC<{ icon?: IconName; size: number; color: string; style?: Rea
   return icon ? <Icon name={icon} size={size} color={color} style={style} /> : null;
 };
 const useStyle = () => React.useContext(StyleCtx);
-const V = (s: MotionStyle): Variants => ({ theme: 'studio', bg: 'dots', caption: 'highlight', transition: s.transition, hook: 'rings', headline: 'pop', phone: 'flat', ...(s.variants ?? {}) });
+const V = (s: MotionStyle): Variants => ({ theme: 'studio', bg: 'dots', caption: 'highlight', transition: s.transition, hook: 'rings', headline: 'pop', phone: 'flat', font: 'cairo', accent: 'orange', card: 'solid', ...(s.variants ?? {}) });
 const toneColor = (s: MotionStyle, t?: Tone | 'good' | 'bad' | 'neutral') => (t === 'green' || t === 'good' ? s.good : t === 'red' || t === 'bad' ? s.bad : t === 'neutral' ? DIM : s.accent);
 
 const f = (s: number) => Math.round(s * FPS);
@@ -92,13 +119,43 @@ const Rich: React.FC<{ hl: Hl }> = ({ hl }) => {
   return <>{hl.text.slice(0, i)}<span style={{ color: toneColor(s, hl.tone) }}>{hl.accent}</span>{hl.text.slice(i + hl.accent!.length)}</>;
 };
 
-const Background: React.FC<{ tint: string }> = ({ tint }) => {
+const Background: React.FC<{ tint: string; media?: { kind: 'image' | 'video'; src: string } }> = ({ tint, media }) => {
   const s = useStyle();
   const t = useCurrentFrame() / FPS;
   const x = 50 + 18 * Math.sin(t * 0.5), y = 35 + 10 * Math.cos(t * 0.4);
   const bg = V(s).bg;
   return (
     <AbsoluteFill style={{ background: `radial-gradient(circle at ${x}% ${y}%, ${tint}55 0%, transparent 45%), radial-gradient(circle at ${100 - x}% ${100 - y}%, ${s.bg2} 0%, ${s.bg1} 70%)` }}>
+      {/* a blurred, darkened real photo / clip of the topic */}
+      {bg === 'photo' && media && (
+        <AbsoluteFill style={{ overflow: 'hidden', opacity: 0.55 }}>
+          {media.kind === 'video'
+            ? <OffthreadVideo src={staticFile(media.src)} muted style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(22px) brightness(0.45) saturate(1.2)', transform: `scale(${1.15 + 0.03 * Math.sin(t * 0.3)})` }} />
+            : <Img src={staticFile(media.src)} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(22px) brightness(0.45) saturate(1.2)', transform: `scale(${1.15 + 0.05 * (t / 30)}) translateY(${-10 * Math.sin(t * 0.2)}px)` }} />}
+        </AbsoluteFill>
+      )}
+      {/* organic flow: particles drifting along a 3D noise field */}
+      {bg === 'noise' && (
+        <svg width={1080} height={1920} style={{ position: 'absolute', inset: 0 }}>
+          {Array.from({ length: 70 }, (_, i) => {
+            const px = ((i * 137) % 1080) + 120 * noise3D('x', i * 0.13, t * 0.15, 0);
+            const py = ((i * 263) % 1920) + 160 * noise3D('y', i * 0.11, t * 0.12, 1);
+            const r = 3 + 5 * (0.5 + 0.5 * noise3D('r', i, t * 0.4, 2));
+            return <circle key={i} cx={px} cy={py} r={r} fill={i % 3 ? 'var(--dot)' : tint} opacity={i % 3 ? 1 : 0.35} />;
+          })}
+        </svg>
+      )}
+      {/* moving colour mesh */}
+      {bg === 'mesh' && [0, 1, 2].map((k) => (
+        <div key={k} style={{ position: 'absolute', width: 900, height: 900, borderRadius: '50%', left: -100 + 500 * (0.5 + 0.5 * Math.sin(t * (0.18 + k * 0.07) + k * 2.1)), top: -100 + k * 600 + 200 * Math.cos(t * (0.15 + k * 0.05) + k), background: k === 1 ? s.bg2 : tint, opacity: k === 1 ? 0.9 : 0.13, filter: 'blur(140px)' }} />
+      ))}
+      {/* soft light rays from the top */}
+      {bg === 'rays' && <AbsoluteFill style={{ background: `conic-gradient(from ${180 + 8 * Math.sin(t * 0.3)}deg at 50% -8%, transparent 0deg, ${tint}22 12deg, transparent 24deg, ${tint}18 40deg, transparent 54deg, ${tint}22 70deg, transparent 84deg, transparent 276deg, ${tint}22 290deg, transparent 304deg, ${tint}18 320deg, transparent 334deg, ${tint}22 348deg, transparent 360deg)`, opacity: 0.9 }} />}
+      {/* floating geometric outlines */}
+      {bg === 'shapes' && [0, 1, 2, 3, 4, 5].map((k) => {
+        const size = 140 + 60 * (k % 3);
+        return <div key={k} style={{ position: 'absolute', width: size, height: size, left: ((k * 211) % 900) + 40 * Math.sin(t * 0.4 + k), top: 200 + ((k * 337) % 1500) + 50 * Math.cos(t * 0.35 + k), border: `4px solid ${k % 2 ? 'var(--dot)' : tint + '44'}`, borderRadius: k % 3 === 0 ? '50%' : k % 3 === 1 ? 28 : 0, transform: `rotate(${t * (8 + k * 3) + k * 30}deg)` }} />;
+      })}
       {bg === 'dots' && <AbsoluteFill style={{ backgroundImage: 'radial-gradient(var(--dot) 2px, transparent 2px)', backgroundSize: '48px 48px', transform: `translateY(${(t * 12) % 48}px)` }} />}
       {bg === 'grid' && <AbsoluteFill style={{ backgroundImage: 'linear-gradient(var(--dot) 2px, transparent 2px), linear-gradient(90deg, var(--dot) 2px, transparent 2px)', backgroundSize: '90px 90px', transform: `perspective(900px) rotateX(35deg) translateY(${(t * 40) % 90}px) scale(1.6)`, transformOrigin: '50% 100%' }} />}
       {bg === 'waves' && (
@@ -1100,8 +1157,12 @@ const Captions: React.FC<{ caps: MotionPlan['captions'] }> = ({ caps }) => {
 };
 
 export const MotionShort: React.FC<MotionPlan> = (plan) => {
-  const th = THEMES[V(plan.style).theme] ?? THEMES.night!;
+  const th0 = THEMES[V(plan.style).theme] ?? THEMES.night!;
+  const pal = ACCENTS[V(plan.style).accent] ?? ACCENTS.orange!;
+  const th = { ...th0, ...(V(plan.style).theme === 'studio' ? pal : {}) };
+  fontFamily = FONTS[V(plan.style).font] ?? CAIRO;
   const s: MotionStyle = { ...plan.style, accent: th.accent, good: th.good, bad: th.bad, bg1: th.bg1, bg2: th.bg2 };
+  const cardVars = V(plan.style).card === 'glass' ? { '--card': 'rgba(255,255,255,0.07)', '--line': 'rgba(255,255,255,0.16)' } : V(plan.style).card === 'outline' ? { '--card': 'rgba(0,0,0,0.25)', '--line': th.accent } : {};
   const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
   const t = frame / FPS;
@@ -1130,8 +1191,8 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
   };
   return (
     <StyleCtx.Provider value={s}><HeroCtx.Provider value={plan.hero}>
-      <AbsoluteFill style={{ ...vars(th), background: s.bg1 }}>
-        <Background tint={tint} />
+      <AbsoluteFill style={{ ...vars(th), ...(cardVars as React.CSSProperties), background: s.bg1 }}>
+        <Background tint={tint} media={plan.bgMedia} />
         {s.particles && <Particles color={tint} />}
         {/* never still: a slow push-in through each scene + a punch when a scene starts */}
         <AbsoluteFill style={{ transform: `scale(${1 + 0.03 * kick + camPush}) translate(${camDrift}px, 0)` }}>

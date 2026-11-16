@@ -37,7 +37,7 @@ const ICONS = ['call', 'shield', 'headset', 'warn', 'check', 'lock', 'antenna', 
 export function motionStyle(ctx: AgentContext): MotionStyle {
   try { return { ...DEFAULT_STYLE, ...(JSON.parse(readKnowledge(ctx, 'motion_style=') ?? '{}') as Partial<MotionStyle>) }; } catch { return DEFAULT_STYLE; }
 }
-const DEFAULT_VARIANTS: Variants = { theme: 'studio', bg: 'dots', caption: 'highlight', transition: 'whip', hook: 'rings', headline: 'pop', phone: 'flat' };
+const DEFAULT_VARIANTS: Variants = { theme: 'studio', bg: 'dots', caption: 'highlight', transition: 'whip', hook: 'rings', headline: 'pop', phone: 'flat', font: 'cairo', accent: 'orange', card: 'solid' };
 /** Critic quality of one review (0–10, opening and match weigh double). */
 export const reviewScore = (r: { hook: number; visualMatch: number; pacing: number; captions: number }) => (r.hook * 2 + r.visualMatch * 2 + r.pacing + r.captions) / 6;
 
@@ -71,8 +71,13 @@ export function chooseVariants(ctx: AgentContext, explore: boolean, rnd: () => n
     const unproven = all.filter((x) => x.n < 3 && x.score > best - 1.5 && !ok.includes(x));
     pools[g] = (explore ? [...ok, ...unproven] : ok).map((x) => ({ v: x.v, w: Math.max(0.2, x.score - (best - 1)) }));
   }
+  // calm backgrounds only (no waves / colour blobs); the theme is the fixed dark studio base
+  pools.bg = pools.bg.filter((x) => x.v !== 'waves' && x.v !== 'blobs');
+  if (!pools.bg.length) pools.bg = [{ v: 'dots', w: 1 }];
   const pick = (pool: { v: string; w: number }[]) => { let r = rnd() * pool.reduce((a, x) => a + x.w, 0); for (const x of pool) { r -= x.w; if (r <= 0) return x.v; } return pool.at(-1)!.v; };
-  const varied = (c: Variants) => (!recent[0] || c.theme !== recent[0].theme || pools.theme.length < 2) && recent.every((p) => genes.filter((g) => p[g] !== c[g]).length >= 2);
+  // Owner: videos must not look alike — never the previous video's font, colour or background, and the whole
+  // look differs from each of the last 3 videos in at least 3 genes.
+  const varied = (c: Variants) => (!recent[0] || ((['font', 'accent', 'bg'] as const).every((g) => c[g] !== recent[0]![g] || pools[g].length < 2))) && recent.every((p) => genes.filter((g) => p[g] !== c[g]).length >= 3);
   let out: Variants | undefined;
   for (let k = 0; k < 40 && !out; k++) {
     const c = Object.fromEntries(genes.map((g) => [g, pick(pools[g])])) as Variants;
@@ -80,8 +85,7 @@ export function chooseVariants(ctx: AgentContext, explore: boolean, rnd: () => n
   }
   // The colour theme is the channel's identity (owner's choice: the calm "studio" look); the other genes vary.
   // calm like the reference: a dotted or grid background only (no waves / colour blobs)
-  const bg = out?.bg === 'grid' ? 'grid' : 'dots';
-  return { ...DEFAULT_VARIANTS, ...out, theme: 'studio', bg };
+  return { ...DEFAULT_VARIANTS, ...out, theme: 'studio' };
 }
 
 /** Share of Shorts drawn as motion graphics (the rest use stock footage), tuned by the analyst. Default 0.5. */
@@ -496,8 +500,18 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
   const hero = heroName ? `props/${propFile(heroName)}` : scenes.flatMap((x) => x.props ?? [])[0]?.src;
   // never the same object twice on screen: no side object that duplicates the big main object
   if (hero) for (const sc of scenes) if (sc.props) { sc.props = sc.props.filter((p) => p.src !== hero); if (!sc.props.length) delete sc.props; }
+  const variants: { -readonly [K in keyof Variants]: Variants[K] } = { ...chooseVariants(ctx, explore || Boolean(criticOnThis)) };
+  // 'photo' background: a blurred real photo / clip of the topic (vision + modesty checked); none → colour mesh
+  let bgMedia: MotionPlan['bgMedia'];
+  if (variants.bg === 'photo') {
+    const { fetchShotVisuals } = await import('./shots.ts');
+    const shot = [{ text: inp.title, query: inp.entry?.footage?.[0] ?? 'smartphone close up', start: 0, duration: inp.duration, variant: 0 }];
+    if (!ctx.providers.llm.name.startsWith('mock')) await fetchShotVisuals(ctx, shot, { targetWidth: 1080, orientation: 'portrait', cacheDir: resolve(ctx.config.rootDir, 'data/stock-cache'), used: new Set(), notes: [], videoId }).catch(() => undefined);
+    const v = (shot[0] as { visual?: { kind: 'image' | 'video'; path: string } }).visual;
+    if (v?.path) bgMedia = { kind: v.kind, src: v.path }; else variants.bg = 'mesh';
+  }
   return {
-    duration: Number(inp.duration.toFixed(2)), audio: 'narration.m4a', ...(hero ? { hero } : {}), style: { ...motionStyle(ctx), variants: chooseVariants(ctx, explore || Boolean(criticOnThis)) }, brand: inp.brand, endCard: inp.endCard,
+    duration: Number(inp.duration.toFixed(2)), audio: 'narration.m4a', ...(hero ? { hero } : {}), ...(bgMedia ? { bgMedia } : {}), style: { ...motionStyle(ctx), variants }, brand: inp.brand, endCard: inp.endCard,
     captions: captionsFromWords(inp.words, inp.duration), beats: [...new Set(beats.map((b) => Number(b.toFixed(2))))].sort((a, b) => a - b), scenes,
   };
 }
@@ -610,6 +624,8 @@ export async function renderMotion(rootDir: string, plan: MotionPlan, audio: str
   try {
     cpSync(resolve(rootDir, 'motion/public/sfx'), resolve(pub, 'sfx'), { recursive: true });
     await stageProps(rootDir, plan, pub);
+    if (plan.bgMedia && existsSync(plan.bgMedia.src)) { mkdirSync(resolve(pub, 'bg'), { recursive: true }); const name = `bg/${basename(plan.bgMedia.src)}`; copyFileSync(plan.bgMedia.src, resolve(pub, name)); plan.bgMedia = { ...plan.bgMedia, src: name }; }
+    else if (plan.bgMedia) { delete plan.bgMedia; plan.style.variants = { ...plan.style.variants!, bg: 'mesh' }; }
     // real clips / photos into the public dir
     mkdirSync(resolve(pub, 'real'), { recursive: true });
     for (const sc of plan.scenes) if (sc.type === 'real' && sc.src && existsSync(sc.src)) { const name = `real/${basename(sc.src)}`; copyFileSync(sc.src, resolve(pub, name)); sc.src = name; }
