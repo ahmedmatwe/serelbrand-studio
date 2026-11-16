@@ -293,9 +293,150 @@ type Of<T extends MotionScene['type']> = Extract<MotionScene, { type: T }>;
 const HookScene: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
   const s = useStyle();
   const v = V(s).hook;
-  if (v === 'slam') return <HookSlam sc={sc} />;
-  if (v === 'phone3d') return <HookPhone3d sc={sc} />;
-  return <HookRings sc={sc} />;
+  // the code-teaser hooks keep their own layouts
+  if (sc.teaserCode) return v === 'slam' ? <HookSlam sc={sc} /> : v === 'phone3d' ? <HookPhone3d sc={sc} /> : <HookRings sc={sc} />;
+  switch (v) {
+    case 'slam': return <HookSlam sc={sc} />;
+    case 'phone3d': return <HookPhone3d sc={sc} />;
+    case 'burst': return <HookBurst sc={sc} />;
+    case 'bubble': return <HookBubble sc={sc} />;
+    case 'notify': return <HookNotify sc={sc} />;
+    case 'glitch': return <HookGlitch sc={sc} />;
+    case 'search': return <HookSearch sc={sc} />;
+    case 'zoomword': return <HookZoomWord sc={sc} />;
+    case 'split': return <HookSplit sc={sc} />;
+    default: return <HookRings sc={sc} />;
+  }
+};
+
+// ── the opening library: a different first 3 seconds for every video ─────────────────────────────────────────
+const bigText = (size: number): React.CSSProperties => ({ fontFamily, fontWeight: 900, fontSize: size, color: WHITE, direction: 'rtl', textAlign: 'center', lineHeight: 1.15, textShadow: '0 10px 40px rgba(0,0,0,.6)' });
+const Accented: React.FC<{ hl: Hl }> = ({ hl }) => { const s = useStyle(); const acc = new Set((hl.accent ?? '').split(/\s+/).filter(Boolean)); return <>{hl.text.split(/\s+/).map((w, i) => <span key={i} style={{ color: acc.has(w) ? toneColor(s, hl.tone) : undefined }}>{w} </span>)}</>; };
+
+/** The main object flies in from far away and lands with a radial burst of light lines and sparks. */
+const HookBurst: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
+  const s = useStyle(); const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const t = frame / FPS;
+  const fly = spring({ frame, fps, config: { damping: 11, stiffness: 120, mass: 0.8 } });
+  const burst = ease(t, 0.35, 1.1);
+  return (
+    <>
+      <svg width={1080} height={1920} style={{ position: 'absolute', inset: 0 }}>
+        {Array.from({ length: 28 }, (_, i) => { const a = (i / 28) * Math.PI * 2; const r0 = 160 + 500 * burst, r1 = r0 + 140 * (1 - burst); return <line key={i} x1={540 + r0 * Math.cos(a)} y1={760 + r0 * Math.sin(a)} x2={540 + r1 * Math.cos(a)} y2={760 + r1 * Math.sin(a)} stroke={i % 2 ? s.accent : '#fff'} strokeWidth={6} strokeLinecap="round" opacity={1 - burst} />; })}
+        {Array.from({ length: 18 }, (_, i) => { const a = i * 2.39; const r = 120 + 620 * burst * (0.6 + (i % 5) / 10); return <circle key={`p${i}`} cx={540 + r * Math.cos(a)} cy={760 + r * Math.sin(a)} r={7} fill={s.accent} opacity={0.9 * (1 - burst)} />; })}
+      </svg>
+      <div style={{ position: 'absolute', top: 760 - 230, left: 540 - 230, width: 460, height: 460, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: `scale(${0.05 + 1.0 * fly}) rotate(${(1 - fly) * 40}deg)`, filter: `drop-shadow(0 0 ${60 * (1 - burst) + 20}px ${s.accent})` }}><Hero icon={sc.icon} size={300} color="#111" /></div>
+      <div data-qa="headline" style={{ position: 'absolute', top: 1110, left: 60, right: 60, ...bigText(96), transform: `translateY(${(1 - pop(frame, fps, 10)) * 80}px)`, opacity: pop(frame, fps, 10) }}><Accented hl={sc.headline} /></div>
+      {sc.question && <Headline hl={sc.question} delay={f((sc.questionAt ?? 1.6) - sc.start)} top={240} size={72} />}
+    </>
+  );
+};
+
+/** A chat bubble types the hook in front of you: typing dots, then the words. */
+const HookBubble: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
+  const s = useStyle(); const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const t = frame / FPS;
+  const inP = pop(frame, fps, 2); const typing = t < 0.55;
+  const n = Math.round(sc.headline.text.length * ease(t, 0.55, Math.min(1.6, (sc.end - sc.start) * 0.6)));
+  return (
+    <>
+      <div style={{ position: 'absolute', top: 360, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}><div style={{ width: 230, height: 230, transform: `scale(${pop(frame, fps, 0)})` }}><Hero icon={sc.icon} size={170} color="#111" /></div></div>
+      <div style={{ position: 'absolute', top: 680, right: 90, maxWidth: 860, transform: `scale(${0.6 + 0.4 * inP})`, transformOrigin: 'right top', opacity: Math.min(1, inP * 1.5) }}>
+        <div style={{ fontFamily, fontWeight: 800, fontSize: 32, color: DIM, direction: 'rtl', marginBottom: 12 }}>سر الموبايل</div>
+        <div data-qa="headline" style={{ padding: '30px 40px', borderRadius: '44px 44px 12px 44px', background: s.accent, color: '#111', fontFamily, fontWeight: 900, fontSize: 70, direction: 'rtl', lineHeight: 1.2, minWidth: 220, boxShadow: `0 20px 60px ${s.accent}55` }}>
+          {typing ? <span style={{ letterSpacing: 10 }}>{[0, 1, 2].map((i) => <span key={i} style={{ opacity: 0.35 + 0.65 * Math.abs(Math.sin(t * 9 + i)) }}>●</span>)}</span> : sc.headline.text.slice(0, n)}
+        </div>
+      </div>
+      {sc.question && <Headline hl={sc.question} delay={f((sc.questionAt ?? 1.8) - sc.start)} top={1180} size={72} />}
+    </>
+  );
+};
+
+/** A phone notification drops from the top with the hook (and the main object as its app icon). */
+const HookNotify: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
+  const s = useStyle(); const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const t = frame / FPS;
+  const drop = spring({ frame: frame - 3, fps, config: { damping: 14, stiffness: 170 } });
+  return (
+    <>
+      <div style={{ position: 'absolute', top: 440, left: 0, right: 0, display: 'flex', justifyContent: 'center', opacity: ease(t, 0.5, 0.9) }}><div style={{ width: 380, height: 380, transform: `scale(${0.7 + 0.3 * ease(t, 0.5, 1)})` }}><Hero icon={sc.icon} size={260} color="#111" /></div></div>
+      <div style={{ position: 'absolute', top: -260 + 470 * drop, left: 60, right: 60, borderRadius: 44, background: 'rgba(30,32,40,0.92)', border: '2px solid rgba(255,255,255,.12)', padding: '28px 34px', display: 'flex', gap: 26, alignItems: 'center', direction: 'rtl', boxShadow: '0 30px 80px rgba(0,0,0,.5)', backdropFilter: 'blur(20px)' }}>
+        <div style={{ width: 96, height: 96, flex: 'none', borderRadius: 26, background: s.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="bell" size={60} color="#111" style={{ transform: `rotate(${12 * Math.sin(t * 14) * (1 - ease(t, 0.3, 1))}deg)` }} /></div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+          <div style={{ fontFamily, fontWeight: 800, fontSize: 32, color: DIM }}>سر الموبايل · الآن</div>
+          <div data-qa="headline" style={{ fontFamily, fontWeight: 900, fontSize: 52, color: WHITE, lineHeight: 1.2 }}><Accented hl={sc.headline} /></div>
+        </div>
+      </div>
+      {sc.question && <Headline hl={sc.question} delay={f((sc.questionAt ?? 1.6) - sc.start)} top={1150} size={76} />}
+    </>
+  );
+};
+
+/** The headline arrives through an RGB glitch with scanlines, then locks sharp. */
+const HookGlitch: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
+  const s = useStyle(); const frame = useCurrentFrame(); const t = frame / FPS;
+  const g = 1 - ease(t, 0.1, 0.8); const j = (k: number) => (frame % 3 === k ? 1 : -1) * 18 * g;
+  const layer = (color: string, dx: number, dy: number, op: number) => <div style={{ position: 'absolute', top: 640, left: 50, right: 50, ...bigText(120), color, transform: `translate(${dx}px, ${dy}px)`, opacity: op, mixBlendMode: 'screen' }}><Accented hl={sc.headline} /></div>;
+  return (
+    <>
+      {g > 0.02 && layer('#ff2d55', j(0), j(1) / 3, 0.85)}
+      {g > 0.02 && layer('#00e5ff', -j(1), -j(2) / 3, 0.85)}
+      <div data-qa="headline" style={{ position: 'absolute', top: 640, left: 50, right: 50, ...bigText(120), clipPath: g > 0.05 ? `inset(${(frame * 37) % 60}% 0 ${(frame * 53) % 30}% 0)` : undefined }}><Accented hl={sc.headline} /></div>
+      <AbsoluteFill style={{ backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 2px, transparent 2px 6px)', opacity: 0.4 + 0.5 * g }} />
+      <div style={{ position: 'absolute', top: 1060, left: 0, right: 0, display: 'flex', justifyContent: 'center', opacity: ease(t, 0.6, 1) }}><div style={{ width: 300, height: 300 }}><Hero icon={sc.icon} size={210} color={s.accent} /></div></div>
+      {sc.question && <Headline hl={sc.question} delay={f((sc.questionAt ?? 1.6) - sc.start)} top={330} size={72} />}
+    </>
+  );
+};
+
+/** A search box types the hook, then it is "searched" (press + results). */
+const HookSearch: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
+  const s = useStyle(); const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const t = frame / FPS;
+  const endT = Math.min(1.5, (sc.end - sc.start) * 0.55);
+  const n = Math.round(sc.headline.text.length * ease(t, 0.25, endT));
+  const press = pop(frame, fps, f(endT + 0.1));
+  return (
+    <>
+      <div style={{ position: 'absolute', top: 380, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}><div style={{ width: 240, height: 240, transform: `scale(${pop(frame, fps, 0)})` }}><Hero icon={sc.icon} size={180} color={s.accent} /></div></div>
+      <div style={{ position: 'absolute', top: 700, left: 70, right: 70, padding: '34px 40px', borderRadius: 80, background: CARD, border: `4px solid ${s.accent}`, display: 'flex', alignItems: 'center', gap: 24, direction: 'rtl', transform: `scale(${1 - 0.04 * press * (1 - ease(t, endT + 0.2, endT + 0.5))})`, boxShadow: `0 0 ${30 + 40 * press}px ${s.accent}66` }}>
+        <Icon name="search" size={70} color={s.accent} />
+        <div data-qa="headline" style={{ fontFamily, fontWeight: 900, fontSize: 60, color: WHITE, lineHeight: 1.2 }}>{sc.headline.text.slice(0, n)}<span style={{ color: s.accent, opacity: Math.sin(t * 10) > 0 ? 1 : 0 }}>|</span></div>
+      </div>
+      {[0, 1, 2].map((i) => <div key={i} style={{ position: 'absolute', top: 920 + i * 110, left: 110, right: 110 + i * 90, height: 70, borderRadius: 20, background: CHIP, opacity: press * (1 - i * 0.2), transform: `translateY(${(1 - pop(frame, fps, f(endT + 0.2) + i * 3)) * 60}px)` }} />)}
+      {sc.question && <Headline hl={sc.question} delay={f((sc.questionAt ?? endT + 0.4) - sc.start)} top={1260} size={72} />}
+    </>
+  );
+};
+
+/** One giant word fills the screen, then the camera pulls back to reveal the whole line. */
+const HookZoomWord: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
+  const s = useStyle(); const frame = useCurrentFrame(); const t = frame / FPS;
+  const words = sc.headline.text.split(/\s+/);
+  const key = sc.headline.accent && words.includes(sc.headline.accent) ? sc.headline.accent : words.reduce((a, b) => (b.length > a.length ? b : a), words[0] ?? '');
+  const k = ease(t, 0.15, 0.95);
+  return (
+    <>
+      <div {...(k > 0.97 ? { 'data-qa': 'headline' } : {})} style={{ position: 'absolute', top: 720, left: 40, right: 40, ...bigText(120), transform: `scale(${1 + 5 * (1 - k)})`, transformOrigin: '50% 50%' }}>
+        {words.map((w, i) => <span key={i} style={{ color: w === key ? s.accent : WHITE, opacity: w === key ? 1 : k }}>{w} </span>)}
+      </div>
+      <div style={{ position: 'absolute', top: 1040, left: 0, right: 0, display: 'flex', justifyContent: 'center', opacity: ease(t, 0.8, 1.1) }}><div style={{ width: 320, height: 320, transform: `translateY(${(1 - ease(t, 0.8, 1.2)) * 80}px)` }}><Hero icon={sc.icon} size={230} color={s.accent} /></div></div>
+      {/* the question waits until the zoom has settled (the giant word fills the screen before that) */}
+      {sc.question && <Headline hl={sc.question} delay={f(Math.max(1.05, (sc.questionAt ?? 1.6) - sc.start))} top={330} size={72} />}
+    </>
+  );
+};
+
+/** The screen splits: the main object on a colour panel above, the hook below; the divider wipes in. */
+const HookSplit: React.FC<{ sc: Of<'hook'> }> = ({ sc }) => {
+  const s = useStyle(); const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const t = frame / FPS;
+  const w = ease(t, 0, 0.45);
+  return (
+    <>
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 960 * w, background: `linear-gradient(160deg, ${s.accent}, ${s.accent}88)`, overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: 300, left: 0, right: 0, display: 'flex', justifyContent: 'center', transform: `scale(${pop(frame, fps, 8)})` }}><div style={{ width: 460, height: 460 }}><Hero icon={sc.icon} size={340} color="#111" /></div></div>
+      </div>
+      <div style={{ position: 'absolute', top: 960 * w - 6, left: 0, width: `${100 * w}%`, height: 12, background: '#fff', boxShadow: '0 0 30px #fff' }} />
+      <div data-qa="headline" style={{ position: 'absolute', top: 1050, left: 60, right: 60, ...bigText(98), transform: `translateY(${(1 - pop(frame, fps, 12)) * 90}px)`, opacity: pop(frame, fps, 12) }}><Accented hl={sc.headline} /></div>
+      {sc.question && <Headline hl={sc.question} delay={f((sc.questionAt ?? 1.6) - sc.start)} top={1330} size={64} />}
+    </>
+  );
 };
 
 /** The headline's words slam onto the screen one by one, big, with a shake — pure kinetic typography. */
@@ -1276,7 +1417,7 @@ export const MotionShort: React.FC<MotionPlan> = (plan) => {
   const wipe = cur && curStart > 0 && sinceCut < 0.22 ? sinceCut / 0.22 : -1;
   // the sound & transitions team decides every cut's transition and every sound (motion/edit.ts)
   const seed = [...(plan.scenes[0]?.headline.text ?? '')].reduce((a, c) => a + c.charCodeAt(0), 0);
-  const { trans, sfx } = soundPlan(plan.scenes, plan.sfxLib, plan.captions, seed);
+  const { trans, sfx } = soundPlan(plan.scenes, plan.sfxLib, plan.captions, seed, V(plan.style).hook);
   // music: soft, lower under the voice (smooth 0.2 s ramps), fade in / out
   const talkAt = (x: number) => plan.captions.some((c) => x >= c.a - 0.1 && x < c.b + 0.1);
   const musicVol = (fr: number) => {

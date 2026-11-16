@@ -77,7 +77,7 @@ export function chooseVariants(ctx: AgentContext, explore: boolean, rnd: () => n
   const pick = (pool: { v: string; w: number }[]) => { let r = rnd() * pool.reduce((a, x) => a + x.w, 0); for (const x of pool) { r -= x.w; if (r <= 0) return x.v; } return pool.at(-1)!.v; };
   // Owner: videos must not look alike — never the previous video's font, colour or background, and the whole
   // look differs from each of the last 3 videos in at least 3 genes.
-  const varied = (c: Variants) => (!recent[0] || ((['font', 'accent', 'bg'] as const).every((g) => c[g] !== recent[0]![g] || pools[g].length < 2))) && recent.every((p) => genes.filter((g) => p[g] !== c[g]).length >= 3);
+  const varied = (c: Variants) => (!recent[0] || ((['font', 'accent', 'bg', 'hook'] as const).every((g) => c[g] !== recent[0]![g] || pools[g].length < 2))) && recent.every((p) => genes.filter((g) => p[g] !== c[g]).length >= 3);
   let out: Variants | undefined;
   for (let k = 0; k < 40 && !out; k++) {
     const c = Object.fromEntries(genes.map((g) => [g, pick(pools[g])])) as Variants;

@@ -60,7 +60,7 @@ export const GENES = {
   card: ['solid', 'glass', 'outline'],
   caption: ['highlight', 'underline', 'boxed'],
   transition: ['whip', 'zoom', 'fade', 'rise'],
-  hook: ['rings', 'slam', 'phone3d'],
+  hook: ['rings', 'slam', 'phone3d', 'burst', 'bubble', 'notify', 'glitch', 'search', 'zoomword', 'split'],
   headline: ['pop', 'stagger'],
   phone: ['flat', 'tilt'],
 } as const;

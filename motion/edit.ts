@@ -34,7 +34,7 @@ const FALLBACK: Record<string, string> = { impact: 'impact', whoosh: 'swipe', 's
 const PROP_SOUND: [RegExp, string][] = [[/camera/, 'camera'], [/money|coin|banknote|credit_card|dollar/, 'cash'], [/bell/, 'notify']];
 const CLICKED = new Set(['checklist', 'ranked', 'notify', 'price', 'search', 'doc']);
 
-export function soundPlan(scenes: MotionScene[], lib: SfxLib = {}, speech: { a: number; b: number }[] = [], seed = 0): { trans: Trans[]; sfx: Sfx[] } {
+export function soundPlan(scenes: MotionScene[], lib: SfxLib = {}, speech: { a: number; b: number }[] = [], seed = 0, hookStyle = ''): { trans: Trans[]; sfx: Sfx[] } {
   const trans = scenes.map((sc, i) => transitionFor(sc, scenes[i - 1]));
   // one family per video: the same variant of each role all through this video (varies between videos)
   const pick = (role: string): { file: string; peak: number } | undefined => {
@@ -48,7 +48,13 @@ export function soundPlan(scenes: MotionScene[], lib: SfxLib = {}, speech: { a: 
     const s = pick(role);
     if (s) raw.push([s.file, Math.max(0, at - (alignPeak ? s.peak : 0)), vol, maxDur]);
   };
-  add('impact', 0.02, VOL.hit);
+  // each opening style has its own first sound
+  const hookEnd = scenes[0]?.end ?? 2;
+  if (hookStyle === 'notify') add('notify', 0.18, VOL.meaning * 1.3);
+  else if (hookStyle === 'search') { if (lib.typing?.length) add('typing', 0.25, VOL.typing, false, Math.max(0.5, Math.min(1.5, hookEnd * 0.55) - 0.3)); add('click', Math.min(1.5, hookEnd * 0.55) + 0.1, VOL.click * 1.4); }
+  else if (hookStyle === 'bubble') { add('click', 0.05, VOL.click); add('notify', 0.55, VOL.meaning); }
+  else if (hookStyle === 'split' || hookStyle === 'zoomword' || hookStyle === 'glitch') add('whoosh', 0.02, VOL.cut * 1.3);
+  else add('impact', 0.02, VOL.hit);
   scenes.forEach((sc, i) => {
     if (i > 0) {
       const t = trans[i]!;
