@@ -29,6 +29,12 @@ export type MotionScene = { start: number; end: number; headline: Hl; props?: Pr
   | { type: 'card'; icon?: IconName; title: string; rows: { label: string; value: string; tone: 'good' | 'bad' | 'neutral'; at: number; then?: { at: number; value: string; tone: 'good' | 'bad' | 'neutral'; detail?: string } }[]; alert?: { text: string; at: number } }
   | { type: 'alert'; icon: IconName; tone: 'good' | 'bad'; action?: { text: string; accent?: string; at: number; icon: IconName } }
   | { type: 'compat'; items: string[]; code?: string; badge?: string; badgeAt?: number }
+  /**
+   * A kinetic diagram (the owner's "boxes + connectors + movement"): boxes pop in on their words, connector lines
+   * draw between them with a light pulse travelling along, the camera glides to the active box.
+   * flow = A → B → C · hub = centre box with spokes · compare = two boxes facing each other · cycle = boxes on a ring.
+   */
+  | { type: 'diagram'; layout: 'flow' | 'hub' | 'compare' | 'cycle'; nodes: { label: string; icon?: string; at: number }[]; edges: { from: number; to: number; at: number; label?: string }[] }
   /** An idea ACTED OUT by a small realistic screen (chat, chart, checklist, search, link, video frame…). */
   | { type: 'mock'; kind: MockKind; title?: string; items: MockItem[]; final?: { text: string; at: number; tone: 'good' | 'bad' } }
   /** A REAL photo or video clip of the situation the sentence describes (mixes real footage into the motion). */

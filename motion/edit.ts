@@ -64,6 +64,7 @@ export function soundPlan(scenes: MotionScene[], lib: SfxLib = {}, speech: { a: 
       else if (CLICKED.has(sc.kind)) sc.items.forEach((it) => add('click', it.at, VOL.click));
       if (sc.final) add(sc.final.tone === 'good' ? 'success' : 'error', sc.final.at, sc.final.tone === 'good' ? VOL.good : VOL.bad);
     }
+    if (sc.type === 'diagram') sc.nodes.forEach((n: { at: number }) => add('click', n.at, VOL.click));
     if (sc.type === 'versus') add('success', sc.freeAt, VOL.good);
     if (sc.type === 'alert' && sc.tone === 'bad') add('error', sc.start + 0.1, VOL.bad);
     (sc.props ?? []).forEach((p) => { const r = PROP_SOUND.find(([re]) => re.test(p.src))?.[1]; if (r) add(r, p.at, VOL.meaning); });

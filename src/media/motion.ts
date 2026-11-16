@@ -286,7 +286,12 @@ const Hl = z.object({ text: z.string().min(2).transform((x) => x.slice(0, 60)), 
 const Planned = z.object({
   hero: z.string().max(40).optional().catch(undefined),
   scenes: z.array(z.object({
-    type: z.enum(['hook', 'dialer', 'settings', 'app', 'card', 'alert', 'compat', 'cta', 'statement', 'versus', 'story', 'mock', 'real']),
+    type: z.enum(['hook', 'dialer', 'settings', 'app', 'card', 'alert', 'compat', 'cta', 'statement', 'versus', 'story', 'mock', 'real', 'diagram']),
+    diagram: z.object({
+      layout: z.enum(['flow', 'hub', 'compare', 'cycle']).catch('flow'),
+      nodes: z.array(z.object({ label: z.string().transform((x) => x.slice(0, 22)), thing: z.string().max(40).optional().catch(undefined), sentence: z.number().int(), word: z.string().max(30).optional().catch(undefined) })).min(2).transform((x) => x.slice(0, 5)),
+      edges: z.array(z.object({ from: z.number().int(), to: z.number().int(), label: z.string().max(16).optional().catch(undefined) })).optional().catch(undefined),
+    }).optional().catch(undefined),
     footage: z.string().max(60).optional().catch(undefined),
     from: z.number().int().min(0), to: z.number().int().min(0),
     headline: Hl,
@@ -354,6 +359,9 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
         'doc (text lines; highlight = the exact words to mark, mark cross = words removed), timer (items[0].value = seconds, text = what takes that long), notify (stacked notifications; label = app), price (rows: text + label like "مجاناً"/"اشتراك", mark cross/win). ' +
         'Example: {"type":"mock","from":3,"to":4,"headline":{"text":"الحشو بيتشال","accent":"الحشو"},"mock":{"kind":"doc","items":[{"text":"يعني بصراحة الفكرة دي","sentence":3,"highlight":["يعني","بصراحة"],"mark":"cross"},{"text":"والنتيجة جت أسرع","sentence":4}]}}. ' +
         'Fill it with the narration\'s own words (short, ≤ 6 words per item), each item timed by sentence + word; final = an optional result tag under it (e.g. "اتحفظ ✓"). Never invent numbers: bars/ranked values only from the narration or entry, else relative heights with no number labels. ' +
+        'diagram = KINETIC BOXES + CONNECTORS (the owner\'s favourite look — use it for every process, relation or comparison: how a tool works, input → output, a feature hub, X vs Y, a repeating cycle): ' +
+        'layout flow (2–5 steps in order: "PDF" → "نوت بوك" → "ملخص" → "بودكاست"), hub (node 0 = the tool in the centre, the others = what it does), compare (exactly 2 nodes), cycle (3–5 steps that loop); ' +
+        'each node: label (1–3 Egyptian words), thing = a 3D object from propNames for its icon, sentence + word = when it appears (exactly when its word is said); edges optional (drawn automatically for the layout). At least one diagram per video when the narration has a process or relation. ' +
         'BRING IT TO LIFE — never just a screen with information: in EVERY scene add 1–3 props = 3D objects of the concrete things the sentences name or picture (a shoe when a shoe is mentioned, money with wings when money is wasted every month, a robot for AI, a locked padlock for privacy, a camera for photos, a hourglass for waiting…). ' +
         'thing = a name from propNames (exact); word = the Arabic word in that sentence that names or evokes it (it appears exactly when that word is said); sentence = its index; action: pop (appears), fly-in, drop (falls in), fly-away (leaves: money spent, data lost), shake (alarm, danger), spin (magic, transformation), pulse (important), no (crossed out: what you no longer need). ' +
         'real = MIX IN REAL FOOTAGE: a real video clip / photo of a life situation a sentence describes (a student with a long PDF, people at a café, hands typing on a phone, a crowded street, an office meeting) — 1–2 per video, never two in a row; footage = a 2–5 word English stock search for exactly that situation (family-friendly: objects, hands, phones, places, fully dressed people; never bed, swimwear, parties). ' +
@@ -451,6 +459,32 @@ export async function planMotion(ctx: AgentContext, inp: MotionInput, videoId?: 
         const freeAt = Number(Math.min(end - 0.6, w?.start ?? start + (end - start) * 0.45).toFixed(2));
         scenes.push({ ...base, type: 'versus', paid: ui.paid, free: { name: ui.free.name, note: ui.free.note }, freeAt });
         beats.push(freeAt);
+        break;
+      }
+      case 'diagram': {
+        const d = p.diagram;
+        if (!d || d.nodes.length < 2) { scenes.push({ ...base, type: 'statement', icon: p.icon ?? 'star', lines: [] }); break; }
+        let prev = start + 0.15;
+        const nodes = d.nodes.map((n, i) => {
+          const s0 = Math.max(start, Math.min(end - 0.4, sAt(n.sentence)));
+          const w = n.word ? ws.find((v) => v.start >= s0 - 0.05 && similarity(normWord(v.w), normWord(n.word!)) >= 0.7) : undefined;
+          const at = Math.min(end - 0.3, Math.max(prev + (i ? 0.35 : 0), w ? w.start - 0.05 : s0 + 0.15 + i * 0.05));
+          prev = at;
+          const name = n.thing ? resolveProp(n.thing) : undefined;
+          return { label: n.label, at: Number(at.toFixed(2)), ...(name ? { icon: `props/${propFile(name)}` } : {}) };
+        });
+        // a diagram must BUILD: if the timings are bunched (a node tied to a sentence outside this scene, words not
+        // found), the boxes are spread evenly across the scene instead of popping all at once
+        const bunched = nodes.some((n, i) => i > 0 && n.at - nodes[i - 1]!.at < 0.3) || nodes.at(-1)!.at > end - 0.5;
+        if (bunched) nodes.forEach((n, i) => { n.at = Number((start + 0.2 + (i * Math.max(0.4, end - start - 0.9)) / Math.max(1, nodes.length - 1 || 1)).toFixed(2)); });
+        const auto = d.layout === 'hub' ? nodes.slice(1).map((_, i) => ({ from: 0, to: i + 1 }))
+          : d.layout === 'compare' ? [{ from: 0, to: 1 }]
+          : d.layout === 'cycle' ? nodes.map((_, i) => ({ from: i, to: (i + 1) % nodes.length }))
+          : nodes.slice(1).map((_, i) => ({ from: i, to: i + 1 }));
+        const raw = (d.edges?.length ? d.edges : auto).filter((e) => e.from !== e.to && nodes[e.from] && nodes[e.to]);
+        // a connector draws just before the box it leads to appears (the cycle's closing line after the last box)
+        const edges = raw.map((e: { from: number; to: number; label?: string }) => ({ from: e.from, to: e.to, ...(e.label ? { label: e.label } : {}), at: Number(Math.max(nodes[e.from]!.at + 0.2, (e.to > e.from ? nodes[e.to]!.at - 0.3 : nodes.at(-1)!.at + 0.4)).toFixed(2)) }));
+        scenes.push({ ...base, type: 'diagram', layout: d.layout, nodes, edges });
         break;
       }
       case 'mock': {
@@ -589,7 +623,7 @@ export function normalizePlan(plan: PlannedScene[], entry?: PhoneSecret): Planne
   for (const p of out) {
     const prev = merged.at(-1);
     // acted-out screens / stories carry their own content: two in a row are two different screens, never merged
-    if (prev && prev.type === p.type && !['hook', 'cta', 'mock', 'story', 'real'].includes(p.type)) { prev.to = p.to; continue; }
+    if (prev && prev.type === p.type && !['hook', 'cta', 'mock', 'story', 'real', 'diagram'].includes(p.type)) { prev.to = p.to; continue; }
     merged.push(p);
   }
   return merged;
@@ -668,7 +702,8 @@ async function stageProps(rootDir: string, plan: MotionPlan, pub: string) {
   mkdirSync(cache, { recursive: true }); mkdirSync(resolve(pub, 'props'), { recursive: true });
   const byFile = new Map(propNames().map((n) => [propFile(n), n]));
   const ok = new Set<string>();
-  for (const src of new Set([...plan.scenes.flatMap((sc) => sc.props ?? []).map((x) => x.src), ...(plan.hero ? [plan.hero] : [])])) {
+  const diagramIcons = plan.scenes.flatMap((sc) => (sc.type === 'diagram' ? sc.nodes.map((n) => n.icon).filter((x): x is string => Boolean(x)) : []));
+  for (const src of new Set([...plan.scenes.flatMap((sc) => sc.props ?? []).map((x) => x.src), ...(plan.hero ? [plan.hero] : []), ...diagramIcons])) {
     const file = src.replace(/^props\//, '');
     const local = resolve(cache, file);
     try {
@@ -709,6 +744,7 @@ async function stageProps(rootDir: string, plan: MotionPlan, pub: string) {
   for (const sc of plan.scenes) for (const p of sc.props ?? []) if (p.lottie && !anim.has(p.lottie)) delete p.lottie;
   for (const sc of plan.scenes) if (sc.props) sc.props = sc.props.filter((x) => ok.has(x.src));
   if (plan.hero && !ok.has(plan.hero)) delete plan.hero;
+  for (const sc of plan.scenes) if (sc.type === 'diagram') for (const n of sc.nodes) if (n.icon && !ok.has(n.icon)) delete n.icon;
   writeFileSync(resolve(pub, 'props.json'), JSON.stringify(plan));
 }
 

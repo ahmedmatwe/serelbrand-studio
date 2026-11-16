@@ -965,6 +965,101 @@ const Cursor: React.FC<{ sc: Of<'mock'>; top: number; zoom: number; header: bool
   );
 };
 
+// ── kinetic diagram: boxes + connectors + movement ─────────────────────────────────────────────────────────
+type Pt = { x: number; y: number };
+function diagramLayout(layout: Of<'diagram'>['layout'], n: number): Pt[] {
+  const c = { x: 540, y: 880 };
+  if (layout === 'compare') return [{ x: 285, y: 860 }, { x: 795, y: 860 }];
+  if (layout === 'hub' || layout === 'cycle') {
+    const ring = layout === 'hub' ? n - 1 : n;
+    const pts = Array.from({ length: ring }, (_, i) => { const a = -Math.PI / 2 + (2 * Math.PI * i) / ring; return { x: c.x + 340 * Math.cos(a), y: c.y + 360 * Math.sin(a) }; });
+    return layout === 'hub' ? [c, ...pts] : pts;
+  }
+  const top = n <= 2 ? 640 : 500, bottom = n <= 2 ? 1100 : 1240;
+  return Array.from({ length: n }, (_, i) => ({ x: n === 1 ? 540 : i % 2 ? 730 : 350, y: top + ((bottom - top) * i) / Math.max(1, n - 1) }));
+}
+const bez = (p0: Pt, p1: Pt, p2: Pt, p3: Pt, u: number): Pt => {
+  const v = 1 - u;
+  return { x: v * v * v * p0.x + 3 * v * v * u * p1.x + 3 * v * u * u * p2.x + u * u * u * p3.x, y: v * v * v * p0.y + 3 * v * v * u * p1.y + 3 * v * u * u * p2.y + u * u * u * p3.y };
+};
+
+const DiagramScene: React.FC<{ sc: Of<'diagram'> }> = ({ sc }) => {
+  const s = useStyle();
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const t = frame / FPS + sc.start;
+  const pos = diagramLayout(sc.layout, sc.nodes.length);
+  const small = sc.nodes.length >= 4 && sc.layout !== 'flow';
+  const W = small ? 270 : sc.nodes.length <= 3 ? 400 : 330, H = small ? 170 : sc.nodes.length <= 3 ? 220 : 190;
+  // camera glides towards the box that just appeared
+  const shown = sc.nodes.map((n, i) => ({ ...n, i })).filter((n) => t >= n.at - 0.05);
+  const act = shown.at(-1)?.i ?? 0, prevAct = shown.at(-2)?.i ?? act;
+  const k = ease(t, sc.nodes[act]!.at, sc.nodes[act]!.at + 0.55);
+  const fx = pos[prevAct]!.x + (pos[act]!.x - pos[prevAct]!.x) * k, fy = pos[prevAct]!.y + (pos[act]!.y - pos[prevAct]!.y) * k;
+  const cam = `translate(${(540 - fx) * 0.22}px, ${(880 - fy) * 0.18}px) scale(${1.03 + 0.015 * Math.sin(t * 1.3)})`;
+  const edgePts = (e: Of<'diagram'>['edges'][number]) => {
+    const a = pos[e.from]!, b = pos[e.to]!;
+    const dy = b.y - a.y, dx = b.x - a.x;
+    const vertical = sc.layout === 'flow';
+    const c1 = vertical ? { x: a.x, y: a.y + dy * 0.55 } : { x: a.x + dx * 0.35 - dy * 0.12, y: a.y + dy * 0.35 + dx * 0.12 };
+    const c2 = vertical ? { x: b.x, y: b.y - dy * 0.55 } : { x: a.x + dx * 0.65 - dy * 0.12, y: a.y + dy * 0.65 + dx * 0.12 };
+    return [a, c1, c2, b] as const;
+  };
+  const U0 = 0.2, U1 = 0.8; // trim the curve to the box edges
+  return (
+    <>
+      <Headline hl={sc.headline} size={84} top={190} />
+      <AbsoluteFill style={{ transform: cam, transformOrigin: '540px 880px' }}>
+        <svg width={1080} height={1920} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
+          <defs>
+            <filter id="dglow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+          </defs>
+          {sc.edges.map((e, j) => {
+            const [p0, p1, p2, p3] = edgePts(e);
+            const prog = ease(t, e.at, e.at + 0.45);
+            if (prog <= 0) return null;
+            const steps = 40, end = U0 + (U1 - U0) * prog;
+            const pts = Array.from({ length: steps + 1 }, (_, i) => bez(p0, p1, p2, p3, U0 + ((end - U0) * i) / steps));
+            const d = pts.map((q, i) => `${i ? 'L' : 'M'}${q.x.toFixed(1)} ${q.y.toFixed(1)}`).join(' ');
+            const tip = pts.at(-1)!, before = pts.at(-3) ?? pts[0]!;
+            const ang = Math.atan2(tip.y - before.y, tip.x - before.x);
+            const drawn = prog >= 1;
+            // after it is drawn: a flowing dashed line + a light pulse travelling along it, forever
+            const u = U0 + (U1 - U0) * (((t - e.at) * 0.55 + j * 0.31) % 1);
+            const pulse = bez(p0, p1, p2, p3, u);
+            const mid = bez(p0, p1, p2, p3, 0.5);
+            return (
+              <g key={j}>
+                <path d={d} fill="none" stroke={s.accent} strokeOpacity={0.25} strokeWidth={14} strokeLinecap="round" />
+                <path d={d} fill="none" stroke={s.accent} strokeWidth={5} strokeLinecap="round" strokeDasharray={drawn ? '18 14' : undefined} strokeDashoffset={drawn ? -(t * 70) : 0} />
+                <path d={`M${tip.x} ${tip.y} l${-22 * Math.cos(ang - 0.45)} ${-22 * Math.sin(ang - 0.45)} M${tip.x} ${tip.y} l${-22 * Math.cos(ang + 0.45)} ${-22 * Math.sin(ang + 0.45)}`} stroke={s.accent} strokeWidth={6} strokeLinecap="round" />
+                {drawn && <circle cx={pulse.x} cy={pulse.y} r={11} fill="#fff" filter="url(#dglow)" />}
+                {drawn && <circle cx={pulse.x} cy={pulse.y} r={18} fill={s.accent} opacity={0.35} filter="url(#dglow)" />}
+                {e.label && drawn && <text x={mid.x} y={mid.y - 18} textAnchor="middle" fill={s.accent} style={{ fontFamily, fontWeight: 800, fontSize: 30 }}>{e.label}</text>}
+              </g>
+            );
+          })}
+        </svg>
+        {sc.nodes.map((n, i) => {
+          if (t < n.at - 0.05) return null;
+          const p = pop(frame, fps, f(n.at - sc.start));
+          const active = i === act;
+          const q = pos[i]!;
+          const fl = 7 * Math.sin(t * 1.6 + i * 1.3);
+          return (
+            <div key={i} data-avoid="node" style={{ position: 'absolute', left: q.x - W / 2, top: q.y - H / 2 + fl, width: W, height: H, borderRadius: 34, background: CARD, border: `4px solid ${active ? s.accent : LINE}`, boxShadow: active ? `0 0 ${50 + 15 * Math.sin(t * 4)}px ${s.accent}88` : '0 20px 50px rgba(0,0,0,.45)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, transform: `scale(${(0.55 + 0.45 * p) * (active ? 1.06 : 1)}) rotate(${(1 - p) * -8}deg)`, opacity: Math.min(1, p * 1.6) * (active ? 1 : 0.88) }}>
+              {n.icon ? <Img src={staticFile(n.icon)} style={{ width: small ? 84 : 118, height: small ? 84 : 118, objectFit: 'contain', filter: 'drop-shadow(0 8px 12px rgba(0,0,0,.45))', transform: `translateY(${-4 * Math.sin(t * 2 + i)}px)` }} />
+                : <div style={{ width: 64, height: 64, borderRadius: '50%', background: s.accent, color: '#111', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily, fontWeight: 900, fontSize: 36 }}>{i + 1}</div>}
+              {/* the label always fits: smaller for long labels, up to two lines — never cut */}
+              <div data-qa="node" style={{ fontFamily, fontWeight: 900, fontSize: Math.max(26, Math.min(small ? 34 : 46, Math.floor(((W - 40) * 2) / Math.max(4, n.label.length) / 0.6 / 2))), color: WHITE, direction: 'rtl', textAlign: 'center', padding: '0 14px', lineHeight: 1.1, maxWidth: W - 20, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden', unicodeBidi: 'plaintext' }}>{n.label}</div>
+            </div>
+          );
+        })}
+      </AbsoluteFill>
+    </>
+  );
+};
+
 const MockScene: React.FC<{ sc: Of<'mock'> }> = ({ sc }) => {
   const s = useStyle();
   const frame = useCurrentFrame();
@@ -1126,6 +1221,7 @@ const SceneView: React.FC<{ sc: MotionScene; endCard: string }> = ({ sc, endCard
     case 'story': return <StoryScene sc={sc} />;
     case 'real': return <RealScene sc={sc} />;
     case 'mock': return <MockScene sc={sc} />;
+    case 'diagram': return <DiagramScene sc={sc} />;
     case 'cta': return <CtaScene sc={sc} endCard={endCard} />;
     default: return <StatementScene sc={sc as Of<'statement'>} />;
   }
