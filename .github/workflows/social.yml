@@ -7,6 +7,10 @@ on:
     - cron: '4 5-21 * * *'   # hourly 07:00–23:00 Cairo (posts land a few minutes after their slot; saves Actions minutes)
   workflow_dispatch:
     inputs:
+      fix:
+        description: 'Started from the «🔧 إصلاح» button on Telegram (the result is sent back)'
+        type: string
+        default: ''
       check:
         description: 'Only check the Facebook/Instagram connection (posts nothing)'
         type: boolean
@@ -92,3 +96,15 @@ jobs:
         if: steps.gate.outputs.connected == 'true' && env.BOT_URL != ''
         continue-on-error: true
         run: node --no-warnings src/cli/index.ts bot:sync
+
+      - name: Fix result → Telegram
+        if: always() && inputs.fix != ''
+        env:
+          FIX: ${{ inputs.fix }}
+          STATUS: ${{ job.status }}
+          BOT_URL: ${{ secrets.BOT_URL }}
+          BOT_INGEST_SECRET: ${{ secrets.BOT_INGEST_SECRET }}
+        run: |
+          if [ "$STATUS" = success ]; then t="✅ الإصلاح «$FIX» خلص بنجاح."; else t="❌ الإصلاح «$FIX» ما نجحش — هبص عليه وأبلّغك."; fi
+          [ -n "$BOT_URL" ] && curl -s -m 20 -X POST "${BOT_URL%/}/ingest" -H "authorization: Bearer $BOT_INGEST_SECRET" -H 'content-type: application/json' \
+            -d "$(jq -n --arg t "$t" '{messages:[$t]}')" > /dev/null || true

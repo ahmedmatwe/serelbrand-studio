@@ -12,10 +12,13 @@ export class Telegram {
   private get f() { return this.o.fetchImpl ?? fetch; }
   private url(method: string) { return `https://api.telegram.org/bot${this.o.token}/${method}`; }
 
-  async send(text: string): Promise<void> {
-    // Telegram limit: 4096 chars per message.
+  /** `buttons`: rows of { text, data } — pressed buttons reach the bot (e.g. «🔧 إصلاح» = f:<fix>). */
+  async send(text: string, buttons?: { text: string; data: string }[][]): Promise<void> {
+    // Telegram limit: 4096 chars per message (buttons go under the last part).
     for (let i = 0; i < text.length; i += 4000) {
-      const res = await this.f(this.url('sendMessage'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: this.o.chatId, text: text.slice(i, i + 4000), disable_web_page_preview: true }) });
+      const last = i + 4000 >= text.length;
+      const markup = last && buttons?.length ? { reply_markup: { inline_keyboard: buttons.map((r) => r.map((b) => ({ text: b.text.slice(0, 60), callback_data: b.data.slice(0, 64) }))) } } : {};
+      const res = await this.f(this.url('sendMessage'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: this.o.chatId, text: text.slice(i, i + 4000), disable_web_page_preview: true, ...markup }) });
       if (!res.ok) throw new Error(`Telegram sendMessage: HTTP ${res.status}`);
     }
   }

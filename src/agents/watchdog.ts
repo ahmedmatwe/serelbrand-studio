@@ -101,11 +101,30 @@ export function newFindings(ctx: AgentContext, all: Finding[], now = new Date())
   return fresh;
 }
 
+/** The safe, known fix for a problem (the bot runs it when «🔧 إصلاح» is pressed); none when only a person can fix it. */
+export function fixFor(f: Finding): string | undefined {
+  if (f.fixed) return undefined;
+  const run = f.key.match(/^run:(\d+)$/);
+  if (run) return `rerun:${run[1]}`;
+  if (/^(social-stalled|missing|stuck):/.test(f.key)) return 'social';
+  if (/^no-pack:/.test(f.key)) return 'produce';
+  if (/^motion-fallback:/.test(f.key)) return 'motion';
+  return undefined;
+}
+
+/** Problems with a fix button each (one message, one button row per fixable problem). */
+export function watchdogButtons(fs: Finding[]): { text: string; data: string }[][] {
+  const open = fs.filter((f) => !f.fixed);
+  return open.map((f, i) => ({ f, i, fix: fixFor(f) })).filter((x) => x.fix).map((x) => [{ text: `🔧 إصلاح${open.length > 1 ? ` ${x.i + 1}` : ''}: ${x.f.text}`, data: `f:${x.fix}` }]);
+}
+
 /** Telegram message for the owner. */
 export function watchdogMessage(fs: Finding[]): string | undefined {
   if (!fs.length) return undefined;
   const fixed = fs.filter((f) => f.fixed), open = fs.filter((f) => !f.fixed);
-  return ['🛡️ المراقب:', ...fixed.map((f) => `🔧 ${f.text}\n   ← صلّحته: ${f.fixed}`), ...open.map((f) => `⚠️ ${f.text}`), ...(open.length ? ['', 'اللي محتاج تعديل في الكود: قولّي «صلّح» في الشات.'] : [])].join('\n');
+  const withFix = open.filter((f) => fixFor(f)).length;
+  const tail = !open.length ? [] : ['', withFix ? 'دوس «🔧 إصلاح» تحت المشكلة وأنا أصلّحها وأبلّغك بالنتيجة.' : '', withFix < open.length ? 'اللي مالوش زرار محتاج تعديل في الكود: قولّي «صلّح» في الشات.' : ''].filter((x, k) => k === 0 || x);
+  return ['🛡️ المراقب:', ...fixed.map((f) => `🔧 ${f.text}\n   ← صلّحته: ${f.fixed}`), ...open.map((f, i) => `⚠️ ${open.length > 1 ? `${i + 1}. ` : ''}${f.text}`), ...tail].join('\n');
 }
 
 /** Titles of the posts still waiting in the social queue (so "missing on Facebook" ignores scheduled ones). */

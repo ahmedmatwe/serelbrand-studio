@@ -202,7 +202,7 @@ export async function runLibraryAgent(ctx: AgentContext, o: { now?: Date; maxNew
       buttons: added.map((s, k) => [{ text: `🗑️ شيل ${k + 1}: ${s.title}`.slice(0, 60), data: `x:${s.id}` }]),
     }] : [];
     const day = now.toISOString().slice(0, 10);
-    const alerts = rep.stock < LOW_STOCK ? [{ id: `low-stock-${day}`, text: `⚠️ مكتبة المواضيع قربت تخلص: فاضل ${rep.stock} موضوع جاهز (حوالي ${Math.floor(rep.stock / 3)} يوم إنتاج).\nالباحث شغال يضيف، بس لو عندك أفكار ابعتها: «موضوع: …»` }] : [];
+    const alerts = rep.stock < LOW_STOCK ? [{ id: `low-stock-${day}`, text: `⚠️ مكتبة المواضيع قربت تخلص: فاضل ${rep.stock} موضوع جاهز (حوالي ${Math.floor(rep.stock / 3)} يوم إنتاج).\nالباحث شغال يضيف، ودوس «🔧 إصلاح» لو عايزه يجهّز دفعة دلوقتي. ولو عندك أفكار ابعتها: «موضوع: …»`, fix: 'library' }] : [];
     if (rich.length || alerts.length) await bot('/ingest', { rich, alerts });
   }
   log.info('library', { ...rep });

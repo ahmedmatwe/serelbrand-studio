@@ -7,6 +7,10 @@ on:
     - cron: '20 */3 * * *'   # every 3 hours (UTC)
   workflow_dispatch:
     inputs:
+      fix:
+        description: 'Started from the «🔧 إصلاح» button on Telegram (the result is sent back)'
+        type: string
+        default: ''
       force:
         description: 'Produce a video now (ignore the one-per-day limit)'
         type: boolean
@@ -248,3 +252,15 @@ jobs:
           path: preview
           retention-days: 3
           if-no-files-found: ignore
+
+      - name: Fix result → Telegram
+        if: always() && inputs.fix != ''
+        env:
+          FIX: ${{ inputs.fix }}
+          STATUS: ${{ job.status }}
+          BOT_URL: ${{ secrets.BOT_URL }}
+          BOT_INGEST_SECRET: ${{ secrets.BOT_INGEST_SECRET }}
+        run: |
+          if [ "$STATUS" = success ]; then t="✅ الإصلاح «$FIX» خلص بنجاح."; else t="❌ الإصلاح «$FIX» ما نجحش — هبص عليه وأبلّغك."; fi
+          [ -n "$BOT_URL" ] && curl -s -m 20 -X POST "${BOT_URL%/}/ingest" -H "authorization: Bearer $BOT_INGEST_SECRET" -H 'content-type: application/json' \
+            -d "$(jq -n --arg t "$t" '{messages:[$t]}')" > /dev/null || true

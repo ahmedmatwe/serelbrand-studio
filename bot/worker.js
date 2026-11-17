@@ -46,6 +46,31 @@ async function dispatch(env, inputs = {}, workflow = 'bot.yml') {
   return Boolean(r && r.status === 204);
 }
 
+/**
+ * «🔧 إصلاح» buttons under a problem: each problem type has one safe, known fix that runs on GitHub; the
+ * workflow tells the owner the result when it ends (its `fix` input).
+ */
+const FIXES = {
+  produce: { label: 'إنتاج فيديوهات النهارده', workflow: 'autopilot.yml', inputs: { force: 'true' } },
+  library: { label: 'تجهيز مواضيع جديدة للمكتبة', workflow: 'autopilot.yml', inputs: { library_only: 'true' } },
+  social: { label: 'النشر على فيسبوك وإنستجرام', workflow: 'social.yml', inputs: {} },
+  motion: { label: 'فحص الموشن وتجربة رندر', workflow: 'motion-check.yml', inputs: {} },
+};
+async function runFix(env, action) {
+  const [kind, arg] = action.split(':');
+  if (kind === 'rerun' && /^\d+$/.test(arg || '')) {
+    const r = env.GH_TOKEN ? await fetch(`https://api.github.com/repos/ahmedmatwe/serelbrand-studio/actions/runs/${arg}/rerun-failed-jobs`, {
+      method: 'POST', headers: { authorization: `Bearer ${env.GH_TOKEN}`, accept: 'application/vnd.github+json', 'user-agent': 'ser-mobile-bot' },
+    }).catch(() => undefined) : undefined;
+    return r && r.status === 201 ? '🔧 بدأت أعيد التشغيل اللي فشل — لو فشل تاني المراقب هيبلّغك.' : '❌ مقدرتش أعيد التشغيل ده (يمكن قديم أو اتعاد قبل كده).';
+  }
+  const f = FIXES[kind];
+  if (!f) return '❌ الإصلاح ده مش معروف.';
+  const ok = await dispatch(env, { ...f.inputs, fix: f.label }, f.workflow);
+  return ok ? `🔧 بدأت الإصلاح: ${f.label}
+هبعتلك النتيجة أول ما يخلص (غالباً خلال دقايق).` : '❌ مقدرتش أبدأ الإصلاح دلوقتي — جرّب تاني بعد شوية.';
+}
+
 async function sendVideos(env, which) {
   const list = JSON.parse((await env.BOT.get('videos')) || '[]');
   const chosen = which === 'all' ? list : [list[Number(which)]].filter(Boolean);
@@ -117,6 +142,13 @@ export default {
         await tg(env, 'answerCallbackQuery', { callback_query_id: u.callback_query.id, text: 'ثواني وهيوصلك…' });
         const d = u.callback_query.data || '';
         if (d.startsWith('v:')) await sendVideos(env, d.slice(2));
+        if (d.startsWith('f:')) {
+          // the pressed fix button disappears (no double runs), then the fix starts
+          const m = u.callback_query.message;
+          const kb = (m?.reply_markup?.inline_keyboard || []).filter((row) => !row.some((b) => b.callback_data === d));
+          if (m) await tg(env, 'editMessageReplyMarkup', { chat_id: env.CHAT_ID, message_id: m.message_id, reply_markup: { inline_keyboard: kb } });
+          await say(env, await runFix(env, d.slice(2)));
+        }
         // «🗑️ شيل»: the library agent drops this topic before it is ever produced.
         if (d.startsWith('x:')) {
           const id = d.slice(2, 64);
@@ -173,10 +205,10 @@ export default {
       if (b.report) { await env.BOT.put('report', b.report); await env.BOT.put('report_at', b.reportAt || ''); }
       if (Array.isArray(b.videos)) await env.BOT.put('videos', JSON.stringify(b.videos));
       for (const a of b.alerts || []) {
-        // Each alert once only (the autopilot may resend it every hour).
+        // Each alert once only (the autopilot may resend it every hour); a fix button under it when there is one.
         if (await env.BOT.get(`alert:${a.id}`)) continue;
         await env.BOT.put(`alert:${a.id}`, '1', { expirationTtl: 60 * 60 * 24 * 30 });
-        await say(env, a.text);
+        await say(env, a.text, a.fix ? { reply_markup: { inline_keyboard: [[{ text: '🔧 إصلاح', callback_data: `f:${a.fix}`.slice(0, 64) }]] } } : {});
       }
       if (Array.isArray(b.requestsDone) && b.requestsDone.length) {
         const list = JSON.parse((await env.BOT.get('requests')) || '[]');

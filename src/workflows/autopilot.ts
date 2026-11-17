@@ -39,7 +39,7 @@ import { weeklyCompilation } from './weekly-compilation.ts';
 import { learnFromErrors, rememberErrors } from '../lab/errors.ts';
 import { labEvolve } from '../lab/lab.ts';
 import { motionResearch } from '../agents/rnd.ts';
-import { checkRecords, checkRuns, healStuckTickets, newFindings, pendingTitles, watchdogMessage, type Finding } from '../agents/watchdog.ts';
+import { checkRecords, checkRuns, healStuckTickets, newFindings, pendingTitles, watchdogButtons, watchdogMessage, type Finding } from '../agents/watchdog.ts';
 import { tmpdir } from 'node:os';
 
 export interface CycleOptions {
@@ -227,6 +227,14 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
   return picked;
 }
 
+/** The fix the owner can start from Telegram for a stop (none for a free quota: it renews by itself). */
+export function productionStopFix(reason?: string): 'library' | 'produce' | undefined {
+  if (!reason) return undefined;
+  if (/could not plan 3 new Shorts topics|no unproduced long topic/.test(reason)) return 'library';
+  if (/3 attempts today were blocked/.test(reason)) return 'produce';
+  return undefined;
+}
+
 /** Why production stopped, in the owner's words — undefined when it's a normal pause (done for today, no time left…). */
 export function productionStopArabic(reason?: string): string | undefined {
   if (!reason) return undefined;
@@ -244,6 +252,8 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   const sent: string[] = [];
   const baseNotify = o.notify ?? macNotify;
   const notify = (title: string, body: string) => { sent.push(`🔔 ${title}\n${body}`); baseNotify(title, body); };
+  /** «🔧 إصلاح» buttons sent under this cycle's notifications. */
+  const fixButtons: { text: string; data: string }[][] = [];
   const rep: CycleReport = { startedAt: now.toISOString(), published: [], analyticsUpdated: [], produced: null, pendingApprovals: 0, needsFactReview: [], errors: [], blockedAttempts: [] };
   const log = ctx.logger.child('autopilot');
 
@@ -481,12 +491,14 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   const stop = productionStopArabic(rep.skippedProductionReason);
   if (!rep.produced && stop && ctx.repos.artifacts.latest<{ key: string }>(null, 'stop_alert')?.data.key !== `${now.toISOString().slice(0, 10)}|${stop}`) {
     notify('سر الموبايل: الإنتاج واقف', stop);
+    const fix = productionStopFix(rep.skippedProductionReason);
+    if (fix) fixButtons.push([{ text: fix === 'library' ? '🔧 إصلاح: جهّز مواضيع جديدة دلوقتي' : '🔧 إصلاح: حاول الإنتاج تاني دلوقتي', data: `f:${fix}` }]);
     ctx.repos.artifacts.save({ videoId: null, kind: 'stop_alert', agent: 'autopilot', data: { key: `${now.toISOString().slice(0, 10)}|${stop}` } });
   }
   const decisions = (rep.learning ?? []).filter((l) => /^(🕒|📈|✂️|⚠️)/.test(l));
   if (decisions.length) notify('سر الموبايل: الفريق اتعلّم حاجة جديدة', decisions.join(' · ').slice(0, 600));
 
-  if (tg && sent.length) await tg.send(sent.join('\n\n')).catch(() => {});
+  if (tg && sent.length) await tg.send(sent.join('\n\n'), fixButtons).catch(() => {});
   // The Buffer key (TikTok) expires: remind the owner a week before, once a day.
   const exp = process.env.BUFFER_KEY_EXPIRES;
   if (tg && exp && /^\d{4}-\d{2}-\d{2}$/.test(exp) && new Date(`${exp}T00:00:00Z`).getTime() - now.getTime() < 7 * 86_400_000 && ctx.repos.artifacts.latest<{ date: string }>(null, 'buffer_key_reminder')?.data.date !== now.toISOString().slice(0, 10)) {
@@ -547,7 +559,7 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     const fresh = newFindings(ctx, found, now);
     for (const f of fresh.filter((x) => !x.fixed)) rep.errors.push(`watchdog: ${f.text}`);
     const msg = watchdogMessage(fresh);
-    if (msg) await tg?.send(msg.slice(0, 4000)).catch(() => {});
+    if (msg) await tg?.send(msg.slice(0, 4000), watchdogButtons(fresh)).catch(() => {});
     if (fresh.length) ctx.repos.artifacts.save({ videoId: null, kind: 'watchdog_report', agent: 'watchdog', data: { at: now.toISOString(), findings: fresh } });
   } catch (err) { ctx.logger.warn('watchdog failed', { error: (err as Error).message }); }
   // Error memory: remember this cycle's errors; recurring ones are studied once → a lesson the writers read,
