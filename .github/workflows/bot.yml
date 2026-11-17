@@ -13,6 +13,10 @@ on:
         description: 'Queued video asset names to send (comma-separated)'
         type: string
         default: ''
+      test_fix:
+        description: 'Send a test problem with a «🔧 إصلاح» button (runs the safe motion test render)'
+        type: boolean
+        default: false
 
 concurrency:
   group: bot
@@ -41,6 +45,13 @@ jobs:
       BOT_URL: ${{ secrets.BOT_URL }}
       BOT_INGEST_SECRET: ${{ secrets.BOT_INGEST_SECRET }}
     steps:
+      - name: Test the fix button
+        if: inputs.test_fix
+        run: |
+          t=$(printf '🧪 تجربة زرار الإصلاح:\n⚠️ مشكلة تجريبية — الموشن محتاج فحص.\n\nدوس «🔧 إصلاح» تحت، وهيشتغل فحص الموشن (رندر تجريبي، مش بينشر حاجة)، وهيوصلك ✅ أو ❌ لما يخلص.')
+          curl -s -m 20 -X POST "${BOT_URL%/}/ingest" -H "authorization: Bearer $BOT_INGEST_SECRET" -H 'content-type: application/json' \
+            -d "$(jq -n --arg t "$t" --arg id "test-fix-$(date +%s)" '{alerts:[{id:$id,text:$t,fix:"motion"}]}')"
+          exit 0
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
