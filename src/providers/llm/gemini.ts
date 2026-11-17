@@ -5,7 +5,7 @@ import type { LLMProvider, LLMRequest, LLMResult, ModelTier } from './types.ts';
 export interface GeminiOptions {
   /** One key, or several comma-separated keys from separate projects (each project has its own free daily quota). */
   apiKey: string;
-  models: Record<ModelTier, string>;
+  models: Record<ModelTier, string> & { /** Models whose free tier includes Google Search grounding (tried first for search requests). */ search?: string };
   /** Injected for tests. Defaults to global fetch. */
   fetchImpl?: typeof fetch;
   baseUrl?: string;
@@ -106,7 +106,7 @@ export class GeminiLLM implements LLMProvider {
     // Models whose DAILY free quota is used up are skipped for the rest of this run (no wasted calls/backoff).
     // Each model on each key (best model first; a second key = another project's quota for the same model).
     const combos = models.flatMap((model) => this.keys.map((key, k) => ({ model, key, id: `${k}:${model}` })));
-    const live = combos.filter((c) => !exhaustedToday.has(c.id));
+    const live = combos.filter((c) => !exhaustedToday.has(`${c.id}${search ? ':search' : ''}`));
     for (const c of live.length ? live : combos) {
       try {
         return { ...(await this.call(c.model, system, userText, maxOutputTokens, images, c.key, search)), model: c.model };
@@ -116,14 +116,17 @@ export class GeminiLLM implements LLMProvider {
         // A slow/overloaded model (timeout) also falls through to the next model or key at once, instead of
         // waiting out 3 minutes × 4 retries on the same one.
         if (!(err instanceof ProviderError) || !/HTTP (503|429|404|500)|Network error/.test(m)) throw err;
-        if (/HTTP 429/.test(m) && /PerDay|per ?day|free_tier_requests/i.test(m)) exhaustedToday.add(c.id);
+        // Out for today, or not in the free tier at all (grounding "exceeded your current quota", limit 0): skip it for this run.
+        if (/HTTP 429/.test(m) && /PerDay|per ?day|free_tier_requests|exceeded your current quota/i.test(m)) exhaustedToday.add(`${c.id}${search ? ':search' : ''}`);
       }
     }
     throw last;
   }
 
   async generateJson<T>(req: LLMRequest<T>): Promise<LLMResult<T>> {
-    const models = this.o.models[req.tier].split(',').map((m) => m.trim()).filter(Boolean);
+    // Search: the models with free grounding first, then the usual ones for this tier.
+    const list = req.search && this.o.models.search ? `${this.o.models.search},${this.o.models[req.tier]}` : this.o.models[req.tier];
+    const models = [...new Set(list.split(',').map((m) => m.trim()).filter(Boolean))];
     let model = models[0]!;
     const jsonSchema = JSON.stringify(z.toJSONSchema(req.schema, { unrepresentable: 'any' }));
     const base = `${req.prompt}\n\nReturn ONLY one JSON value that validates against this JSON Schema:\n${jsonSchema}`;

@@ -66,7 +66,7 @@ export async function proveWithSearch(ctx: AgentContext, e: PhoneSecret): Promis
     prompt: JSON.stringify({ title: e.title, platforms: e.platforms, code_or_feature: e.onScreen, steps: e.steps, result: e.result, facts: e.facts }),
     schema: Proof,
     maxOutputTokens: 1500,
-  }).catch((err) => { ctx.logger.child('library-agent').warn('proof failed', { id: e.id, error: String((err as Error).message).slice(0, 200) }); return undefined; });
+  }).catch((err) => { ctx.logger.child('library-agent').warn('proof failed', { id: e.id, error: String((err as Error).message).slice(0, 600) }); return undefined; });
   if (!r) return { ok: false, reason: 'unavailable', sources: [] };
   const d = r.data as z.infer<typeof Proof>;
   const sources = (r.sources ?? []).map((s) => s.title || s.url).filter(Boolean);
@@ -181,6 +181,8 @@ export async function runLibraryAgent(ctx: AgentContext, o: { now?: Date; maxNew
       const r = await vetRequest(ctx, { id: `auto-${day}-${i++}`, text: idea.topic, at: now.toISOString() }, true);
       if (r.status !== 'approved') { save(ctx, { ...r, auto: true }); continue; }
       const p = await proveWithSearch(ctx, r.entry!);
+      // Search not available right now: keep the twice-checked topic waiting; its proof is retried next cycle.
+      if (p.reason === 'unavailable') { save(ctx, { ...r, auto: true }); continue; }
       if (!p.ok) { save(ctx, { ...r, auto: true, status: 'rejected', reason: `البحث ما أكدهاش: ${p.reason}` }); rep.rejected++; continue; }
       save(ctx, { ...r, auto: true, entry: { ...r.entry!, verified: { at: now.toISOString(), sources: p.sources } } });
       perFam[family(r.entry!)] = (perFam[family(r.entry!)] ?? 0) + 1;

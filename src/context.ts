@@ -71,7 +71,7 @@ export function createContext(opts: CreateContextOptions = {}): AgentContext & {
   const real = (mode: string) => mode !== 'mock' && !env.DRY_RUN;
   const useGemini = !opts.llm && real(env.LLM_PROVIDER) && env.LLM_PROVIDER === 'gemini';
   const rawLLM: LLMProvider =
-    opts.llm ?? (useGemini ? new GeminiLLM({ apiKey: [env.GEMINI_API_KEY, env.GEMINI_API_KEY_2].filter(Boolean).join(','), models: { writing: env.GEMINI_MODEL_WRITING, light: env.GEMINI_MODEL_LIGHT } }) : new MockLLM());
+    opts.llm ?? (useGemini ? new GeminiLLM({ apiKey: [env.GEMINI_API_KEY, env.GEMINI_API_KEY_2].filter(Boolean).join(','), models: { writing: env.GEMINI_MODEL_WRITING, light: env.GEMINI_MODEL_LIGHT, search: env.GEMINI_MODEL_SEARCH } }) : new MockLLM());
   const zero = { inputPerM: 0, outputPerM: 0 };
   const providers = {
     llm: new TrackedLLM(rawLLM, {
