@@ -5,6 +5,7 @@
  *               chosen one or all arrive as playable videos), "موضوع: …" / "اعمل فيديو عن …" (a topic request: kept
  *               until the autopilot researches + fact-checks it and replies), anything else → help. Only CHAT_ID.
  *  /requests  ← (GET, autopilot) pending topic requests.
+ *  /vetoes    ← (GET, autopilot) library topics the owner removed with the «🗑️ شيل» button (x:<id>).
  *  /ingest    ← the autopilot (GitHub Actions) pushes the latest report, the video list (Telegram file_ids, so
  *               videos are re-sent without re-uploading) and alerts (e.g. a video going viral).
  *
@@ -96,6 +97,10 @@ export default {
         return new Response(req.method === 'HEAD' ? null : v, { headers: { 'content-type': 'video/mp4', 'content-length': String(v.byteLength), 'cache-control': 'public, max-age=86400' } });
       }
     }
+    if (url.pathname === '/vetoes' && req.method === 'GET') {
+      if (req.headers.get('authorization') !== `Bearer ${env.INGEST_SECRET}`) return new Response('forbidden', { status: 403 });
+      return json({ vetoes: JSON.parse((await env.BOT.get('vetoes')) || '[]') });
+    }
     if (url.pathname === '/requests' && req.method === 'GET') {
       if (req.headers.get('authorization') !== `Bearer ${env.INGEST_SECRET}`) return new Response('forbidden', { status: 403 });
       return json({ requests: JSON.parse((await env.BOT.get('requests')) || '[]') });
@@ -112,6 +117,16 @@ export default {
         await tg(env, 'answerCallbackQuery', { callback_query_id: u.callback_query.id, text: 'ثواني وهيوصلك…' });
         const d = u.callback_query.data || '';
         if (d.startsWith('v:')) await sendVideos(env, d.slice(2));
+        // «🗑️ شيل»: the library agent drops this topic before it is ever produced.
+        if (d.startsWith('x:')) {
+          const id = d.slice(2, 64);
+          const list = JSON.parse((await env.BOT.get('vetoes')) || '[]');
+          if (!list.includes(id)) { list.push(id); await env.BOT.put('vetoes', JSON.stringify(list.slice(-200))); }
+          const m = u.callback_query.message;
+          const kb = (m?.reply_markup?.inline_keyboard || []).filter((row) => !row.some((b) => b.callback_data === d));
+          if (m) await tg(env, 'editMessageReplyMarkup', { chat_id: env.CHAT_ID, message_id: m.message_id, reply_markup: { inline_keyboard: kb } });
+          await say(env, '🗑️ تمام، الموضوع ده اتشال ومش هيتعمل.');
+        }
         return json({ ok: true });
       }
       const t = norm(u.message?.text);
@@ -167,7 +182,13 @@ export default {
         const list = JSON.parse((await env.BOT.get('requests')) || '[]');
         await env.BOT.put('requests', JSON.stringify(list.filter((r) => !b.requestsDone.includes(r.id))));
       }
+      if (Array.isArray(b.vetoesDone) && b.vetoesDone.length) {
+        const list = JSON.parse((await env.BOT.get('vetoes')) || '[]');
+        await env.BOT.put('vetoes', JSON.stringify(list.filter((id) => !b.vetoesDone.includes(id))));
+      }
       for (const m of b.messages || []) await say(env, m);
+      // Messages with buttons: { text, buttons: [[{ text, data }]] }
+      for (const m of b.rich || []) await say(env, m.text, { reply_markup: { inline_keyboard: (m.buttons || []).map((row) => row.map((x) => ({ text: String(x.text).slice(0, 60), callback_data: String(x.data).slice(0, 64) }))) } });
       return json({ ok: true });
     }
     return new Response('not found', { status: 404 });

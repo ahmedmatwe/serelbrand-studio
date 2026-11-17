@@ -70,12 +70,18 @@ export class ArtifactRepo {
   }
 
   /** Latest artifact of a kind for every video that has one. */
+  /**
+   * Latest version per video. Records not tied to a video (topic requests, handled comment ids, trend picks…)
+   * are independent entries, so ALL of them are returned — collapsing them to the last one hid every topic the
+   * library researcher had approved but the newest, and production stopped with 73 vetted topics unseen.
+   */
   listKind<T>(kind: string): Artifact<T>[] {
     return this.db
       .all<Omit<Artifact, 'data'> & { data: string }>(
-        `SELECT a.* FROM artifacts a JOIN (SELECT video_id, MAX(version) v FROM artifacts WHERE kind = ? GROUP BY video_id) m
-         ON a.video_id IS m.video_id AND a.version = m.v WHERE a.kind = ? ORDER BY a.created_at`,
-        [kind, kind],
+        `SELECT a.* FROM artifacts a WHERE a.kind = ? AND (a.video_id IS NULL OR a.version =
+           (SELECT MAX(b.version) FROM artifacts b WHERE b.kind = a.kind AND b.video_id = a.video_id))
+         ORDER BY a.created_at, a.version`,
+        [kind],
       )
       .map((r) => ({ ...r, data: JSON.parse(r.data) as T }));
   }

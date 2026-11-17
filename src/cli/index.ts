@@ -125,6 +125,12 @@ async function main() {
         } finally { releaseLock(lock); }
         break;
       }
+      case 'library': {
+        // The library agent alone (removals, duplicates, search proof, growth) — no production.
+        const { runLibraryAgent } = await import('../agents/niche/library-agent.ts');
+        out(await runLibraryAgent(ctx, { maxProofs: Number(process.env.LIBRARY_PROOFS) || undefined }));
+        break;
+      }
       case 'social': {
         // Posts the Shorts whose time has come on Facebook + Instagram (run by .github/workflows/social.yml).
         const social = socialFromEnv(ctx.config.env);

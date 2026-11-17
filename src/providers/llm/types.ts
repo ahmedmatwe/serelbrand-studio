@@ -14,11 +14,13 @@ export interface LLMRequest<T> {
   maxOutputTokens?: number;
   /** Optional images for vision models (small JPEG/PNG previews, base64). */
   images?: { mimeType: string; data: string; /** Text placed right before the image (e.g. "Shot 1 – candidate 2"). */ label?: string }[];
+  /** Let the model search the web (Google Search grounding); the pages it used come back in `sources`. */
+  search?: boolean;
 }
 
 export interface LLMUsage { inputTokens: number; outputTokens: number; model: string }
 
-export interface LLMResult<T> { data: T; usage: LLMUsage }
+export interface LLMResult<T> { data: T; usage: LLMUsage; /** Web pages the answer was grounded on (search requests). */ sources?: { title: string; url: string }[] }
 
 export interface LLMProvider {
   readonly name: string;

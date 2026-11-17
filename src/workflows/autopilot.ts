@@ -31,7 +31,8 @@ import { cairoTime, telegramFromEnv, type Telegram } from '../publishing/telegra
 import { syncBot, type LiveStats } from '../publishing/bot-sync.ts';
 import { readFailed, readPosted, socialFromEnv } from '../publishing/social.ts';
 import { family, loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
-import { growLibrary, handleTopicRequests, priorityIds } from '../agents/niche/topic-requests.ts';
+import { handleTopicRequests, priorityIds } from '../agents/niche/topic-requests.ts';
+import { runLibraryAgent, stockOf } from '../agents/niche/library-agent.ts';
 import { scoutTrends, waitingTrends } from '../agents/niche/trend-scout.ts';
 import { weeklyReportArabic } from '../reports/weekly.ts';
 import { weeklyCompilation } from './weekly-compilation.ts';
@@ -56,6 +57,7 @@ export interface CycleReport {
   commentReplies?: number;
   produced: { videoId: string; title: string; recommendation: string; claimsToVerify: number; autoApproved?: boolean; autoApproveBlockedBy?: string[]; publishAt?: string } | null;
   skippedProductionReason?: string;
+  library?: import('../agents/niche/library-agent.ts').LibraryReport;
   pendingApprovals: number;
   needsFactReview: { videoId: string; title: string; claims: number }[];
   errors: string[];
@@ -187,7 +189,11 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
     // give their secrets back to the library.
     const crashed = new Set(ctx.repos.artifacts.listKind<{ blockers: string[] }>('auto_blocked').filter((a) => a.data.blockers.some((b) => b.startsWith('production failed'))).map((a) => a.video_id));
     const used = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').filter((a) => !crashed.has(a.video_id)).flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
-    const picks = pickPhoneSecrets(lib, used, 3, learnedFamilyWeights(ctx), priorityIds(ctx, used));
+    // Only topics with proof (the hand-reviewed base library, the owner's checked requests, researched topics
+    // proven by a live search). If proof is short today, the two-check researched topics fill the gap.
+    const proven = { ...lib, secrets: stockOf(lib, used) };
+    let picks = pickPhoneSecrets(proven, used, 3, learnedFamilyWeights(ctx), priorityIds(ctx, used));
+    if (picks.length < 3) { ctx.logger.child('autopilot').warn('not enough proven topics — using fact-checked ones', { proven: picks.length }); picks = pickPhoneSecrets(lib, used, 3, learnedFamilyWeights(ctx), priorityIds(ctx, used)); }
     if (picks.length === 3) return picks.map((x): PackTopic => ({ title: x.title, subject: x.id, angle: `${x.trend ? `[TREND «${x.trend.name}»: ${x.trend.link} — hook: ${x.trend.hookAngle}] ` : ''}${x.steps.join(' ← ')} → ${x.result}`, kind: x.kind, sourceUrl: lib.sources[x.source] ?? '' }));
     ctx.logger.child('autopilot').warn('phone-secrets library used up — add reviewed entries to config/phone-secrets.json', { left: picks.length });
     // Out of reviewed entries: fall through to AI-proposed topics (still need a real source and the full gates).
@@ -219,6 +225,17 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
     if (picked.length === 3) break;
   }
   return picked;
+}
+
+/** Why production stopped, in the owner's words — undefined when it's a normal pause (done for today, no time left…). */
+export function productionStopArabic(reason?: string): string | undefined {
+  if (!reason) return undefined;
+  if (/could not plan 3 new Shorts topics/.test(reason)) return 'مفيش مواضيع جاهزة كفاية في المكتبة — إيجنت المكتبة بيضيف دلوقتي، ولو عندك أفكار ابعتها: «موضوع: …»';
+  if (/voice quota/.test(reason)) return `كوتة الصوت المجانية خلصت النهارده — هيكمّل لوحده ${reason.match(/until (\S+ \S+|\S+)/)?.[1] ?? 'بكرة'} UTC`;
+  if (/AI writing quota/.test(reason)) return 'كوتة الذكاء الاصطناعي المجانية خلصت النهارده — هيكمّل لوحده لما تتجدد';
+  if (/3 attempts today were blocked/.test(reason)) return '3 محاولات النهارده اتوقفت في المراجعة — هيحاول تاني بكرة بمواضيع تانية';
+  if (/no unproduced long topic/.test(reason)) return 'مفيش موضوع فيديو طويل جاهز في الخطة';
+  return undefined;
 }
 
 export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise<CycleReport> {
@@ -304,8 +321,10 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     try {
       const usedIds = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
       await handleTopicRequests(ctx, usedIds);
-      // Library researcher: keeps ≥ 30 vetted topics ready (phones + social media), once a day when low.
-      const grown = [...await growLibrary(ctx, usedIds, now), ...await scoutTrends(ctx, usedIds, now).catch((err) => { rep.errors.push(`trend scout: ${(err as Error).message.slice(0, 160)}`); return [] as string[]; })];
+      // Library agent: removals, duplicates, search proof, and growth for the families running low.
+      const libRep = await runLibraryAgent(ctx, { now }).catch((err) => { rep.errors.push(`library agent: ${(err as Error).message.slice(0, 160)}`); return undefined; });
+      if (libRep) rep.library = libRep;
+      const grown = [...await scoutTrends(ctx, usedIds, now).catch((err) => { rep.errors.push(`trend scout: ${(err as Error).message.slice(0, 160)}`); return [] as string[]; })];
       if (grown.length && process.env.BOT_URL && process.env.BOT_INGEST_SECRET) await fetch(`${process.env.BOT_URL.replace(/\/$/, '')}/ingest`, { method: 'POST', headers: { authorization: `Bearer ${process.env.BOT_INGEST_SECRET}`, 'content-type': 'application/json' }, body: JSON.stringify({ messages: grown }) }).catch(() => undefined);
     } catch (err) { rep.errors.push(`topic requests: ${(err as Error).message}`); }
   }
@@ -458,6 +477,12 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
   if (locked.length) notify('سر الموبايل: YouTube قفل الفيديو private', 'لازم مراجعة YouTube API (مجانية) عشان النشر العلني التلقائي يشتغل');
   else if (rep.published.length) notify('سر الموبايل', `اترفع ${rep.published.length} فيديو على القناة`);
   if (rep.errors.length) notify('سر الموبايل: مشكلة', rep.errors[0]!.slice(0, 120));
+  // Production stopped for a reason the owner should know (once a day per reason, with the reason in words).
+  const stop = productionStopArabic(rep.skippedProductionReason);
+  if (!rep.produced && stop && ctx.repos.artifacts.latest<{ key: string }>(null, 'stop_alert')?.data.key !== `${now.toISOString().slice(0, 10)}|${stop}`) {
+    notify('سر الموبايل: الإنتاج واقف', stop);
+    ctx.repos.artifacts.save({ videoId: null, kind: 'stop_alert', agent: 'autopilot', data: { key: `${now.toISOString().slice(0, 10)}|${stop}` } });
+  }
   const decisions = (rep.learning ?? []).filter((l) => /^(🕒|📈|✂️|⚠️)/.test(l));
   if (decisions.length) notify('سر الموبايل: الفريق اتعلّم حاجة جديدة', decisions.join(' · ').slice(0, 600));
 

@@ -15,6 +15,10 @@ on:
         description: 'With force: long or short (empty = what is due)'
         type: string
         default: ''
+      library_only:
+        description: 'Run only the library agent (topics: duplicates, proof, new topics) — no production'
+        type: boolean
+        default: false
 
 concurrency:
   group: autopilot
@@ -161,7 +165,14 @@ jobs:
             | sort -u | while read id; do gh run download "$id" -p 'shorts-*' -D data/weekly-in/ 2>/dev/null || true; done
           find data/weekly-in -name '*.mp4' | wc -l
 
+      - name: Library agent only
+        if: inputs.library_only
+        env:
+          LIBRARY_PROOFS: '40'
+        run: node --no-warnings src/cli/index.ts library
+
       - name: Autopilot cycle
+        if: ${{ !inputs.library_only }}
         env:
           FORCE_PRODUCE: ${{ inputs.force || 'false' }}
           FORCE_FORMAT: ${{ inputs.format || '' }}

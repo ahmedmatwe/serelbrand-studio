@@ -13,6 +13,8 @@ export interface PhoneSecret {
   ui?: PhoneUi;
   /** Stock searches that literally show this secret's topic (tried for every sentence, best match picked by vision). */
   footage?: string[];
+  /** Proven by the library agent against a live Google search (sources = the pages found). */
+  verified?: { at: string; sources: string[] };
   /** Too well known to be worth a Short (most viewers already use it) — never picked. */
   skip?: string;
   /** Tied to a trend in Egypt (set by the trend scout): the hook opens on it. */
