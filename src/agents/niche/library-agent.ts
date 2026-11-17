@@ -54,27 +54,45 @@ const Proof = z.object({
   confidence: z.number().min(0).max(1),
 });
 
-/** Checks an entry against a live Google search. Never throws. */
+const Pages = z.object({ urls: z.array(z.string()).max(4) });
+
+/**
+ * Proof from the maker's own help pages: (1) find the official page(s) that document this feature, (2) READ them
+ * (free URL context) and check the entry against what they say. Never throws.
+ * reason 'unavailable' = could not check now (AI quota/network, or no official page loaded) — try again later.
+ */
 export async function proveWithSearch(ctx: AgentContext, e: PhoneSecret): Promise<{ ok: boolean; reason: string; sources: string[] }> {
   if (ctx.providers.llm.name.startsWith('mock')) return { ok: true, reason: '', sources: [] };
+  const log = ctx.logger.child('library-agent');
+  const pages = await ctx.providers.llm.generateJson({
+    task: 'library.pages',
+    tier: 'light',
+    system: 'Give the exact URLs of the OFFICIAL help/support pages (support.apple.com, support.google.com, samsung.com, faq.whatsapp.com, help.instagram.com, facebook.com/help, support.tiktok.com, telegram.org, support.microsoft.com, helpx.adobe.com …) that document this phone feature or code. ' +
+      'Only real pages you are confident exist (prefer specific article URLs, e.g. https://support.google.com/android/answer/9079661). Up to 3. JSON only.',
+    prompt: JSON.stringify({ title: e.title, platforms: e.platforms, feature: e.onScreen, steps: e.steps, facts: e.facts.slice(0, 400) }),
+    schema: Pages,
+    maxOutputTokens: 600,
+  }).catch((err) => { log.warn('proof pages failed', { id: e.id, error: String((err as Error).message).slice(0, 300) }); return undefined; });
+  const urls = ((pages?.data as z.infer<typeof Pages> | undefined)?.urls ?? []).filter((u) => /^https:\/\//.test(u) && OFFICIAL.test(u)).slice(0, 3);
+  if (!pages) return { ok: false, reason: 'unavailable', sources: [] };
+  if (!urls.length) return { ok: false, reason: 'nopage', sources: [] };
   const r = await ctx.providers.llm.generateJson({
     task: 'library.proof',
     tier: 'light',
-    search: true,
-    system: 'You are a strict fact-checker for a phone-tips channel. SEARCH GOOGLE for this feature/code and check it against what current official help pages and recent reliable tech sites say (current iOS / Android / One UI / app versions). ' +
-      'confirmed = true ONLY if the search results show the feature exists today, works as described, and the steps/menu path/code are right (small wording differences in menu names are fine). ' +
-      'If it was removed, renamed into something else, only in beta, only in some countries without saying so, or the steps are wrong → confirmed false and say what is wrong. confidence 0–1. Reply with JSON only.',
-    prompt: JSON.stringify({ title: e.title, platforms: e.platforms, code_or_feature: e.onScreen, steps: e.steps, result: e.result, facts: e.facts }),
+    readUrls: true,
+    system: 'You are a strict fact-checker for a phone-tips channel. READ the official pages given in `pages` and check the entry against what they say (current iOS / Android / One UI / app versions). ' +
+      'confirmed = true ONLY if the pages show the feature exists and works as described, and the steps/menu path/code match (small wording differences in menu names are fine). ' +
+      'If a page does not load or does not cover it, do not guess: confirmed false. If the entry is wrong or outdated → confirmed false and say what is wrong. confidence 0–1. Reply with JSON only.',
+    prompt: JSON.stringify({ pages: urls, entry: { title: e.title, platforms: e.platforms, code_or_feature: e.onScreen, steps: e.steps, result: e.result, facts: e.facts } }),
     schema: Proof,
     maxOutputTokens: 1500,
-  }).catch((err) => { ctx.logger.child('library-agent').warn('proof failed', { id: e.id, error: String((err as Error).message).slice(0, 600) }); return undefined; });
+  }).catch((err) => { log.warn('proof failed', { id: e.id, error: String((err as Error).message).slice(0, 300) }); return undefined; });
   if (!r) return { ok: false, reason: 'unavailable', sources: [] };
   const d = r.data as z.infer<typeof Proof>;
-  const sources = (r.sources ?? []).map((s) => s.title || s.url).filter(Boolean);
-  const official = sources.some((s) => OFFICIAL.test(s));
-  // Real proof: confirmed with confidence, grounded on pages found (an official one, or at least two others).
-  const ok = d.confirmed && d.confidence >= 0.8 && (official || sources.length >= 2);
-  return { ok, reason: ok ? '' : d.reasonArabic || (d.wrong ? `المعلومة فيها غلط: ${d.wrong.slice(0, 160)}` : 'مالقيتش مصدر موثوق يأكدها'), sources: sources.slice(0, 5) };
+  const read = (r.sources ?? []).map((x) => x.url || x.title).filter((u) => OFFICIAL.test(u));
+  if (!read.length) return { ok: false, reason: 'nopage', sources: [] }; // the pages didn't load: not proof either way
+  const ok = d.confirmed && d.confidence >= 0.8;
+  return { ok, reason: ok ? '' : d.reasonArabic || (d.wrong ? `المعلومة فيها غلط: ${d.wrong.slice(0, 160)}` : 'الصفحة الرسمية ما أكدتهاش'), sources: read.slice(0, 3) };
 }
 
 const Dupes = z.object({ groups: z.array(z.object({ keep: z.string(), drop: z.array(z.string()).max(20), sameAsMade: z.string().default('') })).max(60) });
@@ -144,11 +162,14 @@ export async function runLibraryAgent(ctx: AgentContext, o: { now?: Date; maxNew
 
   // 3) Proof for waiting researched topics that don't have it yet (oldest first).
   let proofs = 0;
-  for (const r of [...reqs().values()].filter((x) => x.status === 'approved' && !x.entry!.verified && !used.has(x.entry!.id))) {
+  for (const r of [...reqs().values()].filter((x) => x.status === 'approved' && !x.entry!.verified && (x.entry!.proofTries ?? 0) < 3 && !used.has(x.entry!.id))) {
     if (proofs >= (o.maxProofs ?? 15)) break;
     proofs++;
     const p = await proveWithSearch(ctx, r.entry!);
     if (p.reason === 'unavailable') break; // AI quota/network: try the rest next cycle
+    // No official page could be read: tried again on later cycles; after 3 tries it stays a twice-checked topic
+    // (used only when proven ones run short), so it is never retried forever.
+    if (p.reason === 'nopage') { const tries = (r.entry!.proofTries ?? 0) + 1; save(ctx, { ...r, entry: { ...r.entry!, proofTries: tries } }); continue; }
     if (p.ok) { save(ctx, { ...r, entry: { ...r.entry!, verified: { at: now.toISOString(), sources: p.sources } } }); rep.proven++; }
     else { save(ctx, { ...r, status: 'rejected', reason: `البحث ما أكدهاش: ${p.reason}` }); rep.rejected++; }
   }
@@ -157,8 +178,10 @@ export async function runLibraryAgent(ctx: AgentContext, o: { now?: Date; maxNew
   // 4) Growth for the families running low.
   let lib = loadPhoneLibrary(ctx.config.rootDir)!;
   let stock = stockOf(lib, used);
+  // Growth counts proven topics + researched ones still waiting for their proof (so it doesn't over-produce ideas).
+  const pendingProof = () => lib.secrets.filter((s) => !used.has(s.id) && !s.skip && /^req-(auto|trend)/.test(s.id) && !s.verified && (s.proofTries ?? 0) < 3).length;
   const count = (f: string) => stock.filter((s) => family(s) === f).length;
-  if (stock.length < STOCK_TARGET && !ctx.providers.llm.name.startsWith('mock')) {
+  if (stock.length + pendingProof() < STOCK_TARGET && !ctx.providers.llm.name.startsWith('mock')) {
     const fams = Object.keys(FAMILY_AR).sort((a, b) => count(a) - count(b));
     const need = fams.slice(0, 3);
     const ideas = await ctx.providers.llm.generateJson({
@@ -177,13 +200,13 @@ export async function runLibraryAgent(ctx: AgentContext, o: { now?: Date; maxNew
     let i = 0;
     const day = now.toISOString().slice(0, 13).replace(/\D/g, '');
     for (const idea of (ideas?.data as z.infer<typeof Ideas> | undefined)?.ideas ?? []) {
-      if (rep.added.length >= (o.maxNew ?? 8) || stock.length + rep.added.length >= STOCK_TARGET) break;
+      if (rep.added.length >= (o.maxNew ?? 8) || stock.length + pendingProof() + rep.added.length >= STOCK_TARGET) break;
       if ((perFam[idea.family] ?? 0) >= FAMILY_CAP) continue;
       const r = await vetRequest(ctx, { id: `auto-${day}-${i++}`, text: idea.topic, at: now.toISOString() }, true);
       if (r.status !== 'approved') { save(ctx, { ...r, auto: true }); continue; }
       const p = await proveWithSearch(ctx, r.entry!);
       // Search not available right now: keep the twice-checked topic waiting; its proof is retried next cycle.
-      if (p.reason === 'unavailable') { save(ctx, { ...r, auto: true }); continue; }
+      if (p.reason === 'unavailable' || p.reason === 'nopage') { save(ctx, { ...r, auto: true, entry: { ...r.entry!, proofTries: p.reason === 'nopage' ? 1 : 0 } }); continue; }
       if (!p.ok) { save(ctx, { ...r, auto: true, status: 'rejected', reason: `البحث ما أكدهاش: ${p.reason}` }); rep.rejected++; continue; }
       save(ctx, { ...r, auto: true, entry: { ...r.entry!, verified: { at: now.toISOString(), sources: p.sources } } });
       perFam[family(r.entry!)] = (perFam[family(r.entry!)] ?? 0) + 1;

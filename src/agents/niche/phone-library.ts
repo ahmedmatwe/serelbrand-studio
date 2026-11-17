@@ -15,6 +15,8 @@ export interface PhoneSecret {
   footage?: string[];
   /** Proven by the library agent against a live Google search (sources = the pages found). */
   verified?: { at: string; sources: string[] };
+  /** Times the library agent could not load an official page to prove it (stops retrying at 3). */
+  proofTries?: number;
   /** Too well known to be worth a Short (most viewers already use it) — never picked. */
   skip?: string;
   /** Tied to a trend in Egypt (set by the trend scout): the hook opens on it. */

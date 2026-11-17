@@ -5,7 +5,7 @@ import type { LLMProvider, LLMRequest, LLMResult, ModelTier } from './types.ts';
 export interface GeminiOptions {
   /** One key, or several comma-separated keys from separate projects (each project has its own free daily quota). */
   apiKey: string;
-  models: Record<ModelTier, string> & { /** Models whose free tier includes Google Search grounding (tried first for search requests). */ search?: string };
+  models: Record<ModelTier, string> & { /** Models whose free tier includes Google Search grounding (tried first for search requests). */ search?: string; /** Models whose free tier can read web pages (URL context). */ urls?: string };
   /** Injected for tests. Defaults to global fetch. */
   fetchImpl?: typeof fetch;
   baseUrl?: string;
@@ -15,7 +15,7 @@ export interface GeminiOptions {
 }
 
 interface GeminiResponse {
-  candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string; groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] } }[];
+  candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string; groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] }; urlContextMetadata?: { urlMetadata?: { retrievedUrl?: string; urlRetrievalStatus?: string }[] } }[];
   promptFeedback?: { blockReason?: string };
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
   error?: { code?: number; message?: string; status?: string };
@@ -60,7 +60,7 @@ export class GeminiLLM implements LLMProvider {
 
   private get keys(): string[] { return this.o.apiKey.split(',').map((k) => k.trim()).filter(Boolean); }
 
-  private async call(model: string, system: string, userText: string, maxOutputTokens: number, images: { mimeType: string; data: string; label?: string }[] = [], key = this.keys[0]!, search = false): Promise<{ text: string; inTok: number; outTok: number; sources: { title: string; url: string }[] }> {
+  private async call(model: string, system: string, userText: string, maxOutputTokens: number, images: { mimeType: string; data: string; label?: string }[] = [], key = this.keys[0]!, search: false | 'search' | 'urls' = false): Promise<{ text: string; inTok: number; outTok: number; sources: { title: string; url: string }[] }> {
     let res: Response;
     try {
       res = await this.o.fetchImpl(`${this.o.baseUrl}/models/${encodeURIComponent(model)}:generateContent`, {
@@ -70,7 +70,7 @@ export class GeminiLLM implements LLMProvider {
           systemInstruction: { parts: [{ text: system }] },
           contents: [{ role: 'user', parts: [{ text: userText }, ...images.flatMap((im) => [...(im.label ? [{ text: im.label }] : []), { inlineData: { mimeType: im.mimeType, data: im.data } }])] }],
           // Search grounding can't be combined with a forced JSON reply on every model: ask for JSON in text instead.
-          ...(search ? { tools: [{ google_search: {} }], generationConfig: { temperature: 0.2, maxOutputTokens } } : { generationConfig: { responseMimeType: 'application/json', temperature: 0.7, maxOutputTokens } }),
+          ...(search ? { tools: [search === 'urls' ? { url_context: {} } : { google_search: {} }], generationConfig: { temperature: 0.2, maxOutputTokens } } : { generationConfig: { responseMimeType: 'application/json', temperature: 0.7, maxOutputTokens } }),
         }),
         signal: AbortSignal.timeout(this.o.timeoutMs),
       });
@@ -93,7 +93,11 @@ export class GeminiLLM implements LLMProvider {
     if (!text) throw new ProviderError('gemini', `Empty response (finishReason=${cand?.finishReason ?? 'unknown'})`, cand?.finishReason !== 'MAX_TOKENS');
     if (cand?.finishReason === 'MAX_TOKENS') throw new ProviderError('gemini', 'Response truncated (MAX_TOKENS) — raise maxOutputTokens', false);
     const u = data.usageMetadata ?? {};
-    const sources = (cand?.groundingMetadata?.groundingChunks ?? []).map((g) => ({ title: g.web?.title ?? '', url: g.web?.uri ?? '' })).filter((g) => g.title || g.url);
+    const sources = [
+      ...(cand?.groundingMetadata?.groundingChunks ?? []).map((g) => ({ title: g.web?.title ?? '', url: g.web?.uri ?? '' })),
+      // pages really read (URL context): only the ones that loaded
+      ...(cand?.urlContextMetadata?.urlMetadata ?? []).filter((u) => /SUCCESS/.test(u.urlRetrievalStatus ?? '')).map((u) => ({ title: u.retrievedUrl ?? '', url: u.retrievedUrl ?? '' })),
+    ].filter((g) => g.title || g.url);
     return { text, inTok: u.promptTokenCount ?? 0, outTok: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0), sources };
   }
 
@@ -101,12 +105,12 @@ export class GeminiLLM implements LLMProvider {
    * Tries each model in a comma-separated list ("a,b,c") in order: a busy/over-quota model (503/429)
    * or a retired one (404) falls through to the next. Other errors stop immediately.
    */
-  private async callWithFallback(models: string[], system: string, userText: string, maxOutputTokens: number, images?: { mimeType: string; data: string; label?: string }[], search = false) {
+  private async callWithFallback(models: string[], system: string, userText: string, maxOutputTokens: number, images?: { mimeType: string; data: string; label?: string }[], search: false | 'search' | 'urls' = false) {
     let last: unknown;
     // Models whose DAILY free quota is used up are skipped for the rest of this run (no wasted calls/backoff).
     // Each model on each key (best model first; a second key = another project's quota for the same model).
     const combos = models.flatMap((model) => this.keys.map((key, k) => ({ model, key, id: `${k}:${model}` })));
-    const live = combos.filter((c) => !exhaustedToday.has(`${c.id}${search ? ':search' : ''}`));
+    const live = combos.filter((c) => !exhaustedToday.has(`${c.id}${search ? `:${search}` : ''}`));
     for (const c of live.length ? live : combos) {
       try {
         return { ...(await this.call(c.model, system, userText, maxOutputTokens, images, c.key, search)), model: c.model };
@@ -117,7 +121,7 @@ export class GeminiLLM implements LLMProvider {
         // waiting out 3 minutes × 4 retries on the same one.
         if (!(err instanceof ProviderError) || !/HTTP (503|429|404|500)|Network error/.test(m)) throw err;
         // Out for today, or not in the free tier at all (grounding "exceeded your current quota", limit 0): skip it for this run.
-        if (/HTTP 429/.test(m) && /PerDay|per ?day|free_tier_requests|exceeded your current quota/i.test(m)) exhaustedToday.add(`${c.id}${search ? ':search' : ''}`);
+        if (/HTTP 429/.test(m) && /PerDay|per ?day|free_tier_requests|exceeded your current quota/i.test(m)) exhaustedToday.add(`${c.id}${search ? `:${search}` : ''}`);
       }
     }
     throw last;
@@ -125,7 +129,7 @@ export class GeminiLLM implements LLMProvider {
 
   async generateJson<T>(req: LLMRequest<T>): Promise<LLMResult<T>> {
     // Search: the models with free grounding first, then the usual ones for this tier.
-    const list = req.search && this.o.models.search ? `${this.o.models.search},${this.o.models[req.tier]}` : this.o.models[req.tier];
+    const list = req.readUrls && this.o.models.urls ? this.o.models.urls : req.search && this.o.models.search ? `${this.o.models.search},${this.o.models[req.tier]}` : this.o.models[req.tier];
     const models = [...new Set(list.split(',').map((m) => m.trim()).filter(Boolean))];
     let model = models[0]!;
     const jsonSchema = JSON.stringify(z.toJSONSchema(req.schema, { unrepresentable: 'any' }));
@@ -137,7 +141,7 @@ export class GeminiLLM implements LLMProvider {
     for (let attempt = 0; attempt <= this.o.repairAttempts; attempt++) {
       // Each repair attempt starts from the next model, so one model's bad streak can't sink the task.
       const order = [...models.slice(attempt % models.length), ...models.slice(0, attempt % models.length)];
-      const r = await this.callWithFallback(order, req.system, prompt, req.maxOutputTokens ?? 16_384, req.images, req.search);
+      const r = await this.callWithFallback(order, req.system, prompt, req.maxOutputTokens ?? 16_384, req.images, req.readUrls ? 'urls' : req.search ? 'search' : false);
       model = r.model;
       inTok += r.inTok;
       outTok += r.outTok;
@@ -150,7 +154,7 @@ export class GeminiLLM implements LLMProvider {
         continue;
       }
       const parsed = req.schema.safeParse(parsedJson);
-      if (parsed.success) return { data: parsed.data, usage: { inputTokens: inTok, outputTokens: outTok, model }, ...(req.search ? { sources: r.sources } : {}) };
+      if (parsed.success) return { data: parsed.data, usage: { inputTokens: inTok, outputTokens: outTok, model }, ...(req.search || req.readUrls ? { sources: r.sources } : {}) };
       lastIssues = parsed.error.issues.slice(0, 10).map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
       prompt = `${base}\n\nYour previous reply failed validation: ${lastIssues}\nFix these problems and reply with the complete corrected JSON only.`;
     }

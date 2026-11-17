@@ -34,7 +34,9 @@ const EnvSchema = z.object({
   GEMINI_API_KEY_2: z.string().optional(),
   GEMINI_MODEL_WRITING: z.string().default('gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3-flash-preview,gemini-flash-latest,gemini-3.5-flash-lite'),
   /** Search-grounded fact checks (library proof): models whose free tier includes Google Search. */
-  GEMINI_MODEL_SEARCH: z.string().default('gemini-2.5-flash,gemini-2.5-flash-lite,gemini-flash-latest,gemini-flash-lite-latest'),
+  GEMINI_MODEL_SEARCH: z.string().default('gemini-3.5-flash-lite,gemini-flash-lite-latest'),
+  /** Reading official help pages (library proof): the models whose FREE tier allows URL context (checked by search-check.yml). */
+  GEMINI_MODEL_URLS: z.string().default('gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest,gemini-3-flash-preview,gemini-3.6-flash'),
   GEMINI_MODEL_LIGHT: z.string().default('gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest,gemini-3.5-flash,gemini-3.6-flash,gemini-3-flash-preview'),
   /** true = Google AI Studio free tier: cost is recorded as $0. */
   GEMINI_FREE_TIER: z.string().default('true').transform((v) => v.toLowerCase() !== 'false'),

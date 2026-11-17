@@ -16,6 +16,8 @@ export interface LLMRequest<T> {
   images?: { mimeType: string; data: string; /** Text placed right before the image (e.g. "Shot 1 – candidate 2"). */ label?: string }[];
   /** Let the model search the web (Google Search grounding); the pages it used come back in `sources`. */
   search?: boolean;
+  /** Let the model READ the web pages named in the prompt (free URL context); the pages it read come back in `sources`. */
+  readUrls?: boolean;
 }
 
 export interface LLMUsage { inputTokens: number; outputTokens: number; model: string }
