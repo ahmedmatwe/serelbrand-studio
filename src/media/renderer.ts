@@ -370,7 +370,10 @@ export class RendererAgent extends Agent<RenderInput, RenderOutput> {
       o.notes.push(`Short ${o.n}: design genes ${JSON.stringify(plan.style.variants)}`);
       return plan.scenes.map((x) => ({ start: x.start, duration: Number((x.end - x.start).toFixed(1)), said: plan.captions.filter((c) => c.a >= x.start && c.a < x.end).map((c) => c.text).join(' ').slice(0, 120), showing: `motion ${x.type} ${JSON.stringify(plan.style.variants ?? {}).replace(/"/g, '')}: ${x.headline.text}`.slice(0, 200) }));
     } catch (e) {
-      const msg = String((e as Error).message).slice(0, 200);
+      // The first line is just the render command; the reason (LAYOUT_OVERLAP …, a TypeError …) comes after it.
+      const full = String((e as Error).message);
+      const why = full.split('\n').slice(1).map((l) => l.trim()).filter((l) => /error|LAYOUT_|cannot|failed|timeout|not found|undefined/i.test(l) && !/^\s*at /.test(l));
+      const msg = (why.length ? why.slice(0, 3).join(' | ') : full).slice(0, 400);
       // Second full attempt (fresh plan, told what went wrong) before falling back to stock footage.
       if (!o.retried) {
         o.notes.push(`Short ${o.n}: motion graphics failed once (${msg.slice(0, 120)}) — trying again`);
