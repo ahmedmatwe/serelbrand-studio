@@ -17,8 +17,9 @@ import type { AgentContext } from '../base.ts';
 import { family, loadPhoneLibrary, type PhoneSecret } from './phone-library.ts';
 import { requestedEntries, vetRequest, writeRequestedLibrary } from './topic-requests.ts';
 
-export const STOCK_TARGET = 30;
-export const LOW_STOCK = 12;
+/** ~15 days of production waiting at all times (3 a day); refilled every cycle, never only when it runs out. */
+export const STOCK_TARGET = 45;
+export const LOW_STOCK = 15;
 const FAMILY_CAP = 3;
 export const FAMILY_AR: Record<string, string> = { apps: 'تطبيقات وسوشيال ميديا', code: 'أكواد سرية', ios: 'آيفون', android: 'أندرويد وسامسونج', free: 'أدوات مجانية بدل المدفوعة' };
 const FAMILY_HINT: Record<string, string> = {

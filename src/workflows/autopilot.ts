@@ -32,7 +32,7 @@ import { syncBot, type LiveStats } from '../publishing/bot-sync.ts';
 import { readFailed, readPosted, socialFromEnv } from '../publishing/social.ts';
 import { family, loadPhoneLibrary, pickPhoneSecrets } from '../agents/niche/phone-library.ts';
 import { handleTopicRequests, priorityIds } from '../agents/niche/topic-requests.ts';
-import { runLibraryAgent, stockOf } from '../agents/niche/library-agent.ts';
+import { runLibraryAgent, stockOf, usedTopicIds } from '../agents/niche/library-agent.ts';
 import { scoutTrends, waitingTrends } from '../agents/niche/trend-scout.ts';
 import { weeklyReportArabic } from '../reports/weekly.ts';
 import { weeklyCompilation } from './weekly-compilation.ts';
@@ -195,6 +195,16 @@ export async function planShortsPack(ctx: AgentContext, niche: string, avoid: st
     let picks = pickPhoneSecrets(proven, used, 3, learnedFamilyWeights(ctx), priorityIds(ctx, used));
     if (picks.length < 3) { ctx.logger.child('autopilot').warn('not enough proven topics — using fact-checked ones', { proven: picks.length }); picks = pickPhoneSecrets(lib, used, 3, learnedFamilyWeights(ctx), priorityIds(ctx, used)); }
     if (picks.length === 3) return picks.map((x): PackTopic => ({ title: x.title, subject: x.id, angle: `${x.trend ? `[TREND «${x.trend.name}»: ${x.trend.link} — hook: ${x.trend.hookAngle}] ` : ''}${x.steps.join(' ← ')} → ${x.result}`, kind: x.kind, sourceUrl: lib.sources[x.source] ?? '' }));
+    // Never stop: a topic made at least 30 days ago comes back as a remake (new hook, new examples) to fill the pack.
+    const madeAt = new Map<string, string>();
+    for (const a of ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry')) for (const t of a.data.topics ?? []) if (!crashed.has(a.video_id)) madeAt.set(t.subject, a.created_at);
+    const old = lib.secrets.filter((s) => !s.skip && !picks.includes(s) && madeAt.has(s.id) && Date.now() - Date.parse(madeAt.get(s.id)!) > 30 * 86_400_000)
+      .sort((a, b) => madeAt.get(a.id)!.localeCompare(madeAt.get(b.id)!));
+    if (picks.length + old.length >= 3) {
+      ctx.logger.child('autopilot').warn('library short — remaking topics made 30+ days ago', { fresh: picks.length });
+      const fill = old.slice(0, 3 - picks.length);
+      return [...picks.map((x) => ({ x, remake: false })), ...fill.map((x) => ({ x, remake: true }))].map(({ x, remake }): PackTopic => ({ title: x.title, subject: x.id, angle: `${remake ? '[REMAKE of a video made a month ago: a NEW hook, new wording and a fresh example — never the old title or opening] ' : ''}${x.steps.join(' ← ')} → ${x.result}`, kind: x.kind, sourceUrl: lib.sources[x.source] ?? '' }));
+    }
     ctx.logger.child('autopilot').warn('phone-secrets library used up — add reviewed entries to config/phone-secrets.json', { left: picks.length });
     // Out of reviewed entries: fall through to AI-proposed topics (still need a real source and the full gates).
   }
@@ -331,9 +341,13 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     try {
       const usedIds = new Set(ctx.repos.artifacts.listKind<{ topics?: { subject: string }[] }>('calendar_entry').flatMap((a) => (a.data.topics ?? []).map((t) => t.subject)));
       await handleTopicRequests(ctx, usedIds);
-      // Library agent: removals, duplicates, search proof, and growth for the families running low.
-      const libRep = await runLibraryAgent(ctx, { now }).catch((err) => { rep.errors.push(`library agent: ${(err as Error).message.slice(0, 160)}`); return undefined; });
-      if (libRep) rep.library = libRep;
+      // Library agent BEFORE production only in an emergency (too few topics for today's pack); otherwise it runs
+      // after production, so it never eats the free AI quota today's videos need.
+      const libNow = loadPhoneLibrary(ctx.config.rootDir);
+      if (libNow && stockOf(libNow, usedTopicIds(ctx)).length < 6) {
+        const libRep = await runLibraryAgent(ctx, { now }).catch((err) => { rep.errors.push(`library agent: ${(err as Error).message.slice(0, 160)}`); return undefined; });
+        if (libRep) rep.library = libRep;
+      }
       const grown = [...await scoutTrends(ctx, usedIds, now).catch((err) => { rep.errors.push(`trend scout: ${(err as Error).message.slice(0, 160)}`); return [] as string[]; })];
       if (grown.length && process.env.BOT_URL && process.env.BOT_INGEST_SECRET) await fetch(`${process.env.BOT_URL.replace(/\/$/, '')}/ingest`, { method: 'POST', headers: { authorization: `Bearer ${process.env.BOT_INGEST_SECRET}`, 'content-type': 'application/json' }, body: JSON.stringify({ messages: grown }) }).catch(() => undefined);
     } catch (err) { rep.errors.push(`topic requests: ${(err as Error).message}`); }
@@ -468,6 +482,12 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     // Without full automation a human reviews each video: one per cycle is enough.
     if (!ctx.config.env.AUTO_APPROVE) break;
     if (rep.produced && !rep.produced.autoApproved) rep.blockedAttempts.push({ title: rep.produced.title, reason: rep.produced.autoApproveBlockedBy?.[0] ?? rep.errors.at(-1) ?? 'failed' });
+  }
+
+  // 3b) The library agent keeps topics ready ahead (every cycle): removals, duplicates, search proof, growth.
+  if (o.produce !== false && !rep.library) {
+    const libRep = await runLibraryAgent(ctx, { now }).catch((err) => { rep.errors.push(`library agent: ${(err as Error).message.slice(0, 160)}`); return undefined; });
+    if (libRep) rep.library = libRep;
   }
 
   // 4) What needs the human.
