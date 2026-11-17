@@ -1,0 +1,25 @@
+# Manual: which Gemini models answer with Google Search grounding / URL reading on our free keys (status only).
+name: search-check
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  gemini-search:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          K1: ${{ secrets.GEMINI_API_KEY }}
+          K2: ${{ secrets.GEMINI_API_KEY_2 }}
+        run: |
+          for n in 1 2; do
+            k=$([ $n = 1 ] && echo "$K1" || echo "$K2"); [ -n "$k" ] || continue
+            for m in gemini-3.8-flash gemini-3.7-flash gemini-3.6-flash gemini-3.5-flash gemini-3.5-flash-lite gemini-3.1-flash-lite gemini-3-flash-preview gemini-flash-latest gemini-flash-lite-latest; do
+              for tool in google_search url_context; do
+                q=$([ $tool = google_search ] && echo 'Is Notification history a setting in Android 15? Answer yes or no.' || echo 'Summarize https://support.google.com/android/answer/9079661 in one line.')
+                body=$(jq -n --arg q "$q" --arg t "$tool" '{contents:[{parts:[{text:$q}]}],tools:[{($t):{}}]}')
+                r=$(curl -s -w '\n%{http_code}' -H "x-goog-api-key: $k" -H 'content-type: application/json' -d "$body" "https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent")
+                code=$(echo "$r" | tail -1); msg=$(echo "$r" | head -n -1 | jq -r '.error.message // ((.candidates[0].groundingMetadata.groundingChunks // []) | length | "chunks=\(.)")' 2>/dev/null | head -c 110)
+                echo "key$n $m $tool → $code $msg"
+              done
+            done
+          done
