@@ -1,0 +1,25 @@
+# Manual: which accounts «سر الموبايل» posts to (names only, no secrets) and where its last TikTok posts went.
+name: accounts-check
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  accounts:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          B: ${{ secrets.BUFFER_API_KEY }}
+          PAGE: ${{ secrets.META_PAGE_ID }}
+          TOKEN: ${{ secrets.META_PAGE_TOKEN }}
+          IG: ${{ secrets.META_IG_USER_ID }}
+        run: |
+          q() { curl -s https://api.buffer.com -H "authorization: Bearer $B" -H 'content-type: application/json' -d "$1"; }
+          echo "== Buffer channels"
+          for org in $(q '{"query":"query { account { organizations { id } } }"}' | jq -r '.data.account.organizations[].id'); do
+            q "$(jq -n --arg o "$org" '{query:"query($o: OrganizationId!) { channels(input: { organizationId: $o }) { id name service } }",variables:{o:$o}}')" | jq -r '.data.channels[] | "\(.service)  \(.name)  \(.id)"'
+            echo "== last TikTok posts in this org (channel ← text)"
+            q "$(jq -n --arg o "$org" '{query:"query($o: OrganizationId!) { posts(first: 25, input: { organizationId: $o, sort: [{ field: dueAt, direction: desc }] }) { edges { node { channelId status dueAt text } } } }",variables:{o:$o}}')" \
+              | jq -r '.data.posts.edges[].node | "\(.dueAt[0:16]) \(.status) ch=\(.channelId[-6:]) \(.text[0:60] | gsub("\n";" "))"'
+          done
+          echo "== Facebook page"; curl -s "https://graph.facebook.com/v21.0/$PAGE?fields=name&access_token=$TOKEN" | jq -r '.name // .error.message'
+          echo "== Instagram"; curl -s "https://graph.facebook.com/v21.0/$IG?fields=username,name&access_token=$TOKEN" | jq -r '(.username // "") + " " + (.name // .error.message // "")'
