@@ -54,6 +54,19 @@ export class BufferClient {
     return r.posts.edges.map((e) => e.node);
   }
 
+  /** Scheduled posts of ANOTHER TikTok channel in the same account (by name), e.g. ours that went to كادر كورة. */
+  async scheduledOn(channelName: RegExp): Promise<BufferPost[]> {
+    await this.tiktokChannel();
+    const c = await this.gql<{ channels: { id: string; service: string; name: string }[] }>('query($org: OrganizationId!) { channels(input: { organizationId: $org }) { id name service } }', { org: this.org });
+    const ch = c.channels.find((x) => /tiktok/i.test(x.service) && channelName.test(x.name));
+    if (!ch) return [];
+    const r = await this.gql<{ posts: { edges: { node: BufferPost }[] } }>(
+      `query($org: OrganizationId!, $ch: ChannelId!) { posts(first: 40, input: { organizationId: $org, filter: { channelIds: [$ch], status: [scheduled] }, sort: [{ field: dueAt, direction: asc }] }) { edges { node { id text status dueAt sentAt externalLink error { message } assets { source type } } } } }`,
+      { org: this.org, ch: ch.id },
+    );
+    return r.posts.edges.map((e) => e.node);
+  }
+
   /** Removes a scheduled post from Buffer (before it goes out). */
   async deletePost(id: string): Promise<void> {
     const r = await this.gql<{ deletePost: { id?: string; message?: string } }>('mutation($id: PostId!) { deletePost(input: { id: $id }) { ... on DeletePostSuccess { id } ... on MutationError { message } } }', { id });

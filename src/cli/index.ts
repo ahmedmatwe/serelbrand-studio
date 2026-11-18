@@ -170,6 +170,28 @@ async function main() {
         }
         return out(log.length ? log.join('\n') : 'Nothing due.');
       }
+      case 'tiktok:move': {
+        // Our scheduled TikToks that went to another channel (كادر كورة): scheduled again on OUR channel at the
+        // same time, and only then removed from the other one. Only posts whose text contains one of TIKTOK_MOVE.
+        const { bufferFromEnv } = await import('../publishing/buffer.ts');
+        const buffer = bufferFromEnv(ctx.config.env);
+        if (!buffer) return out('Buffer not connected');
+        const match = (process.env.TIKTOK_MOVE ?? '').split('|').map((x) => x.trim()).filter((x) => x.length >= 6);
+        if (!match.length) return out('TIKTOK_MOVE is empty');
+        const log: string[] = [];
+        for (const p of await buffer.scheduledOn(/kader|كادر/i)) {
+          if (!match.some((m) => p.text.includes(m))) continue;
+          const video = p.assets?.find((a) => /video/i.test(a.type ?? ''))?.source ?? p.assets?.[0]?.source;
+          if (!video) { log.push(`SKIPPED (no video): ${p.text.slice(0, 50)}`); continue; }
+          try {
+            const due = p.dueAt && new Date(p.dueAt) > new Date(Date.now() + 5 * 60_000) ? p.dueAt : new Date(Date.now() + 10 * 60_000).toISOString();
+            const id = await buffer.scheduleTikTok(video, p.text, due);
+            await buffer.deletePost(p.id);
+            log.push(`MOVED ${p.text.slice(0, 50)} → ser.mobile ${due} (new ${id}, removed ${p.id})`);
+          } catch (e) { log.push(`FAILED ${p.text.slice(0, 50)}: ${(e as Error).message}`); }
+        }
+        return out(log.join('\n') || 'Nothing matched.');
+      }
       case 'tiktok:delete': {
         // Pull scheduled TikTok posts back out of Buffer (ids from the backfill log, via env TIKTOK_DELETE).
         const { bufferFromEnv } = await import('../publishing/buffer.ts');

@@ -19,6 +19,10 @@ on:
         description: 'Buffer post ids to remove (comma-separated)'
         type: string
         default: ''
+      tiktok_move:
+        description: 'Our scheduled TikToks that went to كادر كورة: texts to move to ser.mobile (| separated)'
+        type: string
+        default: ''
       tiktok_backfill:
         description: 'Also send the Shorts already queued to TikTok (through Buffer)'
         type: boolean
@@ -86,6 +90,11 @@ jobs:
         env:
           TIKTOK_DELETE: ${{ inputs.tiktok_delete }}
         run: node --no-warnings src/cli/index.ts tiktok:delete
+      - name: Move our TikToks from كادر كورة to ser.mobile
+        if: steps.gate.outputs.connected == 'true' && inputs.tiktok_move != ''
+        env:
+          TIKTOK_MOVE: ${{ inputs.tiktok_move }}
+        run: node --no-warnings src/cli/index.ts tiktok:move
       - name: Send queued Shorts to TikTok (Buffer)
         if: steps.gate.outputs.connected == 'true' && inputs.tiktok_backfill
         run: node --no-warnings src/cli/index.ts tiktok:backfill
