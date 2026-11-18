@@ -25,16 +25,23 @@ export class BufferClient {
     return j.data as T;
   }
 
-  /** The connected TikTok channel (first one), found once. */
+  /**
+   * OUR TikTok channel, found by its NAME. The same Buffer account also holds other channels' TikToks
+   * (kader_kora): taking "the first TikTok" sent every «سر الموبايل» TikTok to كادر كورة. Never guess:
+   * no channel with our name → refuse to post.
+   */
   async tiktokChannel(): Promise<string> {
     if (this.channel) return this.channel;
+    const want = new RegExp(process.env.BUFFER_TIKTOK_CHANNEL || 'ser[._ ]?mobile|سر[ _]?الموبايل', 'i');
+    const seen: string[] = [];
     const orgs = await this.gql<{ account: { organizations: { id: string }[] } }>('query { account { organizations { id name } } }');
     for (const org of orgs.account.organizations) {
       const c = await this.gql<{ channels: { id: string; service: string; name: string }[] }>('query($org: OrganizationId!) { channels(input: { organizationId: $org }) { id name service } }', { org: org.id });
-      const tt = c.channels.find((x) => /tiktok/i.test(x.service));
+      for (const x of c.channels.filter((y) => /tiktok/i.test(y.service))) seen.push(x.name);
+      const tt = c.channels.find((x) => /tiktok/i.test(x.service) && want.test(x.name) && !/kader|كادر/i.test(x.name));
       if (tt) { this.org = org.id; return (this.channel = tt.id); }
     }
-    throw new Error('Buffer: no TikTok channel connected');
+    throw new Error(`Buffer: no «سر الموبايل» TikTok channel (found: ${seen.join(', ') || 'none'}) — not posting to another channel`);
   }
 
   /** The TikTok channel's latest posts (scheduled, sending, sent, failed), newest due first. */
