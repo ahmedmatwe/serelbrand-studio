@@ -193,35 +193,43 @@ async function main() {
         return out(log.join('\n') || 'Nothing matched.');
       }
       case 'tiktok:repost': {
-        // Our TikToks that went out (or failed) on كادر كورة: posted again on OUR channel, 2 a day in free slots.
+        // Our TikToks that went out (or failed) on كادر كورة are posted again on OUR channel — drip-fed so the daily
+        // videos always have room: Buffer's free plan holds 10 scheduled posts per channel, so reposts are added
+        // only while ≤ 5 are waiting (one per run), and extra reposts beyond 6 waiting are taken back out.
         // Ours = our caption hashtag #سر_الموبايل (كادر كورة's end with #كورة); a football post is never taken.
         const { bufferFromEnv } = await import('../publishing/buffer.ts');
         const buffer = bufferFromEnv(ctx.config.env);
         if (!buffer) return out('Buffer not connected');
-        const ours = (p: { text: string; assets?: { source: string }[] }) => p.text.includes('#سر_الموبايل') && !p.text.includes('#كورة') && Boolean(p.assets?.length);
         const since = process.env.TIKTOK_REPOST_SINCE ?? '2026-11-10';
-        const mine = await buffer.recentTikTokPosts(60);
-        const theirs = (await buffer.scheduledOn(/kader|كادر/i, '[sent, error]')).filter((p) => ours(p) && (p.dueAt ?? '') >= since && !mine.some((m) => m.text === p.text));
-        const dry = process.env.TIKTOK_REPOST_DRY === '1';
-        const log: string[] = [`found ${theirs.length} of ours on كادر كورة${dry ? ' (dry run)' : ''}`];
-        // free slots: 10:00 and 21:00 UTC (12:00 / 23:00 Cairo), from the next one on — the daily 12/16/19 UTC stay as they are
-        const slots: string[] = [];
-        for (let d = 0; slots.length < theirs.length; d++) for (const h of [10, 21]) {
+        const ours = (p: { text: string; assets?: { source: string }[] }) => p.text.includes('#سر_الموبايل') && !p.text.includes('#كورة') && Boolean(p.assets?.length);
+        const onKader = (await buffer.scheduledOn(/kader|كادر/i, '[sent, error]')).filter((p) => ours(p) && (p.dueAt ?? '') >= since);
+        const repostTexts = new Set(onKader.map((p) => p.text));
+        let mine = await buffer.recentTikTokPosts(60);
+        const log: string[] = [];
+        // 1) room for the daily videos: at most 6 waiting — later reposts go back out (they come again later)
+        const waiting = () => mine.filter((p) => p.status === 'scheduled');
+        for (const p of waiting().filter((x) => repostTexts.has(x.text)).sort((a, b) => (b.dueAt ?? '').localeCompare(a.dueAt ?? ''))) {
+          if (waiting().length <= 6) break;
+          await buffer.deletePost(p.id).then(() => { log.push(`TAKEN BACK (room for daily) ${p.text.slice(0, 50)}`); mine = mine.filter((x) => x.id !== p.id); }, (e: Error) => log.push(`FAILED take back: ${e.message}`));
+        }
+        // 2) one more repost when there is room
+        const todo = onKader.filter((p) => !mine.some((m) => m.text === p.text));
+        log.push(`waiting on ser.mobile: ${waiting().length} · reposts left: ${todo.length}`);
+        if (process.env.TIKTOK_REPOST_DRY === '1' || !todo.length || waiting().length > 5) return out(log.join('\n'));
+        const taken = new Set(waiting().map((p) => (p.dueAt ?? '').slice(0, 13)));
+        let slot = '';
+        for (let d = 0; !slot && d < 14; d++) for (const h of [10, 21]) {
           const t = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + d, h));
-          if (t.getTime() > Date.now() + 30 * 60_000 && slots.length < theirs.length) slots.push(t.toISOString());
+          if (!slot && t.getTime() > Date.now() + 30 * 60_000 && !taken.has(t.toISOString().slice(0, 13))) slot = t.toISOString();
         }
-        for (const [i, p] of theirs.entries()) {
-          const src = (p.assets!.find((a) => /video/i.test(a.type ?? '')) ?? p.assets![0]!).source;
-          if (dry) { log.push(`WOULD POST ${slots[i]} ${p.text.slice(0, 60)}`); continue; }
-          try {
-            // Buffer's own copy of the video (public link, kept by Buffer) — checked before scheduling
-            const head = await fetch(src, { method: 'HEAD' });
-            if (!head.ok) throw new Error(`video gone (HTTP ${head.status})`);
-            const url = src;
-            const id = await buffer.scheduleTikTok(url, p.text, slots[i]!);
-            log.push(`POSTED ${slots[i]} ${p.text.slice(0, 60)} (${id})`);
-          } catch (e) { log.push(`FAILED ${p.text.slice(0, 60)}: ${(e as Error).message}`); }
-        }
+        const p = todo[0]!;
+        const src = (p.assets!.find((a) => /video/i.test(a.type ?? '')) ?? p.assets![0]!).source;
+        try {
+          const head = await fetch(src, { method: 'HEAD' });
+          if (!head.ok) throw new Error(`video gone (HTTP ${head.status})`);
+          const id = await buffer.scheduleTikTok(src, p.text, slot);
+          log.push(`POSTED ${slot} ${p.text.slice(0, 60)} (${id})`);
+        } catch (e) { log.push(`FAILED ${p.text.slice(0, 60)}: ${(e as Error).message}`); }
         return out(log.join('\n'));
       }
       case 'tiktok:delete': {

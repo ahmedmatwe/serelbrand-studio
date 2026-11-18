@@ -24,7 +24,7 @@ on:
         type: string
         default: ''
       tiktok_repost:
-        description: 'Repost our TikToks that went out on كادر كورة to ser.mobile: dry (list only) or yes'
+        description: 'Reposting our TikToks from كادر كورة runs by itself, drip-fed: dry = list only, off = skip'
         type: string
         default: ''
       tiktok_backfill:
@@ -99,8 +99,9 @@ jobs:
         env:
           TIKTOK_MOVE: ${{ inputs.tiktok_move }}
         run: node --no-warnings src/cli/index.ts tiktok:move
-      - name: Repost our TikToks from كادر كورة on ser.mobile
-        if: steps.gate.outputs.connected == 'true' && (inputs.tiktok_repost == 'dry' || inputs.tiktok_repost == 'yes')
+      - name: Repost our TikToks from كادر كورة on ser.mobile (drip-fed, the daily videos keep their room)
+        if: steps.gate.outputs.connected == 'true' && inputs.tiktok_repost != 'off'
+        continue-on-error: true
         env:
           TIKTOK_REPOST_DRY: ${{ inputs.tiktok_repost == 'dry' && '1' || '0' }}
         run: node --no-warnings src/cli/index.ts tiktok:repost
