@@ -194,16 +194,15 @@ async function main() {
       }
       case 'tiktok:repost': {
         // Our TikToks that went out (or failed) on كادر كورة: posted again on OUR channel, 2 a day in free slots.
-        // Ours = the video is hosted on OUR bot (كادر كورة hosts its own), never a football post.
+        // Ours = our caption hashtag #سر_الموبايل (كادر كورة's end with #كورة); a football post is never taken.
         const { bufferFromEnv, hostVideo } = await import('../publishing/buffer.ts');
         const buffer = bufferFromEnv(ctx.config.env);
         if (!buffer || !process.env.BOT_URL) return out('Buffer / bot not connected');
-        const ours = (p: { assets?: { source: string }[] }) => (p.assets ?? []).some((a) => a.source.startsWith(process.env.BOT_URL!.replace(/\/$/, '')));
+        const ours = (p: { text: string; assets?: { source: string }[] }) => p.text.includes('#سر_الموبايل') && !p.text.includes('#كورة') && Boolean(p.assets?.length);
         const since = process.env.TIKTOK_REPOST_SINCE ?? '2026-11-10';
         const mine = await buffer.recentTikTokPosts(60);
         const theirs = (await buffer.scheduledOn(/kader|كادر/i, '[sent, error]')).filter((p) => ours(p) && (p.dueAt ?? '') >= since && !mine.some((m) => m.text === p.text));
         const dry = process.env.TIKTOK_REPOST_DRY === '1';
-        if (dry) for (const p of (await buffer.scheduledOn(/kader|كادر/i, '[sent, error]')).slice(-14)) console.log('tail:', p.status, (p.dueAt ?? '').slice(0, 16), '|', p.text.replace(/\s+/g, ' ').slice(-110));
         const log: string[] = [`found ${theirs.length} of ours on كادر كورة${dry ? ' (dry run)' : ''}`];
         // free slots: 10:00 and 21:00 UTC (12:00 / 23:00 Cairo), from the next one on — the daily 12/16/19 UTC stay as they are
         const slots: string[] = [];
@@ -215,13 +214,13 @@ async function main() {
         const { tmpdir } = await import('node:os');
         const dir = mkdtempSync(`${tmpdir()}/repost-`);
         for (const [i, p] of theirs.entries()) {
-          const src = p.assets!.find((a) => a.source.startsWith(process.env.BOT_URL!.replace(/\/$/, '')))!.source;
+          const src = (p.assets!.find((a) => /video/i.test(a.type ?? '')) ?? p.assets![0]!).source;
           if (dry) { log.push(`WOULD POST ${slots[i]} ${p.text.slice(0, 60)}`); continue; }
           try {
             // re-host so the link lives long enough for its new date
             const res = await fetch(src);
             if (!res.ok) throw new Error(`video gone (HTTP ${res.status})`);
-            const name = `repost-${i}-${src.split('/').pop()}`.replace(/[^\w.-]/g, '').slice(-120);
+            const name = `repost-${Date.now()}-${i}.mp4`;
             writeFileSync(`${dir}/${name}`, Buffer.from(await res.arrayBuffer()));
             const url = await hostVideo(`${dir}/${name}`, name, process.env);
             const id = await buffer.scheduleTikTok(url, p.text, slots[i]!);
