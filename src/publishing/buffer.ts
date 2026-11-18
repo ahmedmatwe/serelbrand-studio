@@ -54,14 +54,14 @@ export class BufferClient {
     return r.posts.edges.map((e) => e.node);
   }
 
-  /** Scheduled posts of ANOTHER TikTok channel in the same account (by name), e.g. ours that went to كادر كورة. */
-  async scheduledOn(channelName: RegExp): Promise<BufferPost[]> {
+  /** Posts of ANOTHER TikTok channel in the same account (by name), e.g. ours that went to كادر كورة. */
+  async scheduledOn(channelName: RegExp, status = '[scheduled]'): Promise<BufferPost[]> {
     await this.tiktokChannel();
     const c = await this.gql<{ channels: { id: string; service: string; name: string }[] }>('query($org: OrganizationId!) { channels(input: { organizationId: $org }) { id name service } }', { org: this.org });
     const ch = c.channels.find((x) => /tiktok/i.test(x.service) && channelName.test(x.name));
     if (!ch) return [];
     const r = await this.gql<{ posts: { edges: { node: BufferPost }[] } }>(
-      `query($org: OrganizationId!, $ch: ChannelId!) { posts(first: 40, input: { organizationId: $org, filter: { channelIds: [$ch], status: [scheduled] }, sort: [{ field: dueAt, direction: asc }] }) { edges { node { id text status dueAt sentAt externalLink error { message } assets { source type } } } } }`,
+      `query($org: OrganizationId!, $ch: ChannelId!) { posts(first: 40, input: { organizationId: $org, filter: { channelIds: [$ch], status: ${status} }, sort: [{ field: dueAt, direction: asc }] }) { edges { node { id text status dueAt sentAt externalLink error { message } assets { source type } } } } }`,
       { org: this.org, ch: ch.id },
     );
     return r.posts.edges.map((e) => e.node);
@@ -85,7 +85,7 @@ export class BufferClient {
   }
 }
 
-/** Puts a video on the bot's public /media link (kept 4 days) and returns the URL. */
+/** Puts a video on the bot's public /media link (kept 10 days) and returns the URL. */
 export async function hostVideo(file: string, name: string, env: { BOT_URL?: string; BOT_INGEST_SECRET?: string }, fetchImpl: typeof fetch = fetch): Promise<string> {
   if (!env.BOT_URL || !env.BOT_INGEST_SECRET) throw new Error('bot not connected (BOT_URL)');
   const safe = name.replace(/[^\w.-]+/g, '_').slice(-110).replace(/^[._]+/, '') || 'short.mp4';

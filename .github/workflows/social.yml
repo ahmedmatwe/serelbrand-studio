@@ -23,6 +23,10 @@ on:
         description: 'Our scheduled TikToks that went to كادر كورة: texts to move to ser.mobile (| separated)'
         type: string
         default: ''
+      tiktok_repost:
+        description: 'Repost our TikToks that went out on كادر كورة to ser.mobile: dry (list only) or yes'
+        type: string
+        default: ''
       tiktok_backfill:
         description: 'Also send the Shorts already queued to TikTok (through Buffer)'
         type: boolean
@@ -95,6 +99,11 @@ jobs:
         env:
           TIKTOK_MOVE: ${{ inputs.tiktok_move }}
         run: node --no-warnings src/cli/index.ts tiktok:move
+      - name: Repost our TikToks from كادر كورة on ser.mobile
+        if: steps.gate.outputs.connected == 'true' && (inputs.tiktok_repost == 'dry' || inputs.tiktok_repost == 'yes')
+        env:
+          TIKTOK_REPOST_DRY: ${{ inputs.tiktok_repost == 'dry' && '1' || '0' }}
+        run: node --no-warnings src/cli/index.ts tiktok:repost
       - name: Send queued Shorts to TikTok (Buffer)
         if: steps.gate.outputs.connected == 'true' && inputs.tiktok_backfill
         run: node --no-warnings src/cli/index.ts tiktok:backfill

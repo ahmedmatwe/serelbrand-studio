@@ -192,6 +192,43 @@ async function main() {
         }
         return out(log.join('\n') || 'Nothing matched.');
       }
+      case 'tiktok:repost': {
+        // Our TikToks that went out (or failed) on كادر كورة: posted again on OUR channel, 2 a day in free slots.
+        // Ours = the video is hosted on OUR bot (كادر كورة hosts its own), never a football post.
+        const { bufferFromEnv, hostVideo } = await import('../publishing/buffer.ts');
+        const buffer = bufferFromEnv(ctx.config.env);
+        if (!buffer || !process.env.BOT_URL) return out('Buffer / bot not connected');
+        const ours = (p: { assets?: { source: string }[] }) => (p.assets ?? []).some((a) => a.source.startsWith(process.env.BOT_URL!.replace(/\/$/, '')));
+        const since = process.env.TIKTOK_REPOST_SINCE ?? '2026-11-10';
+        const mine = await buffer.recentTikTokPosts(60);
+        const theirs = (await buffer.scheduledOn(/kader|كادر/i, '[sent, error]')).filter((p) => ours(p) && (p.dueAt ?? '') >= since && !mine.some((m) => m.text === p.text));
+        const dry = process.env.TIKTOK_REPOST_DRY === '1';
+        const log: string[] = [`found ${theirs.length} of ours on كادر كورة${dry ? ' (dry run)' : ''}`];
+        // free slots: 10:00 and 21:00 UTC (12:00 / 23:00 Cairo), from the next one on — the daily 12/16/19 UTC stay as they are
+        const slots: string[] = [];
+        for (let d = 0; slots.length < theirs.length; d++) for (const h of [10, 21]) {
+          const t = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + d, h));
+          if (t.getTime() > Date.now() + 30 * 60_000 && slots.length < theirs.length) slots.push(t.toISOString());
+        }
+        const { mkdtempSync, writeFileSync } = await import('node:fs');
+        const { tmpdir } = await import('node:os');
+        const dir = mkdtempSync(`${tmpdir()}/repost-`);
+        for (const [i, p] of theirs.entries()) {
+          const src = p.assets!.find((a) => a.source.startsWith(process.env.BOT_URL!.replace(/\/$/, '')))!.source;
+          if (dry) { log.push(`WOULD POST ${slots[i]} ${p.text.slice(0, 60)}`); continue; }
+          try {
+            // re-host so the link lives long enough for its new date
+            const res = await fetch(src);
+            if (!res.ok) throw new Error(`video gone (HTTP ${res.status})`);
+            const name = `repost-${i}-${src.split('/').pop()}`.replace(/[^\w.-]/g, '').slice(-120);
+            writeFileSync(`${dir}/${name}`, Buffer.from(await res.arrayBuffer()));
+            const url = await hostVideo(`${dir}/${name}`, name, process.env);
+            const id = await buffer.scheduleTikTok(url, p.text, slots[i]!);
+            log.push(`POSTED ${slots[i]} ${p.text.slice(0, 60)} (${id})`);
+          } catch (e) { log.push(`FAILED ${p.text.slice(0, 60)}: ${(e as Error).message}`); }
+        }
+        return out(log.join('\n'));
+      }
       case 'tiktok:delete': {
         // Pull scheduled TikTok posts back out of Buffer (ids from the backfill log, via env TIKTOK_DELETE).
         const { bufferFromEnv } = await import('../publishing/buffer.ts');

@@ -113,7 +113,7 @@ export default {
         if (req.headers.get('authorization') !== `Bearer ${env.INGEST_SECRET}`) return new Response('forbidden', { status: 403 });
         const buf = await req.arrayBuffer();
         if (buf.byteLength > 25 * 1024 * 1024) return new Response('too large', { status: 413 });
-        await env.BOT.put(`media:${media[1]}`, buf, { expirationTtl: 60 * 60 * 24 * 4 });
+        await env.BOT.put(`media:${media[1]}`, buf, { expirationTtl: 60 * 60 * 24 * 10 });
         return json({ ok: true, url: `${url.origin}/media/${media[1]}` });
       }
       if (req.method === 'GET' || req.method === 'HEAD') {
