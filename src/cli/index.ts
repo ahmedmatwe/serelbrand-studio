@@ -203,6 +203,7 @@ async function main() {
         const mine = await buffer.recentTikTokPosts(60);
         const theirs = (await buffer.scheduledOn(/kader|كادر/i, '[sent, error]')).filter((p) => ours(p) && (p.dueAt ?? '') >= since && !mine.some((m) => m.text === p.text));
         const dry = process.env.TIKTOK_REPOST_DRY === '1';
+        if (dry) for (const p of (await buffer.scheduledOn(/kader|كادر/i, '[sent, error]')).slice(0, 4)) console.log('asset hosts:', (p.assets ?? []).map((x) => `${x.type ?? ''} ${x.source.replace(/^(https:\/\/[^/]+\/[^/]{0,12}).*/, '$1')}`).join(' , '), '|', p.text.slice(0, 30));
         const log: string[] = [`found ${theirs.length} of ours on كادر كورة${dry ? ' (dry run)' : ''}`];
         // free slots: 10:00 and 21:00 UTC (12:00 / 23:00 Cairo), from the next one on — the daily 12/16/19 UTC stay as they are
         const slots: string[] = [];
