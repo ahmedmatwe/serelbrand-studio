@@ -25,6 +25,28 @@ const HELP = 'أهلاً 👋 أنا مساعد قناة سر الموبايل.\
   '💡 اكتب «موضوع: …» أو «اعمل فيديو عن …» — أراجع المعلومة وأعمل عنها فيديو في الإنتاج الجاي\n' +
   '🔥 ولو فيديو ضرب مشاهدات عالية هبعتلك تنبيه لوحدي في أي وقت';
 
+const page = (title, body) => `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Tahoma,sans-serif;max-width:760px;margin:0 auto;padding:24px 16px;line-height:1.8;color:#1b1b1f;background:#fafafa}h1{font-size:1.6rem}h2{font-size:1.15rem;margin-top:1.6em}.en{direction:ltr;text-align:left;border-top:1px solid #ddd;margin-top:2em;padding-top:1em}a{color:#5b3fd1}</style></head><body>${body}</body></html>`;
+const UPDATED = '2026-11-22';
+const PAGES = {
+  '/': page('سر الموبايل', `<h1>سر الموبايل</h1><p>قناة بالعامية المصرية بتكشف أسرار الموبايل: أكواد، ميزات مخفية في الآيفون والأندرويد، وحيل التطبيقات — فيديو قصير كل يوم.</p>
+<p>الأداة دي داخلية بتنشر فيديوهات القناة نفسها بس على حساباتها الرسمية (يوتيوب، فيسبوك، إنستجرام، تيك توك @ser.mobile) بعد موافقة صاحب القناة.</p>
+<p><a href="/privacy">سياسة الخصوصية</a> · <a href="/terms">شروط الاستخدام</a></p>
+<div class="en"><h2>Ser El Mobile (Secrets of Your Phone)</h2><p>An Egyptian-Arabic channel of short videos revealing phone tips: hidden codes, iPhone and Android features, and app tricks.</p><p>This internal tool only publishes the channel's own videos to the channel's own official accounts (YouTube, Facebook, Instagram, TikTok @ser.mobile), as approved by the channel owner. It is not offered to other users.</p><p><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a></p></div>`),
+  '/privacy': page('سياسة الخصوصية — سر الموبايل', `<h1>سياسة الخصوصية</h1><p>آخر تحديث: ${UPDATED}</p>
+<p>الأداة دي بيستخدمها صاحب قناة «سر الموبايل» بس، عشان ينشر فيديوهات القناة على حساباتها. مش بنجمع بيانات من أي حد تاني.</p>
+<h2>البيانات اللي بنستخدمها</h2><p>مفاتيح الدخول لحسابات القناة نفسها (زي تيك توك)، واسم الحساب وصورته، وإحصائيات فيديوهات القناة. بنستخدمها لنشر الفيديوهات ومتابعة أدائها بس.</p>
+<h2>التخزين والمشاركة</h2><p>المفاتيح محفوظة متشفّرة كأسرار في GitHub وCloudflare. مش بنبيع ولا بنشارك أي بيانات مع أي طرف تالت.</p>
+<h2>الحذف</h2><p>صاحب الحساب يقدر يلغي الصلاحية في أي وقت من إعدادات تيك توك (الأمان ← التطبيقات المرتبطة)، وساعتها المفاتيح بتتمسح.</p>
+<div class="en"><h1>Privacy Policy</h1><p>Last updated: ${UPDATED}</p><p>This tool is used only by the owner of the «سر الموبايل» (Ser El Mobile) channel to publish the channel's own videos to the channel's own accounts. It does not collect data from anyone else.</p>
+<h2>Data we use</h2><p>Access tokens of the channel's own accounts (e.g. TikTok), the account's display name and avatar (to show which account is posting), and statistics of the channel's own videos. They are used only to publish the videos and measure their performance.</p>
+<h2>Storage and sharing</h2><p>Tokens are stored encrypted as secrets in GitHub Actions and Cloudflare. We never sell or share any data with third parties.</p>
+<h2>Deletion</h2><p>The account owner can revoke access at any time in TikTok (Settings → Security → Apps), after which the stored tokens are deleted.</p><h2>Contact</h2><p>Through the channel's official accounts.</p></div>`),
+  '/terms': page('شروط الاستخدام — سر الموبايل', `<h1>شروط الاستخدام</h1><p>آخر تحديث: ${UPDATED}</p>
+<p>الأداة دي خاصة بقناة «سر الموبايل» ومش متاحة لمستخدمين تانيين. صاحب القناة بيراجع كل فيديو ويوافق عليه قبل ما يتنشر، ومسؤول عن محتواه ومطابقته لقواعد كل منصة.</p>
+<div class="en"><h1>Terms of Service</h1><p>Last updated: ${UPDATED}</p><p>This tool is private to the «سر الموبايل» (Ser El Mobile) channel and is not offered to other users. The channel owner reviews and approves each video before it is published, and is responsible for its content and for following each platform's rules, including TikTok's Community Guidelines and Terms of Service.</p></div>`),
+};
+
 const norm = (t) => (t || '').trim().replace(/[إأآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
 
 async function videosMenu(env) {
@@ -131,6 +153,13 @@ export default {
       if (req.headers.get('authorization') !== `Bearer ${env.INGEST_SECRET}`) return new Response('forbidden', { status: 403 });
       return json({ requests: JSON.parse((await env.BOT.get('requests')) || '[]') });
     }
+    // Public pages TikTok for Developers asks for (website, privacy policy, terms) + its site-verification file.
+    if (req.method === 'GET' && PAGES[url.pathname]) return new Response(PAGES[url.pathname], { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    const verify = url.pathname.match(/^\/(tiktok[\w-]{1,80}\.txt)$/);
+    if (req.method === 'GET' && verify) {
+      const v = await env.BOT.get(`ttverify:${verify[1]}`);
+      return v ? new Response(v, { headers: { 'content-type': 'text/plain' } }) : new Response('not found', { status: 404 });
+    }
     if (req.method !== 'POST') return new Response('ok');
 
     // --- Telegram webhook -------------------------------------------------------------------------
@@ -215,6 +244,8 @@ export default {
         const list = JSON.parse((await env.BOT.get('requests')) || '[]');
         await env.BOT.put('requests', JSON.stringify(list.filter((r) => !b.requestsDone.includes(r.id))));
       }
+      // TikTok site verification file (name + content from TikTok for Developers → URL properties)
+      if (b.ttVerify && /^tiktok[\w-]{1,80}\.txt$/.test(b.ttVerify.name || '')) await env.BOT.put(`ttverify:${b.ttVerify.name}`, String(b.ttVerify.content || '').slice(0, 500));
       if (Array.isArray(b.vetoesDone) && b.vetoesDone.length) {
         const list = JSON.parse((await env.BOT.get('vetoes')) || '[]');
         await env.BOT.put('vetoes', JSON.stringify(list.filter((id) => !b.vetoesDone.includes(id))));
