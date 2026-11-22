@@ -1,6 +1,12 @@
 # Manual: which accounts «سر الموبايل» posts to (names only, no secrets) and where its last TikTok posts went.
 name: accounts-check
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      yt_ids:
+        description: 'YouTube video ids to check (comma-separated)'
+        type: string
+        default: ''
 permissions:
   contents: read
 jobs:
@@ -12,6 +18,10 @@ jobs:
           PAGE: ${{ secrets.META_PAGE_ID }}
           TOKEN: ${{ secrets.META_PAGE_TOKEN }}
           IG: ${{ secrets.META_IG_USER_ID }}
+          YCI: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YCS: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YRT: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YT_IDS: ${{ inputs.yt_ids }}
         run: |
           q() { curl -s https://api.buffer.com -H "authorization: Bearer $B" -H 'content-type: application/json' -d "$1"; }
           echo "== Buffer channels"
@@ -23,3 +33,8 @@ jobs:
           done
           echo "== Facebook page"; curl -s "https://graph.facebook.com/v21.0/$PAGE?fields=name&access_token=$TOKEN" | jq -r '.name // .error.message'
           echo "== Instagram"; curl -s "https://graph.facebook.com/v21.0/$IG?fields=username,name&access_token=$TOKEN" | jq -r '(.username // "") + " " + (.name // .error.message // "")'
+          echo "== YouTube"
+          at=$(curl -s https://oauth2.googleapis.com/token -d client_id="$YCI" -d client_secret="$YCS" -d refresh_token="$YRT" -d grant_type=refresh_token | jq -r '.access_token // empty')
+          [ -n "$at" ] || { echo "youtube token failed"; exit 0; }
+          curl -s -H "authorization: Bearer $at" "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true" | jq -r '.items[0] | "channel: \(.snippet.title) · subs \(.statistics.subscriberCount) · videos \(.statistics.videoCount) · views \(.statistics.viewCount)"'
+          [ -n "$YT_IDS" ] && curl -s -H "authorization: Bearer $at" "https://www.googleapis.com/youtube/v3/videos?part=status,statistics,snippet&id=$YT_IDS" | jq -r '.items[] | "\(.snippet.publishedAt[0:16]) \(.status.privacyStatus) \(.status.uploadStatus) publishAt=\(.status.publishAt // "-") views=\(.statistics.viewCount) \(.snippet.title[0:50])"'
