@@ -48,8 +48,8 @@ export async function checkRuns(repo: string, token: string, now = new Date(), f
   if (!r.ok) return [];
   const runs = ((await r.json()) as { workflow_runs: { id: number; name: string; conclusion: string | null; created_at: string; run_attempt: number }[] }).workflow_runs;
   const out: Finding[] = [];
-  // Manual diagnostic workflows (check-keys, motion-check) are tests, not the pipeline.
-  for (const run of runs.filter((x) => ['failure', 'startup_failure', 'timed_out'].includes(x.conclusion ?? '') && !['check-keys', 'motion-check'].includes(x.name))) {
+  // Manual diagnostic workflows (check-keys, motion-check, accounts-check, search-check) are tests, not the pipeline.
+  for (const run of runs.filter((x) => ['failure', 'startup_failure', 'timed_out'].includes(x.conclusion ?? '') && !['check-keys', 'motion-check', 'accounts-check', 'search-check'].includes(x.name))) {
     const f: Finding = { key: `run:${run.id}`, text: `تشغيل ${run.name} فشل (${run.conclusion}) الساعة ${run.created_at.slice(11, 16)} UTC` };
     if (['social', 'bot'].includes(run.name) && run.run_attempt < 2) {
       const rr = await fetchImpl(`https://api.github.com/repos/${repo}/actions/runs/${run.id}/rerun-failed-jobs`, { method: 'POST', headers: h }).catch(() => undefined);
