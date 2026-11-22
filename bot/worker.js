@@ -55,6 +55,7 @@ const FIXES = {
   library: { label: 'تجهيز مواضيع جديدة للمكتبة', workflow: 'autopilot.yml', inputs: { library_only: 'true' } },
   social: { label: 'النشر على فيسبوك وإنستجرام', workflow: 'social.yml', inputs: {} },
   motion: { label: 'فحص الموشن وتجربة رندر', workflow: 'motion-check.yml', inputs: {} },
+  cycle: { label: 'دورة كاملة (بتعيد جدولة اللي فشل)', workflow: 'autopilot.yml', inputs: {} },
 };
 async function runFix(env, action) {
   const [kind, arg] = action.split(':');

@@ -85,6 +85,10 @@ export function checkRecords(ctx: AgentContext, now = new Date(), pendingTitles:
       }
     }
   }
+  // TikToks that could not be scheduled (the retry keeps trying; reported once it failed 3 times).
+  for (const a of ctx.repos.artifacts.listKind<{ shorts: { title: string; bufferId?: string; tiktokError?: string; tries?: number }[] }>('social_extras').filter((x) => now.getTime() - new Date(x.created_at).getTime() < 4 * 24 * H)) {
+    for (const t of a.data.shorts) if (!t.bufferId && t.tiktokError && (t.tries ?? 0) >= 3) out.push({ key: `tiktok-failed:${a.video_id}:${t.title.slice(0, 30)}`, text: `تيك توك: «${t.title}» فشل يتجدول ${t.tries} مرات (${t.tiktokError.slice(0, 70)})` });
+  }
   // Motion graphics falling back to stock footage (owner chose 100% motion).
   const fails = ctx.repos.artifacts.listKind<{ error: string }>('motion_failure').filter((a) => now.getTime() - new Date(a.created_at).getTime() < 48 * H);
   if (fails.length >= 2) out.push({ key: `motion-fallback:${today}`, text: `الموشن فشل ${fails.length} مرات في آخر يومين ونزل بلقطات بدل منه (${fails.at(-1)!.data.error.slice(0, 80)})` });
@@ -108,6 +112,7 @@ export function fixFor(f: Finding): string | undefined {
   if (run) return `rerun:${run[1]}`;
   if (/^(social-stalled|missing|stuck):/.test(f.key)) return 'social';
   if (/^no-pack:/.test(f.key)) return 'produce';
+  if (/^tiktok-failed:/.test(f.key)) return 'cycle';
   if (/^motion-fallback:/.test(f.key)) return 'motion';
   return undefined;
 }

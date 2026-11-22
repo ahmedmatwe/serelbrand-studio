@@ -163,7 +163,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     }
     // Same Shorts as Reels on the Facebook Page + Instagram, at the same time they go public on YouTube.
     const social = !env.DRY_RUN && pack ? socialFromEnv(env) : undefined;
-    const tiktokCaptions: { title: string; caption: string; facebookAt?: string; instagramAt?: string; tiktokAt?: string; bufferId?: string; tiktokError?: string }[] = [];
+    const tiktokCaptions: TikTokExtra[] = [];
     // TikTok goes through Buffer when its key is set (public posts); else directly when a TikTok token is set.
     const viaBuffer = Boolean(env.BUFFER_API_KEY);
     if (social) {
@@ -193,6 +193,8 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
           const ytAt = times[i] ?? new Date().toISOString();
           const at = platformTime(platformHours(this.ctx, 'tiktok'), ytAt, i);
           const url = await hostVideo(sh.path, `${videoId}-${i + 1}.mp4`, process.env);
+          t.videoUrl = url; // kept 10 days on the bot: a failed schedule is retried from it later
+          t.wantAt = at;
           t.bufferId = await buffer.scheduleTikTok(url, t.caption, at);
           t.tiktokAt = at;
         } catch (err) {
@@ -209,6 +211,34 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
     }
     return { ...res, videoId, provider: yt.name, dryRun: env.DRY_RUN, uploadedAt: new Date().toISOString(), attempts, shorts };
   }
+}
+
+export interface TikTokExtra { title: string; caption: string; facebookAt?: string; instagramAt?: string; tiktokAt?: string; bufferId?: string; tiktokError?: string; videoUrl?: string; wantAt?: string; tries?: number }
+
+/**
+ * TikToks that failed to schedule (Buffer full, network…) are never lost: every cycle they are tried again from
+ * the video kept on the bot, at their own time or the next free one, for up to 4 days / 12 tries.
+ */
+export async function retryFailedTikTokSchedules(ctx: AgentContext, buffer: { scheduleTikTok(url: string, text: string, at: string): Promise<string> }, now = new Date()): Promise<{ done: string[]; failed: string[] }> {
+  const out = { done: [] as string[], failed: [] as string[] };
+  for (const a of ctx.repos.artifacts.listKind<{ shorts: TikTokExtra[] }>('social_extras')) {
+    if (now.getTime() - Date.parse(a.created_at) > 4 * 86_400_000) continue;
+    let changed = false;
+    for (const [i, t] of a.data.shorts.entries()) {
+      // older records didn't keep the link: the bot's name for it is known (<videoId>-<n>.mp4)
+      if (!t.videoUrl && process.env.BOT_URL && a.video_id) t.videoUrl = `${process.env.BOT_URL.replace(/\/$/, '')}/media/${a.video_id}-${i + 1}.mp4`;
+      if (t.bufferId || !t.tiktokError || !t.videoUrl || (t.tries ?? 0) >= 12) continue;
+      const soon = new Date(now.getTime() + 20 * 60_000);
+      const at = t.wantAt && new Date(t.wantAt) > soon ? t.wantAt : soon.toISOString();
+      try {
+        t.bufferId = await buffer.scheduleTikTok(t.videoUrl, t.caption, at);
+        t.tiktokAt = at; t.tiktokError = undefined; out.done.push(t.title);
+      } catch (err) { t.tries = (t.tries ?? 0) + 1; t.tiktokError = (err as Error).message.slice(0, 200); out.failed.push(`${t.title}: ${t.tiktokError}`); }
+      changed = true;
+    }
+    if (changed) ctx.repos.artifacts.save({ videoId: a.video_id, kind: 'social_extras', agent: 'tiktok-retry', data: a.data });
+  }
+  return out;
 }
 
 /** Uploads (main + Shorts) made since the last YouTube quota reset (midnight Pacific time). */

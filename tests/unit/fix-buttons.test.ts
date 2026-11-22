@@ -52,3 +52,31 @@ test('bot worker: «🔧 إصلاح» starts the right workflow, removes the but
     assert.deepEqual(sent.at(-1)!.body.reply_markup.inline_keyboard, [[{ text: '🔧 إصلاح', callback_data: 'f:library' }]]);
   } finally { globalThis.fetch = real; }
 });
+
+test('tiktok: a schedule that failed (Buffer full) is retried from the kept video, never lost; gives up after 12 tries', async () => {
+  const { createContext } = await import('../../src/context.ts');
+  const { retryFailedTikTokSchedules } = await import('../../src/publishing/publisher.ts');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, resolve } = await import('node:path');
+  const ctx = createContext({ rootDir: resolve('.'), envOverrides: { DATABASE_URL: `sqlite:${join(mkdtempSync(join(tmpdir(), 'tt-')), 'db.sqlite')}`, LLM_PROVIDER: 'mock' } });
+  const now = new Date();
+  ctx.repos.artifacts.save({ videoId: 'v1', kind: 'social_extras', agent: 't', data: { shorts: [
+    { title: 'ok', caption: 'c', bufferId: 'b0' },
+    { title: 'failed', caption: 'c2', tiktokError: 'limit reached', videoUrl: 'https://bot/media/v1-2.mp4', wantAt: new Date(now.getTime() + 3_600_000).toISOString() },
+  ] } });
+  let full = true;
+  const calls: string[] = [];
+  const buffer = { scheduleTikTok: async (url: string) => { calls.push(url); if (full) throw new Error('Scheduled posts limit reached'); return 'b1'; } };
+  let r = await retryFailedTikTokSchedules(ctx, buffer, now);
+  assert.equal(r.failed.length, 1);
+  full = false;
+  r = await retryFailedTikTokSchedules(ctx, buffer, now);
+  assert.deepEqual(r.done, ['failed']);
+  assert.deepEqual(calls, ['https://bot/media/v1-2.mp4', 'https://bot/media/v1-2.mp4']);
+  const saved = ctx.repos.artifacts.latest<{ shorts: { bufferId?: string; tiktokError?: string }[] }>('v1', 'social_extras')!.data.shorts[1]!;
+  assert.equal(saved.bufferId, 'b1');
+  assert.equal(saved.tiktokError, undefined);
+  r = await retryFailedTikTokSchedules(ctx, buffer, now);
+  assert.equal(r.done.length + r.failed.length, 0, 'already scheduled: not sent twice');
+});

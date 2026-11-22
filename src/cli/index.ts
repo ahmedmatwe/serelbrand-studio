@@ -195,7 +195,7 @@ async function main() {
       case 'tiktok:repost': {
         // Our TikToks that went out (or failed) on كادر كورة are posted again on OUR channel — drip-fed so the daily
         // videos always have room: Buffer's free plan holds 10 scheduled posts per channel, so reposts are added
-        // only while ≤ 5 are waiting (one per run), and extra reposts beyond 6 waiting are taken back out.
+        // only while ≤ 3 are waiting (one per run), and reposts beyond 4 waiting are taken back out.
         // Ours = our caption hashtag #سر_الموبايل (كادر كورة's end with #كورة); a football post is never taken.
         const { bufferFromEnv } = await import('../publishing/buffer.ts');
         const buffer = bufferFromEnv(ctx.config.env);
@@ -209,13 +209,13 @@ async function main() {
         // 1) room for the daily videos: at most 6 waiting — later reposts go back out (they come again later)
         const waiting = () => mine.filter((p) => p.status === 'scheduled');
         for (const p of waiting().filter((x) => repostTexts.has(x.text)).sort((a, b) => (b.dueAt ?? '').localeCompare(a.dueAt ?? ''))) {
-          if (waiting().length <= 6) break;
+          if (waiting().length <= 4) break;
           await buffer.deletePost(p.id).then(() => { log.push(`TAKEN BACK (room for daily) ${p.text.slice(0, 50)}`); mine = mine.filter((x) => x.id !== p.id); }, (e: Error) => log.push(`FAILED take back: ${e.message}`));
         }
         // 2) one more repost when there is room
         const todo = onKader.filter((p) => !mine.some((m) => m.text === p.text));
         log.push(`waiting on ser.mobile: ${waiting().length} · reposts left: ${todo.length}`);
-        if (process.env.TIKTOK_REPOST_DRY === '1' || !todo.length || waiting().length > 5) return out(log.join('\n'));
+        if (process.env.TIKTOK_REPOST_DRY === '1' || !todo.length || waiting().length > 3) return out(log.join('\n'));
         const taken = new Set(waiting().map((p) => (p.dueAt ?? '').slice(0, 13)));
         let slot = '';
         for (let d = 0; !slot && d < 14; d++) for (const h of [10, 21]) {

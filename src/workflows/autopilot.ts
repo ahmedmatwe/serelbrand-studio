@@ -484,6 +484,20 @@ export async function runCycle(ctx: AgentContext, o: CycleOptions = {}): Promise
     if (rep.produced && !rep.produced.autoApproved) rep.blockedAttempts.push({ title: rep.produced.title, reason: rep.produced.autoApproveBlockedBy?.[0] ?? rep.errors.at(-1) ?? 'failed' });
   }
 
+  // 3a) TikToks that failed to schedule (Buffer full, network) are tried again — never silently lost.
+  if (!ctx.config.env.DRY_RUN) {
+    try {
+      const { bufferFromEnv } = await import('../publishing/buffer.ts');
+      const { retryFailedTikTokSchedules } = await import('../publishing/publisher.ts');
+      const buf = bufferFromEnv(ctx.config.env);
+      if (buf) {
+        const r = await retryFailedTikTokSchedules(ctx, buf, now);
+        if (r.done.length) notify('سر الموبايل: تيك توك اتصلّح', `اتجدول تاني ${r.done.length} فيديو كانوا فشلوا: ${r.done.join(' · ').slice(0, 200)}`);
+        if (r.failed.length) log.warn('tiktok retry still failing', { failed: r.failed });
+      }
+    } catch (err) { log.warn('tiktok retry failed', { error: (err as Error).message }); }
+  }
+
   // 3b) The library agent keeps topics ready ahead (every cycle): removals, duplicates, search proof, growth.
   if (o.produce !== false && !rep.library) {
     const libRep = await runLibraryAgent(ctx, { now }).catch((err) => { rep.errors.push(`library agent: ${(err as Error).message.slice(0, 160)}`); return undefined; });
