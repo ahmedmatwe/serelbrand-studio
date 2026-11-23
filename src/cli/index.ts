@@ -212,24 +212,12 @@ async function main() {
           if (waiting().length <= 4) break;
           await buffer.deletePost(p.id).then(() => { log.push(`TAKEN BACK (room for daily) ${p.text.slice(0, 50)}`); mine = mine.filter((x) => x.id !== p.id); }, (e: Error) => log.push(`FAILED take back: ${e.message}`));
         }
-        // 2) one more repost when there is room
-        const todo = onKader.filter((p) => !mine.some((m) => m.text === p.text));
-        log.push(`waiting on ser.mobile: ${waiting().length} · reposts left: ${todo.length}`);
-        if (process.env.TIKTOK_REPOST_DRY === '1' || !todo.length || waiting().length > 3) return out(log.join('\n'));
-        const taken = new Set(waiting().map((p) => (p.dueAt ?? '').slice(0, 13)));
-        let slot = '';
-        for (let d = 0; !slot && d < 14; d++) for (const h of [10, 21]) {
-          const t = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + d, h));
-          if (!slot && t.getTime() > Date.now() + 30 * 60_000 && !taken.has(t.toISOString().slice(0, 13))) slot = t.toISOString();
+        // 2) STOPPED on 2026-11-23: TikTok removed reposted copies as duplicate content. Every repost still waiting
+        //    is taken back, and none is added again.
+        for (const p of waiting().filter((x) => repostTexts.has(x.text))) {
+          await buffer.deletePost(p.id).then(() => { log.push(`TAKEN BACK (reposts stopped) ${p.text.slice(0, 50)}`); mine = mine.filter((x) => x.id !== p.id); }, (e: Error) => log.push(`FAILED take back: ${e.message}`));
         }
-        const p = todo[0]!;
-        const src = (p.assets!.find((a) => /video/i.test(a.type ?? '')) ?? p.assets![0]!).source;
-        try {
-          const head = await fetch(src, { method: 'HEAD' });
-          if (!head.ok) throw new Error(`video gone (HTTP ${head.status})`);
-          const id = await buffer.scheduleTikTok(src, p.text, slot);
-          log.push(`POSTED ${slot} ${p.text.slice(0, 60)} (${id})`);
-        } catch (e) { log.push(`FAILED ${p.text.slice(0, 60)}: ${(e as Error).message}`); }
+        log.push(`reposts stopped · waiting on ser.mobile: ${waiting().length}`);
         return out(log.join('\n'));
       }
       case 'tiktok:delete': {

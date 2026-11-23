@@ -99,7 +99,7 @@ jobs:
         env:
           TIKTOK_MOVE: ${{ inputs.tiktok_move }}
         run: node --no-warnings src/cli/index.ts tiktok:move
-      - name: Repost our TikToks from كادر كورة on ser.mobile (drip-fed, the daily videos keep their room)
+      - name: Take back reposted copies (reposts stopped — TikTok removed them as duplicates)
         if: steps.gate.outputs.connected == 'true' && inputs.tiktok_repost != 'off'
         continue-on-error: true
         env:

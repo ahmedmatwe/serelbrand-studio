@@ -1,4 +1,5 @@
 import { Agent, type AgentContext } from '../agents/base.ts';
+import { cleanTikTokCaption, tiktokRisk } from './tiktok-safety.ts';
 import { coverTime, extractCover } from '../media/cover.ts';
 import type { ComplianceReport } from '../agents/compliance.ts';
 import type { FactCheckReport, Script, SeoPackage } from '../agents/schemas.ts';
@@ -189,6 +190,10 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
       for (const [i, sh] of (render?.data.shorts ?? []).entries()) {
         const t = tiktokCaptions.find((x) => x.title === sh.title);
         if (!t) continue;
+        // TikTok removes hacking / leak / secret-code topics: such a Short stays on the other platforms only.
+        const risk = tiktokRisk(sh.title, t.caption);
+        if (risk) { t.tiktokSkipped = risk; this.ctx.logger.warn('tiktok skipped (guidelines risk)', { videoId, short: sh.title, risk }); continue; }
+        t.caption = cleanTikTokCaption(t.caption);
         try {
           const ytAt = times[i] ?? new Date().toISOString();
           const at = platformTime(platformHours(this.ctx, 'tiktok'), ytAt, i);
@@ -213,7 +218,7 @@ export class PublisherAgent extends Agent<PublishInput, PublishLog> {
   }
 }
 
-export interface TikTokExtra { title: string; caption: string; facebookAt?: string; instagramAt?: string; tiktokAt?: string; bufferId?: string; tiktokError?: string; videoUrl?: string; wantAt?: string; tries?: number }
+export interface TikTokExtra { title: string; caption: string; facebookAt?: string; instagramAt?: string; tiktokAt?: string; bufferId?: string; tiktokError?: string; tiktokSkipped?: string; videoUrl?: string; wantAt?: string; tries?: number }
 
 /**
  * TikToks that failed to schedule (Buffer full, network…) are never lost: every cycle they are tried again from
