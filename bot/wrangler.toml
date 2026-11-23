@@ -11,3 +11,7 @@ id = "a7508baf9d87468fbe2b9d6fcac38fb3"
 # 5 per account, shared with other bots; dueWorkflows() in worker.js picks what runs each hour.
 [triggers]
 crons = ["4 * * * *"]
+
+# TikTok app (Content Posting API). The sandbox key until TikTok approves the app; the secret is TIKTOK_CLIENT_SECRET.
+[vars]
+TIKTOK_CLIENT_KEY = "sbawmzn8lf8p20k83g"

@@ -11,6 +11,7 @@
  *
  * Bindings: KV namespace BOT. Secrets: TELEGRAM_BOT_TOKEN, CHAT_ID, INGEST_SECRET, WEBHOOK_SECRET.
  */
+import { handleTikTok, newApproval } from './tiktok.js';
 const json = (x, status = 200) => new Response(JSON.stringify(x), { status, headers: { 'content-type': 'application/json' } });
 
 async function tg(env, method, body) {
@@ -160,6 +161,8 @@ export default {
       const v = await env.BOT.get(`ttverify:${verify[1]}`);
       return v ? new Response(v, { headers: { 'content-type': 'text/plain' } }) : new Response('not found', { status: 404 });
     }
+    const tt = await handleTikTok(req, env, url);
+    if (tt) return tt;
     if (req.method !== 'POST') return new Response('ok');
 
     // --- Telegram webhook -------------------------------------------------------------------------
@@ -249,6 +252,12 @@ export default {
       if (Array.isArray(b.vetoesDone) && b.vetoesDone.length) {
         const list = JSON.parse((await env.BOT.get('vetoes')) || '[]');
         await env.BOT.put('vetoes', JSON.stringify(list.filter((id) => !b.vetoesDone.includes(id))));
+      }
+      // TikTok direct post: an approval link for one video (the owner taps «Post» on TikTok's required page)
+      if (b.ttApprove?.file) {
+        const link = await newApproval(env, url.origin, b.ttApprove);
+        if (b.ttApprove.notify !== false) await say(env, `🎵 فيديو جاهز لتيك توك: ${b.ttApprove.title || ''}`.trim(), { reply_markup: { inline_keyboard: [[{ text: '✅ راجع وانشر', url: link }]] } });
+        return json({ ok: true, link });
       }
       for (const m of b.messages || []) await say(env, m);
       // Messages with buttons: { text, buttons: [[{ text, data }]] }
